@@ -86,6 +86,29 @@ func (e *Engine) mdnsName() string { return e.get("CARE_MDNS_NAME", "care") }
 func (e *Engine) adminPassword() string { return e.get("CARE_ADMIN_PASSWORD", "admin") }
 func (e *Engine) noMDNS() bool   { return e.get("CARE_NO_MDNS", "0") == "1" }
 
+// MDNSName is the bare host label to advertise/resolve (e.g. "care"). Exported for
+// the app + CLI, which host the responder.
+func (e *Engine) MDNSName() string { return e.mdnsName() }
+
+// MDNSMode selects how http://<name>.local is made resolvable:
+//   - "advertise" (default): a pure-Go mDNS responder in the app / `care mdns` —
+//     no rename, no sudo, works on all 3 OSes.
+//   - "rename": the old scutil/hostnamectl path (a permanent OS-level hostname).
+//   - "off": do nothing (static-IP users). CARE_NO_MDNS=1 forces this too.
+func (e *Engine) MDNSMode() string {
+	if e.noMDNS() {
+		return "off"
+	}
+	switch strings.ToLower(e.get("CARE_MDNS_MODE", "advertise")) {
+	case "rename":
+		return "rename"
+	case "off":
+		return "off"
+	default:
+		return "advertise"
+	}
+}
+
 func (e *Engine) backupDir() string {
 	if d := e.get("BACKUP_DIR", ""); d != "" {
 		return d

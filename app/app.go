@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"care-clinic/app/internal/care"
 
@@ -18,6 +20,10 @@ import (
 type App struct {
 	ctx context.Context
 	kit fs.FS // embedded deployment kit
+
+	advMu   sync.Mutex       // guards adv
+	adv     *care.Advertiser // the running mDNS responder (advertise mode), if any
+	advStop chan struct{}    // closed on shutdown to end the DHCP watcher
 }
 
 func NewApp(kit fs.FS) *App {
@@ -25,7 +31,85 @@ func NewApp(kit fs.FS) *App {
 	return &App{kit: kit}
 }
 
-func (a *App) startup(ctx context.Context) { a.ctx = ctx }
+func (a *App) startup(ctx context.Context) {
+	a.ctx = ctx
+	// Advertise care.local right away (host process; no rename, no sudo). Doing it
+	// before setup means the installer's step-3 check goes green immediately, and
+	// leaving it up while the app runs keeps the clinic reachable by name.
+	a.startAdvertise()
+	a.advStop = make(chan struct{})
+	go a.watchAdvertise()
+}
+
+// shutdown stops the responder when the app quits (wired via Wails OnShutdown).
+func (a *App) shutdown(context.Context) {
+	if a.advStop != nil {
+		close(a.advStop)
+	}
+	a.advMu.Lock()
+	a.adv.Stop()
+	a.adv = nil
+	a.advMu.Unlock()
+}
+
+// startAdvertise brings up the mDNS responder for the configured name, unless mDNS
+// is in "rename"/"off" mode. Best-effort: a failure is logged, never fatal.
+func (a *App) startAdvertise() {
+	if a.engine(nil).MDNSMode() != "advertise" {
+		return
+	}
+	a.advMu.Lock()
+	defer a.advMu.Unlock()
+	if a.adv != nil {
+		return
+	}
+	name := a.loadConfig().MDNSName
+	adv, err := care.Advertise(name)
+	if err != nil {
+		if a.ctx != nil {
+			wruntime.EventsEmit(a.ctx, "care-log", "mDNS: couldn't advertise "+name+".local ("+err.Error()+")")
+		}
+		return
+	}
+	a.adv = adv
+}
+
+// restartAdvertise re-advertises with the current config (after the name changes,
+// or the LAN IP changes).
+func (a *App) restartAdvertise() {
+	a.advMu.Lock()
+	a.adv.Stop()
+	a.adv = nil
+	a.advMu.Unlock()
+	a.startAdvertise()
+}
+
+// advRunning reports whether we're actively answering <name>.local.
+func (a *App) advRunning() bool {
+	a.advMu.Lock()
+	defer a.advMu.Unlock()
+	return a.adv != nil
+}
+
+// watchAdvertise re-advertises when the host's LAN IP changes (e.g. DHCP renew), so
+// care.local never points at a stale address. Cheap: a lookup every 30s.
+func (a *App) watchAdvertise() {
+	t := time.NewTicker(30 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-a.advStop:
+			return
+		case <-t.C:
+			a.advMu.Lock()
+			changed := a.adv != nil && a.adv.IPsChanged()
+			a.advMu.Unlock()
+			if changed {
+				a.restartAdvertise()
+			}
+		}
+	}
+}
 
 // --- persisted config -------------------------------------------------------
 
@@ -150,8 +234,19 @@ func (a *App) GetState() AppState {
 
 func (a *App) DockerStatus() care.DockerStatus { return a.engine(nil).DockerCheck() }
 func (a *App) GitStatus() care.DockerStatus     { return a.engine(nil).GitCheck() }
-func (a *App) MDNSStatus() care.NameStatus       { return a.engine(nil).MDNSCheck() }
 func (a *App) CareHealth() care.Health           { return a.engine(nil).Ping() }
+
+// MDNSStatus is green whenever this app is actively advertising the name (advertise
+// mode), since that's exactly what makes care.local resolve. Otherwise it falls back
+// to the engine's resolution test + mode-specific guidance.
+func (a *App) MDNSStatus() care.NameStatus {
+	if a.advRunning() {
+		full := care.NameStatus{OK: true}
+		full.Message = a.loadConfig().MDNSName + " is being advertised by this app"
+		return full
+	}
+	return a.engine(nil).MDNSCheck()
+}
 
 // --- actions (async; stream logs, finish with a care-done event) ------------
 
@@ -227,6 +322,7 @@ func (a *App) RunSetup(mdnsName, adminPassword, installDir, backupDir string) er
 	if err := a.saveConfig(cfg); err != nil {
 		return err
 	}
+	a.restartAdvertise() // pick up the chosen name (usually still care.local)
 	if _, err := a.ensureKit(); err != nil {
 		return err
 	}

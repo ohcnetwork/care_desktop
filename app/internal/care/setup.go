@@ -109,10 +109,12 @@ func (e *Engine) imageExists(tag string) bool {
 	return cmd.Run() == nil
 }
 
-// ensureMDNS makes http://<name>.local resolve on the LAN. Per-OS, best-effort:
+// ensureMDNS makes http://<name>.local resolve on the LAN by renaming the machine.
+// Only runs in "rename" mode now — the default "advertise" mode uses the in-app
+// pure-Go responder (Advertise) instead, which needs no rename. Per-OS, best-effort:
 // failures never abort setup (naming can be fixed by hand / static IP).
 func (e *Engine) ensureMDNS() {
-	if e.noMDNS() {
+	if e.MDNSMode() != "rename" {
 		return
 	}
 	name := e.mdnsName()

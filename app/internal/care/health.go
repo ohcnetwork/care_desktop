@@ -75,32 +75,49 @@ type NameStatus struct {
 	How     string `json:"how"`
 }
 
-// MDNSCheck verifies the server advertises <name>.local. It's gated in the
-// installer because the frontend is baked to http://care.local.
+// MDNSCheck verifies that <name>.local actually resolves right now — a real
+// functional test (does the LAN answer?), uniform across OSes. It's gated in the
+// installer because the frontend is baked to http://care.local. The "how" text when
+// it fails depends on the mDNS mode. Note: in "advertise" mode the app answers this
+// itself, so the app's MDNSStatus reports green as soon as its responder is up.
 func (e *Engine) MDNSCheck() NameStatus {
 	name := e.mdnsName() // e.g. "care"
 	full := name + ".local"
+	if _, err := net.LookupHost(full); err == nil {
+		return NameStatus{OK: true, Message: full + " resolves"}
+	}
+	switch e.MDNSMode() {
+	case "rename":
+		return renameHow(name, full)
+	case "off":
+		return NameStatus{OK: false,
+			Message: full + " not advertised (mDNS is off)",
+			How:     "You're on static-IP mode. Open http://<server-ip>/ instead of " + full + ", or set CARE_MDNS_MODE=advertise."}
+	default: // advertise
+		how := "Open (and keep open) the CARE Clinic app — it advertises " + full +
+			" on the LAN while running. Then re-check."
+		if runtime.GOOS == "windows" {
+			how += "\nOn Windows, also allow inbound UDP 5353 (PowerShell as Admin):\n" +
+				"  Set-NetConnectionProfile -NetworkCategory Private\n" +
+				"  New-NetFirewallRule -DisplayName \"mDNS\" -Direction Inbound -Protocol UDP -LocalPort 5353 -Action Allow -Profile Private"
+		}
+		how += "\nStill failing? Use a static IP (see the install docs)."
+		return NameStatus{OK: false, Message: full + " isn't resolving yet", How: how}
+	}
+}
+
+// renameHow is the legacy per-OS guidance for the opt-in "rename" mode.
+func renameHow(name, full string) NameStatus {
 	switch runtime.GOOS {
 	case "darwin":
-		cur, _ := e.capture("scutil", "--get", "LocalHostName")
-		if strings.EqualFold(cur, name) {
-			return NameStatus{OK: true, Message: "This Mac is '" + full + "'"}
-		}
 		return NameStatus{OK: false,
-			Message: "Not set yet (current name: '" + cur + "')",
+			Message: full + " not set yet",
 			How:     "In Terminal: sudo scutil --set LocalHostName " + name + "  — or System Settings → General → Sharing → Local hostname → " + name + ". Then re-check."}
 	case "linux":
-		cur, _ := e.capture("hostname")
-		if strings.EqualFold(cur, name) {
-			return NameStatus{OK: true, Message: "Hostname is '" + name + "' (" + full + ")"}
-		}
 		return NameStatus{OK: false,
-			Message: "Hostname is '" + cur + "', expected '" + name + "'",
+			Message: full + " not set yet",
 			How:     "In Terminal: sudo hostnamectl set-hostname " + name + " && sudo systemctl enable --now avahi-daemon. Then re-check."}
 	case "windows":
-		if _, err := net.LookupHost(full); err == nil {
-			return NameStatus{OK: true, Message: full + " resolves"}
-		}
 		return NameStatus{OK: false,
 			Message: full + " doesn't resolve yet",
 			How: "Open PowerShell as Administrator and run these (the last one reboots):\n" +

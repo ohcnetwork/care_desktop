@@ -2,6 +2,8 @@ package care
 
 import (
 	"fmt"
+	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -105,16 +107,24 @@ func (e *Engine) migrate() {
 	e.logln("backend not ready — run start again shortly")
 }
 
-// createAdmin makes a default admin/admin superuser (idempotent: a failure means
-// it already exists, which we leave alone).
+// createAdmin makes a default admin/admin superuser. Idempotent: on an existing
+// install createsuperuser exits 1 with "username already taken", which is the
+// normal case — we report it plainly. Output is captured (not streamed) so the
+// raw "CommandError ... exit status 1" never leaks into the log.
 func (e *Engine) createAdmin() {
-	err := e.dc("exec", "-T",
+	cmd := exec.Command("docker", "compose", "exec", "-T",
 		"-e", "DJANGO_SUPERUSER_PASSWORD="+e.adminPassword(),
 		"backend", "python", "manage.py", "createsuperuser", "--noinput",
 		"--username", "admin", "--email", "admin@care.local")
-	if err == nil {
+	cmd.Env = e.baseEnv()
+	cmd.Dir = e.workdir()
+	out, err := cmd.CombinedOutput()
+	switch {
+	case err == nil:
 		e.logln("Created admin login (username: admin) — change the password in the app.")
-	} else {
+	case strings.Contains(string(out), "already taken"):
 		e.logln("Admin login already exists (left unchanged).")
+	default:
+		e.logln("Admin login not created: " + strings.TrimSpace(string(out)))
 	}
 }
