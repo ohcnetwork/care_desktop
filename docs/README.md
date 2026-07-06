@@ -1,6 +1,6 @@
-# CARE Clinic — Documentation
+# CARE Desktop — Documentation
 
-CARE Clinic runs the entire [CARE](https://github.com/ohcnetwork/care) stack
+CARE Desktop runs the entire [CARE](https://github.com/ohcnetwork/care) stack
 (backend + frontend + database + file storage) on **one computer** for a small
 clinic, reachable across the local WiFi at **http://care.local** — with **no
 internet needed** after the one-time setup.

@@ -1,4 +1,4 @@
-# Install CARE Clinic on Windows
+# Install CARE Desktop on Windows
 
 Follow these once on the **server PC** — the computer that stays on and runs the
 clinic. Other devices install nothing; they open `http://care.local`.
@@ -62,7 +62,7 @@ Usually already allowed once the network is Private — add this only if devices
 
 ### Step 4 — Verify
 - On the server: `ping care.local` → replies with an IP = ✅.
-- In the CARE Clinic app: click **Check** on step 3 → it turns green.
+- In the CARE Desktop app: click **Check** on step 3 → it turns green.
 - From a phone on the same WiFi: open `http://care.local/` → the login page loads.
 
 ### If step 4 still fails — pick one:
@@ -83,9 +83,9 @@ Usually already allowed once the network is Private — add this only if devices
 
 ## 3. Get the app
 
-1. Download `CARE-Clinic-windows.zip` from the project's **GitHub Releases** page.
+1. Download `CARE-Desktop-windows.zip` from the project's **GitHub Releases** page.
 2. Unzip it. (Windows SmartScreen may warn about an unsigned app — **More info → Run anyway**.)
-3. Run **CARE Clinic.exe**.
+3. Run **CARE Desktop.exe**.
 
 ---
 

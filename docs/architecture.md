@@ -1,4 +1,4 @@
-# Architecture — how CARE Clinic works
+# Architecture — how CARE Desktop works
 
 This explains the moving parts: the app, the engine, the container stack, and how
 a request flows. For *changing* settings see [configuration.md](configuration.md).
@@ -35,7 +35,7 @@ What the engine does:
 
 ### 2. The runtime layer (Docker containers)
 The actual CARE stack, defined in `docker-compose.yml`. Project name is
-**`care-clinic`** so it never collides with another CARE stack on the same machine.
+**`care-desktop`** so it never collides with another CARE stack on the same machine.
 
 | Service | Image | Role |
 |---|---|---|
@@ -117,13 +117,13 @@ See [configuration.md](configuration.md#versionsenv) for pinning versions.
 
 | Path (macOS shown) | What |
 |---|---|
-| `~/Library/Application Support/care-clinic/config.json` | the app's saved choices (setup done, install/backup folders) |
-| `~/Library/Application Support/care-clinic/kit/` | the unpacked deployment kit + the `care`/`care_fe` clones |
+| `~/Library/Application Support/care-desktop/config.json` | the app's saved choices (setup done, install/backup folders) |
+| `~/Library/Application Support/care-desktop/kit/` | the unpacked deployment kit + the `care`/`care_fe` clones |
 | `~/Desktop/care-db-backups/` (default) | daily backups (override in the installer) |
 | Docker named volumes | `postgres-data`, `redis-data`, `minio-data`, `caddy-*` — the actual data |
 
-On Linux the config dir is `~/.config/care-clinic/`; on Windows it's
-`%AppData%\care-clinic\`.
+On Linux the config dir is `~/.config/care-desktop/`; on Windows it's
+`%AppData%\care-desktop\`.
 
 > **Patient data lives in the Docker volumes**, not in the install folder. The
 > install folder only holds the kit + source clones. This is why moving/clearing the

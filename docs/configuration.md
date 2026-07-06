@@ -158,7 +158,7 @@ variables when using the CLI.
 | `CARE_ADMIN_PASSWORD` | installer "Admin password" | Password for the first `admin` user. Default `admin`. |
 | `CARE_MDNS_NAME` | fixed `care` | The mDNS hostname (the app fixes it to `care`). |
 | `CARE_NO_MDNS` | `1` from the GUI | Skip the engine's own hostname-rename (the GUI verifies `care.local` as a step instead). |
-| `CARE_CLINIC_DIR` | CLI override | Point the CLI at a specific kit folder (default: current directory). |
+| `CARE_DESKTOP_DIR` | CLI override | Point the CLI at a specific kit folder (default: current directory). |
 | `CARE_BE_DIR` / `CARE_FE_DIR` | advanced | Where the source clones live (default `<kit>/care`, `<kit>/care_fe`). |
 
 ---

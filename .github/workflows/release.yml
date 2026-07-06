@@ -1,6 +1,6 @@
 name: release
 
-# Push a tag like v0.1.0 to build CARE Clinic installers for all three OSes and
+# Push a tag like v0.1.0 to build CARE Desktop installers for all three OSes and
 # attach them to a GitHub Release. (This dir must be its own git repo on GitHub.)
 on:
   push:
@@ -49,16 +49,16 @@ jobs:
         shell: bash
         run: |
           case "${{ matrix.name }}" in
-            macos)   zip -ry "CARE-Clinic-macos.zip" *.app ;;
-            windows) 7z a "CARE-Clinic-windows.zip" *.exe ;;
-            linux)   tar -czf "CARE-Clinic-linux.tar.gz" "CARE Clinic" ;;
+            macos)   zip -ry "CARE-Desktop-macos.zip" *.app ;;
+            windows) 7z a "CARE-Desktop-windows.zip" *.exe ;;
+            linux)   tar -czf "CARE-Desktop-linux.tar.gz" "CARE Desktop" ;;
           esac
 
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          name: "CARE Clinic ${{ github.ref_name }}"
+          name: "CARE Desktop ${{ github.ref_name }}"
           files: |
-            app/build/bin/CARE-Clinic-*.zip
-            app/build/bin/CARE-Clinic-*.tar.gz
+            app/build/bin/CARE-Desktop-*.zip
+            app/build/bin/CARE-Desktop-*.tar.gz

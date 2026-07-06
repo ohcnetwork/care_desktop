@@ -1,6 +1,6 @@
 # Building from source (developers)
 
-CARE Clinic's control app is a [Wails](https://wails.io) (Go + web) project in
+CARE Desktop's control app is a [Wails](https://wails.io) (Go + web) project in
 `app/`. One codebase produces the desktop app **and** the `care` CLI, sharing the
 engine in `app/internal/care/`.
 
@@ -56,7 +56,7 @@ Opens the app with hot-reload: edit `frontend/src/*` (instant) or any `.go` file
 ## Build a release binary
 ```bash
 cd app
-wails build                       # current OS → build/bin/CARE Clinic(.app/.exe/binary)
+wails build                       # current OS → build/bin/CARE Desktop(.app/.exe/binary)
 wails build -platform darwin/universal   # mac universal (Intel + Apple Silicon)
 ```
 `wails build` runs the frontend build first (which stages the kit), then compiles Go
@@ -97,8 +97,8 @@ go vet ./...        # static checks
    and attaches it to a **draft GitHub Release**.
 3. Review the draft and publish.
 
-Artifacts: `CARE-Clinic-macos.zip` (`.app`), `CARE-Clinic-windows.zip` (`.exe`),
-`CARE-Clinic-linux.tar.gz` (binary).
+Artifacts: `CARE-Desktop-macos.zip` (`.app`), `CARE-Desktop-windows.zip` (`.exe`),
+`CARE-Desktop-linux.tar.gz` (binary).
 
 > **Signing/notarization** isn't set up yet, so users see an "unsigned app" warning
 > on first open (right-click → Open on macOS; "More info → Run anyway" on Windows).

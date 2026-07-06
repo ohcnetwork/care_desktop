@@ -94,7 +94,7 @@ func (e *Engine) MDNSCheck() NameStatus {
 			Message: full + " not advertised (mDNS is off)",
 			How:     "You're on static-IP mode. Open http://<server-ip>/ instead of " + full + ", or set CARE_MDNS_MODE=advertise."}
 	default: // advertise
-		how := "Open (and keep open) the CARE Clinic app — it advertises " + full +
+		how := "Open (and keep open) the CARE Desktop app — it advertises " + full +
 			" on the LAN while running. Then re-check."
 		if runtime.GOOS == "windows" {
 			how += "\nOn Windows, also allow inbound UDP 5353 (PowerShell as Admin):\n" +

@@ -1,4 +1,4 @@
-# Install CARE Clinic on macOS
+# Install CARE Desktop on macOS
 
 Follow these once on the **server Mac** — the computer that stays on and runs the
 clinic. Other devices (phones, laptops) install nothing; they just open
@@ -47,8 +47,8 @@ scutil --get LocalHostName     # should print: care
 ## 3. Get the app
 
 **Option A — Desktop app (recommended):**
-1. Download `CARE-Clinic-macos.zip` from the project's **GitHub Releases** page.
-2. Unzip it and move **CARE Clinic.app** to **Applications**.
+1. Download `CARE-Desktop-macos.zip` from the project's **GitHub Releases** page.
+2. Unzip it and move **CARE Desktop.app** to **Applications**.
 3. First open: right-click → **Open** (to bypass the unsigned-app warning), then **Open** again.
 
 **Option B — Command line** (for developers): see [building.md](building.md) to build
@@ -58,7 +58,7 @@ the `care` CLI, then jump to [cli.md](cli.md).
 
 ## 4. Run the setup wizard
 
-Open **CARE Clinic**. The installer shows gated steps — each must be green:
+Open **CARE Desktop**. The installer shows gated steps — each must be green:
 
 1. **Docker** — green when Docker Desktop is running. (If red: start Docker, click **Check**.)
 2. **Git** — green when git is installed.

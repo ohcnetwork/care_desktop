@@ -72,7 +72,7 @@ func newMDNSServer(name string, ips []net.IP) (*mdns.Server, error) {
 		name+".local.", // hostName — answers A/AAAA for <name>.local
 		80,             // port
 		ips,
-		[]string{"CARE Clinic"},
+		[]string{"CARE Desktop"},
 	)
 	if err != nil {
 		return nil, err

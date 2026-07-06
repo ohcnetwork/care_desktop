@@ -21,7 +21,7 @@ func main() {
 	app := NewApp(kitFS)
 
 	err := wails.Run(&options.App{
-		Title:     "CARE Clinic",
+		Title:     "CARE Desktop",
 		Width:     920,
 		Height:    800,
 		MinWidth:  720,

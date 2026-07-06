@@ -51,7 +51,7 @@ not resolving, or the MinIO endpoint not reachable from other devices.
 - Run `care status` (or check the panel). All services should be `running`.
 - If `backend` keeps restarting, the database may still be initializing — wait a
   minute and `care restart`. Migrations retry automatically for ~100s on first start.
-- Check the log pane (or `docker compose -p care-clinic logs backend`) for the error.
+- Check the log pane (or `docker compose -p care-desktop logs backend`) for the error.
 
 ---
 
@@ -75,9 +75,9 @@ The frontend bakes its settings at **build** time. Run `care rebuild-frontend` (
 
 Create or reset a superuser directly:
 ```bash
-docker compose -p care-clinic exec backend python manage.py changepassword admin
+docker compose -p care-desktop exec backend python manage.py changepassword admin
 # or create another superuser:
-docker compose -p care-clinic exec backend python manage.py createsuperuser
+docker compose -p care-desktop exec backend python manage.py createsuperuser
 ```
 
 ---
@@ -86,7 +86,7 @@ docker compose -p care-clinic exec backend python manage.py createsuperuser
 
 No — `care` never deletes volumes. Data survives `stop`, `start`, `restart`,
 `rebuild-backend`, and `rebuild-frontend`. The only ways to lose data are removing the
-Docker volumes manually (`docker compose -p care-clinic down -v`) or a disk failure
+Docker volumes manually (`docker compose -p care-desktop down -v`) or a disk failure
 (hence: [keep backups on a separate drive](backups.md)).
 
 ---
@@ -94,10 +94,10 @@ Docker volumes manually (`docker compose -p care-clinic down -v`) or a disk fail
 ## Reset everything and start clean (testing)
 
 ```bash
-docker compose -p care-clinic down -v --remove-orphans   # removes containers + volumes
+docker compose -p care-desktop down -v --remove-orphans   # removes containers + volumes
 docker rmi care:clinic care_fe:clinic                    # force a rebuild next setup
 # remove saved app state (macOS path shown):
-rm -rf ~/Library/Application\ Support/care-clinic
+rm -rf ~/Library/Application\ Support/care-desktop
 ```
 Then launch the app (or `care setup`) for a fresh install. **This deletes all data —
 only do it intentionally.**

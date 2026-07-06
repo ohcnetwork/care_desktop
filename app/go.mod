@@ -1,4 +1,4 @@
-module care-clinic/app
+module care-desktop/app
 
 go 1.26
 
