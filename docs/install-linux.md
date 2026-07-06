@@ -1,4 +1,4 @@
-# Install CARE Clinic on Linux
+# Install CARE Desktop on Linux
 
 Follow these once on the **server machine** — the computer that stays on and runs
 the clinic. Other devices install nothing; they open `http://care.local`.
@@ -48,14 +48,14 @@ hostname        # should print: care
 ## 3. Get the app
 
 **Option A — Desktop app:**
-1. Download `CARE-Clinic-linux.tar.gz` from the project's **GitHub Releases** page.
-2. Extract it: `tar -xzf CARE-Clinic-linux.tar.gz`
-3. Run the **CARE Clinic** binary (`./CARE\ Clinic`). Mark it executable if needed: `chmod +x`.
+1. Download `CARE-Desktop-linux.tar.gz` from the project's **GitHub Releases** page.
+2. Extract it: `tar -xzf CARE-Desktop-linux.tar.gz`
+3. Run the **CARE Desktop** binary (`./CARE\ Clinic`). Mark it executable if needed: `chmod +x`.
 
 **Option B — Command line:** build the `care` CLI ([building.md](building.md)) or run
 it directly, then see [cli.md](cli.md):
 ```bash
-cd care-clinic
+cd care-desktop
 go run ./app/cmd/care setup     # then: ... start
 # (run from the repo root so it finds docker-compose.yml)
 ```
@@ -92,7 +92,7 @@ Open **http://care.local/** on any device on the WiFi:
 
 On a server with no GUI, skip the desktop app entirely and use the CLI:
 ```bash
-cd care-clinic
+cd care-desktop
 go run ./app/cmd/care setup
 go run ./app/cmd/care start
 ```

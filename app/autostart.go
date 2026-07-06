@@ -7,8 +7,8 @@ import (
 	"runtime"
 )
 
-const autostartLabel = "network.ohc.care.clinic"
-const autostartName = "CARE Clinic"
+const autostartLabel = "network.ohc.care.desktop"
+const autostartName = "CARE Desktop"
 
 func (a *App) macPlistPath() string {
 	home, _ := os.UserHomeDir()
@@ -17,7 +17,7 @@ func (a *App) macPlistPath() string {
 
 func (a *App) linuxDesktopPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "autostart", "care-clinic.desktop")
+	return filepath.Join(home, ".config", "autostart", "care-desktop.desktop")
 }
 
 // AutostartEnabled reports whether the app is set to launch at login.

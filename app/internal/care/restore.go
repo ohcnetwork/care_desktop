@@ -11,7 +11,7 @@ import (
 )
 
 // composeProject is the compose `name:` — volumes are named "<project>_<volume>".
-const composeProject = "care-clinic"
+const composeProject = "care-desktop"
 
 // Backup is one restorable point in the backup folder: a database dump and, for
 // daily backups, the matching uploaded-files archive (same timestamp). Manual

@@ -1,6 +1,6 @@
 # Backups & restore
 
-CARE Clinic backs up **automatically, every day**, with no setup. This page covers
+CARE Desktop backs up **automatically, every day**, with no setup. This page covers
 where backups go, how to restore them, and how to keep them safe.
 
 ---
@@ -78,16 +78,16 @@ care restore care-YYYYMMDD-HHMMSS.dump  # DB + same-timestamp files, if present
 The built-in restore does exactly this. Stop the app first so nothing is writing:
 
 ```bash
-care stop && docker compose -p care-clinic up -d db
+care stop && docker compose -p care-desktop up -d db
 
-docker compose -p care-clinic exec -T db psql -U postgres -c "DROP DATABASE IF EXISTS care;"
-docker compose -p care-clinic exec -T db psql -U postgres -c "CREATE DATABASE care;"
+docker compose -p care-desktop exec -T db psql -U postgres -c "DROP DATABASE IF EXISTS care;"
+docker compose -p care-desktop exec -T db psql -U postgres -c "CREATE DATABASE care;"
 cat ~/Desktop/care-db-backups/care-YYYYMMDD-HHMMSS.dump | \
-  docker compose -p care-clinic exec -T db pg_restore -U postgres -d care
+  docker compose -p care-desktop exec -T db pg_restore -U postgres -d care
 
-# files: extract the archive into the MinIO volume (care-clinic_minio-data)
+# files: extract the archive into the MinIO volume (care-desktop_minio-data)
 docker run --rm \
-  -v care-clinic_minio-data:/data \
+  -v care-desktop_minio-data:/data \
   -v ~/Desktop/care-db-backups:/backup \
   alpine sh -c 'cd /data && tar -xzf /backup/files-YYYYMMDD-HHMMSS.tar.gz'
 
@@ -101,7 +101,7 @@ care start
 ## Moving the whole clinic to a new computer
 
 1. On the old server: take a fresh backup (**Backup now**), copy the backup folder to a USB.
-2. On the new server: install CARE Clinic (it builds a fresh, empty stack), and point its
+2. On the new server: install CARE Desktop (it builds a fresh, empty stack), and point its
    backup folder at the USB (installer step 5, or `BACKUP_DIR` for the CLI).
 3. Restore that backup — **Restore from a backup** in the app, or `care restore <dump>`.
    (Restore stops and restarts the stack itself.)

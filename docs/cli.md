@@ -6,17 +6,17 @@ developers and headless servers; non-technical staff use the app instead.
 ## Getting it
 Build the binary once (needs Go — see [building.md](building.md)):
 ```bash
-cd care-clinic/app
+cd care-desktop/app
 go build -o /usr/local/bin/care ./cmd/care    # or ~/.local/bin on Linux
 ```
 Or run without building: `go run ./app/cmd/care <command>` from the repo root.
 
 ## Where it runs
 `care` acts on the **kit** in the **current directory** (the folder with
-`docker-compose.yml`). Override with `CARE_CLINIC_DIR=/path/to/kit`.
+`docker-compose.yml`). Override with `CARE_DESKTOP_DIR=/path/to/kit`.
 
 ```bash
-cd care-clinic        # the repo root is a valid kit
+cd care-desktop        # the repo root is a valid kit
 care status
 ```
 
@@ -40,7 +40,7 @@ care status
 
 | Variable | Example | Effect |
 |---|---|---|
-| `CARE_CLINIC_DIR` | `/srv/care-clinic` | Use a kit folder other than the current dir. |
+| `CARE_DESKTOP_DIR` | `/srv/care-desktop` | Use a kit folder other than the current dir. |
 | `BACKUP_DIR` | `/mnt/usb/care-backups` | Where backups go (default `~/Desktop/care-db-backups`). |
 | `CARE_ADMIN_PASSWORD` | `s3cret` | Password for the first `admin` user (default `admin`). |
 | `CARE_NO_MDNS` | `1` | Skip the hostname rename (use the server IP instead). |
@@ -48,14 +48,14 @@ care status
 
 Example — first run on a Linux server, backups to a USB drive:
 ```bash
-cd care-clinic
+cd care-desktop
 BACKUP_DIR=/mnt/usb/care-backups CARE_ADMIN_PASSWORD=changeme care setup
 BACKUP_DIR=/mnt/usb/care-backups care start
 ```
 
 Example — restore the latest backup on this box:
 ```bash
-cd care-clinic
+cd care-desktop
 care list-backups                      # copy the dump name you want
 care restore care-20260701-020000.dump # DB + same-timestamp files, if present
 ```

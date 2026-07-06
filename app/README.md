@@ -1,4 +1,4 @@
-# `app/` — the CARE Clinic control app (Go / Wails)
+# `app/` — the CARE Desktop control app (Go / Wails)
 
 One Go codebase that drives the whole clinic stack on macOS, Linux, and Windows —
 **no shell, no Rust**. It ships as a desktop app **and** a `care` CLI sharing one
@@ -16,7 +16,7 @@ frontend/          web UI (TS + Vite); scripts/stage-kit.mjs stages the kit
 ## Build / run
 ```bash
 wails dev      # hot-reload dev (needs a display)
-wails build    # → build/bin/CARE Clinic(.app/.exe/binary)
+wails build    # → build/bin/CARE Desktop(.app/.exe/binary)
 go test ./internal/care/   # engine tests
 ```
 

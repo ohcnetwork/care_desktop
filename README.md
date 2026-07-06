@@ -1,4 +1,4 @@
-# CARE Clinic
+# CARE Desktop
 
 **Run the whole [CARE](https://github.com/ohcnetwork/care) stack on one computer for
 a small clinic — offline, on the local WiFi, at `http://care.local`.**
@@ -38,7 +38,7 @@ Full docs are in **[`docs/`](docs/README.md)**:
 
 Prefer a terminal? See the [CLI guide](docs/cli.md):
 ```bash
-cd care-clinic && care setup && care start
+cd care-desktop && care setup && care start
 ```
 
 ---

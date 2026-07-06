@@ -3,172 +3,275 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CARE Clinic</title>
+    <title>CARE Desktop</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <!-- ===== Installer view (first run) ===== -->
-    <div class="wrap view" id="wizard">
-      <header>
-        <div class="title"><h1>Welcome to CARE&nbsp;Clinic</h1></div>
-      </header>
-      <p class="lead">A one-time setup. Complete the three required checks, then Install &amp; Start.</p>
-
-      <section class="card">
-        <h2><span class="dot" id="dockerDot"></span> 1 · Docker <span class="req">required</span></h2>
-        <div class="docker-row">
-          <span id="dockerMsg">checking…</span>
-          <button id="check-docker" class="ghost">Check</button>
+    <!-- ===================== WIZARD (first run) ===================== -->
+    <div class="view" id="wizard" hidden>
+      <!-- left rail -->
+      <aside class="rail">
+        <div class="brand">
+          <div class="brand-badge"><i class="ph-fill ph-heartbeat"></i></div>
+          <div>
+            <div class="brand-name">CARE Desktop</div>
+            <div class="brand-kicker">First-time setup</div>
+          </div>
         </div>
-        <p class="hint">CARE runs on Docker. Install <b>Docker Desktop</b>, start it, then Check.</p>
-      </section>
+        <h1 class="rail-title">Set up your clinic server</h1>
+        <p class="rail-lead">
+          A one-time setup runs the whole CARE system on this one computer, reachable by every phone
+          and laptop on the clinic WiFi.
+        </p>
+        <ol class="rail-steps">
+          <li><span class="step-n">1</span><div><b>Check requirements</b><span>Docker, Git and the <code>care.local</code> address.</span></div></li>
+          <li><span class="step-n">2</span><div><b>Choose where data lives</b><span>An install folder and a safe backup drive.</span></div></li>
+          <li><span class="step-n">3</span><div><b>Create the admin login</b><span>You'll manage staff from inside CARE.</span></div></li>
+        </ol>
+        <div class="rail-spacer"></div>
+        <div class="rail-note"><i class="ph ph-shield-check"></i><span>Runs fully offline after setup. Patient data never leaves the building.</span></div>
+      </aside>
 
-      <section class="card">
-        <h2><span class="dot" id="gitDot"></span> 2 · Git <span class="req">required</span></h2>
-        <div class="docker-row">
-          <span id="gitMsg">checking…</span>
-          <button id="check-git" class="ghost">Check</button>
+      <!-- main -->
+      <section class="wiz-main">
+        <!-- requirements / choices -->
+        <div id="wiz-form">
+          <div class="section-label">Requirements</div>
+          <div class="cards">
+            <div class="req-card">
+              <div class="req-icon"><i class="ph ph-cube"></i></div>
+              <div class="req-text"><div class="req-title">Docker</div><div class="req-sub">CARE runs inside Docker containers on this machine.</div></div>
+              <span class="pill" id="docker-pill"><i class="ph ph-circle-dashed"></i>checking…</span>
+              <button class="btn ghost" id="check-docker">Check</button>
+            </div>
+
+            <div class="req-card">
+              <div class="req-icon"><i class="ph ph-git-branch"></i></div>
+              <div class="req-text"><div class="req-title">Git</div><div class="req-sub">Used once to download and build CARE.</div></div>
+              <span class="pill" id="git-pill"><i class="ph ph-circle-dashed"></i>checking…</span>
+              <button class="btn ghost" id="check-git">Check</button>
+            </div>
+
+            <div class="req-card col">
+              <div class="req-row">
+                <div class="req-icon"><i class="ph ph-broadcast"></i></div>
+                <div class="req-text"><div class="req-title">Network name · <code>care.local</code></div><div class="req-sub">The friendly address every device uses to reach the clinic.</div></div>
+                <span class="pill" id="mdns-pill"><i class="ph ph-circle-dashed"></i>checking…</span>
+                <button class="btn ghost" id="check-mdns">Check</button>
+              </div>
+              <div class="howbox" id="mdns-how" hidden>
+                <div class="howbox-head"><i class="ph-bold ph-warning"></i>How to fix</div>
+                <div class="howbox-body" id="mdns-how-text"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-label">Where data lives</div>
+          <div class="cards">
+            <div class="req-card">
+              <div class="req-icon neutral"><i class="ph ph-folder"></i></div>
+              <div class="req-text"><div class="req-title">Install location</div><div class="path" id="install-path">Default app location</div></div>
+              <button class="btn ghost" id="choose-install">Choose…</button>
+            </div>
+            <div class="req-card">
+              <div class="req-icon neutral"><i class="ph ph-hard-drives"></i></div>
+              <div class="req-text">
+                <div class="req-title">Backup location</div>
+                <div class="path" id="backup-path">Desktop (default)</div>
+                <div class="tip">Tip — pick a USB or external drive so a dead disk can't take the backups with it.</div>
+              </div>
+              <button class="btn ghost" id="choose-backup">Choose…</button>
+            </div>
+          </div>
+
+          <div class="section-label">Admin account</div>
+          <div class="admin-card">
+            <div class="admin-user">
+              <label>Username</label>
+              <div class="user-chip"><i class="ph ph-user"></i>admin</div>
+            </div>
+            <div class="admin-pw">
+              <label>Password for the first admin login</label>
+              <div class="input-wrap">
+                <i class="ph ph-lock-key lead-icon"></i>
+                <input type="password" id="adminpw" placeholder="leave blank to use 'admin'" />
+                <button class="eye" id="pw-toggle" title="show/hide"><i class="ph ph-eye" id="pw-eye"></i></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="wiz-actions">
+            <button class="btn primary lg" id="install" disabled><i class="ph-bold ph-rocket-launch"></i>Install &amp; Start</button>
+            <span class="note" id="install-note">Complete the checks above to continue.</span>
+          </div>
         </div>
-        <p class="hint">Used once to download + build CARE. Install <b>Git</b> (Git for Windows / Xcode CLT / <code>apt-get git</code>), then Check.</p>
-      </section>
 
-      <section class="card">
-        <h2><span class="dot" id="mdnsDot"></span> 3 · Network name — <code>care.local</code> <span class="req">required</span></h2>
-        <div class="docker-row">
-          <span id="mdnsMsg">checking…</span>
-          <button id="check-mdns" class="ghost">Check</button>
+        <!-- installing -->
+        <div id="wiz-installing" hidden>
+          <h2 class="inst-title">Setting up your clinic…</h2>
+          <p class="inst-sub">Downloading and building CARE. This needs the internet once and takes about 10–20 minutes — then it runs offline forever.</p>
+          <div class="progress"><div class="progress-fill" id="install-bar"></div></div>
+          <div class="progress-pct" id="install-pct">Working…</div>
+          <div class="console">
+            <div class="console-head"><i class="ph ph-terminal-window"></i>Setup log</div>
+            <pre id="wizard-log"></pre>
+          </div>
         </div>
-        <p class="hint" id="mdnsHow">Devices reach the clinic at <code>http://care.local</code>. This must be set before installing.</p>
-      </section>
-
-      <section class="card">
-        <h2>4 · Install location</h2>
-        <div class="docker-row">
-          <button id="choose-dir" class="ghost">Choose folder…</button>
-          <span id="dirPath">Default app location</span>
-        </div>
-        <p class="hint">Where CARE's files are installed. Patient data is stored in Docker regardless. Leave default if unsure.</p>
-      </section>
-
-      <section class="card">
-        <h2>5 · Backup location</h2>
-        <div class="docker-row">
-          <button id="choose-backup" class="ghost">Choose folder…</button>
-          <span id="backupPath">Desktop (default)</span>
-        </div>
-        <p class="hint">Daily database + file backups go here. Pick a USB/external drive so a dead disk doesn't take the backups with it. Leave default for the Desktop.</p>
-      </section>
-
-      <section class="card">
-        <h2>6 · Admin password</h2>
-        <label class="field">
-          <span>Password for the first admin login (username <b>admin</b>)</span>
-          <input id="adminpw" type="password" placeholder="leave blank to use 'admin'" />
-        </label>
-      </section>
-
-      <div class="wizard-actions">
-        <button id="install" class="primary" disabled>Install &amp; Start</button>
-        <span id="install-note" class="hint">Complete steps 1–3 to continue.</span>
-      </div>
-
-      <section class="console" id="wizard-console" hidden>
-        <div class="console-head"><span>Setup log</span></div>
-        <pre id="wizard-log"></pre>
       </section>
     </div>
 
-    <!-- ===== Control panel view (after setup) ===== -->
-    <div class="wrap view" id="panel" hidden>
-      <header>
-        <div class="title">
-          <h1>CARE&nbsp;Clinic</h1>
-          <div class="status">
-            <span id="dot" class="dot"></span>
-            <span id="statusText">checking…</span>
+    <!-- ===================== CONTROL PANEL ===================== -->
+    <div class="view" id="panel" hidden>
+      <!-- sidebar -->
+      <nav class="sidebar">
+        <div class="brand small">
+          <div class="brand-badge sm"><i class="ph-fill ph-heartbeat"></i></div>
+          <div class="brand-name">CARE Desktop</div>
+        </div>
+        <div class="nav" id="nav">
+          <button class="nav-item active" data-tab="overview"><i class="ph ph-squares-four"></i>Overview</button>
+          <button class="nav-item" data-tab="settings"><i class="ph ph-sliders-horizontal"></i>Settings</button>
+          <button class="nav-item" data-tab="backups"><i class="ph ph-archive"></i>Backups</button>
+          <button class="nav-item" data-tab="logs"><i class="ph ph-terminal-window"></i>Activity log</button>
+          <button class="nav-item" data-tab="danger"><i class="ph ph-wrench"></i>Advanced</button>
+        </div>
+        <div class="nav-spacer"></div>
+        <div class="mini-status">
+          <span class="mini-dot" id="mini-dot"></span>
+          <div><div class="mini-label" id="mini-label">checking…</div><div class="mini-sub">CARE · offline</div></div>
+        </div>
+      </nav>
+
+      <!-- main -->
+      <section class="main">
+        <header class="main-head">
+          <div><h1 id="tab-title">Overview</h1><div class="sub" id="tab-sub">Your clinic server at a glance.</div></div>
+          <button class="btn ghost accent" id="open-link"><i class="ph ph-arrow-square-out"></i>Open <span id="open-name">care.local</span></button>
+        </header>
+
+        <div class="main-body">
+          <!-- OVERVIEW -->
+          <div class="tab" id="tab-overview">
+            <div class="hero-row">
+              <div class="status-hero">
+                <div class="status-line">
+                  <div class="status-icon" id="sys-tint"><i class="ph-fill ph-pulse" id="sys-icon"></i></div>
+                  <div><div class="status-label" id="sys-label">checking…</div><div class="status-sub" id="sys-sub"></div></div>
+                </div>
+                <div class="hero-actions">
+                  <button class="btn" id="btn-start"><i class="ph-fill ph-play"></i>Start</button>
+                  <button class="btn" id="btn-stop"><i class="ph-fill ph-stop"></i>Stop</button>
+                  <button class="btn ghost" id="btn-restart"><i class="ph ph-arrow-clockwise"></i>Restart</button>
+                  <label class="switch" id="autostart-label">
+                    <span class="track"><span class="knob"></span></span>
+                    <input type="checkbox" id="autostart" hidden />Start at login
+                  </label>
+                </div>
+              </div>
+              <div class="address-card">
+                <div class="addr-kicker">Clinic address</div>
+                <div class="addr-name" id="addr-name">care.local</div>
+                <div class="addr-sub">Open this on any phone or laptop on the clinic WiFi.</div>
+                <div class="addr-spacer"></div>
+                <div class="addr-actions">
+                  <button class="btn white" id="open-link2"><i class="ph-bold ph-arrow-square-out"></i>Open</button>
+                  <button class="btn glass" id="copy-addr"><i class="ph ph-copy"></i>Copy</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="stat-row">
+              <div class="stat"><div class="stat-k"><i class="ph ph-stack"></i>Services</div><div class="stat-v" id="stat-services">—</div></div>
+              <div class="stat"><div class="stat-k"><i class="ph ph-database"></i>Last backup</div><div class="stat-v" id="stat-lastbackup">—</div></div>
+              <div class="stat"><div class="stat-k"><i class="ph ph-archive"></i>Backups kept</div><div class="stat-v" id="stat-backups">—</div></div>
+            </div>
+
+            <div class="services-card">
+              <div class="card-title">Services</div>
+              <div class="services-grid" id="services-grid"></div>
+            </div>
+          </div>
+
+          <!-- SETTINGS -->
+          <div class="tab" id="tab-settings" hidden>
+            <div class="settings-card">
+              <div class="settings-head">
+                <div><div class="card-title">Backend settings</div><div class="card-sub">Saving recreates the backend container. No rebuild — takes seconds.</div></div>
+                <span class="tag">backend.env</span>
+              </div>
+              <div class="env-form" id="be-form"></div>
+              <div class="env-actions">
+                <button class="btn ghost" id="be-add"><i class="ph ph-plus"></i>Add variable</button>
+                <div class="grow"></div>
+                <button class="btn primary" id="be-save">Save &amp; apply</button>
+              </div>
+            </div>
+            <div class="settings-card">
+              <div class="settings-head">
+                <div><div class="card-title">Frontend settings</div><div class="card-sub warn">Baked in at build time — saving rebuilds the app image (a few minutes).</div></div>
+                <span class="tag">frontend.env</span>
+              </div>
+              <div class="env-form" id="fe-form"></div>
+              <div class="env-actions">
+                <button class="btn ghost" id="fe-add"><i class="ph ph-plus"></i>Add variable</button>
+                <div class="grow"></div>
+                <button class="btn primary" id="fe-save">Save &amp; rebuild app</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- BACKUPS -->
+          <div class="tab" id="tab-backups" hidden>
+            <div class="backups-bar">
+              <button class="btn primary" id="btn-backup-now"><i class="ph-bold ph-download-simple"></i>Backup now</button>
+              <span class="note">Automatic backups run daily.</span>
+              <div class="grow"></div>
+              <button class="btn ghost" id="backups-refresh"><i class="ph ph-arrows-clockwise"></i>Refresh</button>
+            </div>
+            <div class="warn-banner">
+              <i class="ph-fill ph-warning"></i>
+              <div>Restoring <b>replaces</b> the current database (and files) with the backup you pick. CARE stops during the restore and can't be undone — take a fresh backup first if unsure.</div>
+            </div>
+            <div class="backups-list" id="backups-list"></div>
+          </div>
+
+          <!-- LOGS -->
+          <div class="tab" id="tab-logs" hidden>
+            <div class="console tall">
+              <div class="console-head between">
+                <span><i class="ph ph-terminal-window"></i>Activity log</span>
+                <button class="btn tiny" id="clear-log">Clear</button>
+              </div>
+              <pre id="log"></pre>
+            </div>
+          </div>
+
+          <!-- ADVANCED -->
+          <div class="tab" id="tab-danger" hidden>
+            <div class="req-card">
+              <div class="req-icon"><i class="ph ph-hammer"></i></div>
+              <div class="req-text"><div class="req-title">Rebuild the app</div><div class="req-sub">Rebuild the frontend image from the latest settings/code. Data is preserved.</div></div>
+              <button class="btn ghost" id="btn-rebuild-frontend">Rebuild</button>
+            </div>
+
+            <div class="danger-card">
+              <div class="danger-head"><i class="ph-fill ph-warning-octagon"></i>Uninstall CARE Desktop</div>
+              <div class="danger-body">
+                Removes CARE's containers and <b>all data volumes</b> — patient records and uploaded files — plus the
+                installed files and downloaded source. <b>This permanently deletes all patient data and can't be undone.</b>
+                Make sure you have a backup you trust.
+              </div>
+              <label class="danger-opt"><input type="checkbox" id="uninstall-images" /><span>Also remove Docker images (frees disk; re-downloaded on next install)</span></label>
+              <label class="danger-opt"><input type="checkbox" id="uninstall-backups" /><span>Also delete backups — <b>no way to recover the data afterward</b></span></label>
+              <button class="btn danger" id="uninstall-run"><i class="ph-bold ph-trash"></i>Uninstall everything</button>
+            </div>
           </div>
         </div>
-        <a id="openLink" href="#" target="_blank" rel="noreferrer">Open ↗</a>
-      </header>
-
-      <section class="actions">
-        <button id="btn-start" class="primary">▶ Start</button>
-        <button id="btn-stop">■ Stop</button>
-        <button id="btn-restart">⟳ Restart</button>
-        <button id="btn-rebuild-frontend">⤓ Rebuild app</button>
-        <button id="btn-backup-now">⬇ Backup now</button>
-        <label class="autostart" title="Start CARE automatically when this computer turns on">
-          <input type="checkbox" id="autostart" />
-          <span>Start at login</span>
-        </label>
-      </section>
-
-      <section class="envs">
-        <details>
-          <summary>Backend settings — <code>backend.env</code></summary>
-          <p class="hint">Saving recreates the backend container so it re-reads these values. No image rebuild.</p>
-          <div id="be-form" class="env-form"></div>
-          <div class="env-form-actions">
-            <button id="be-add" class="ghost">+ Add variable</button>
-            <button id="be-save">Save &amp; apply</button>
-          </div>
-        </details>
-        <details>
-          <summary>Frontend settings — <code>frontend.env</code></summary>
-          <p class="hint">Vite bakes these at build time, so saving <b>rebuilds the app image</b> (a few minutes).</p>
-          <div id="fe-form" class="env-form"></div>
-          <div class="env-form-actions">
-            <button id="fe-add" class="ghost">+ Add variable</button>
-            <button id="fe-save">Save &amp; rebuild app</button>
-          </div>
-        </details>
-        <details>
-          <summary>Restore from a backup</summary>
-          <p class="hint warn">
-            Restoring <b>replaces</b> the current database (and uploaded files, when the backup
-            has them) with the one you pick. CARE is stopped during the restore and restarted after.
-            <b>This can't be undone</b> — take a fresh <b>Backup now</b> first if unsure.
-          </p>
-          <div class="restore-row">
-            <select id="restore-select" class="restore-select">
-              <option value="">No backups found</option>
-            </select>
-            <button id="restore-refresh" class="ghost">Refresh</button>
-            <button id="restore-run" class="danger" disabled>Restore</button>
-          </div>
-        </details>
-      </section>
-
-      <section class="console">
-        <div class="console-head">
-          <span>Log</span>
-          <button id="clear-log">clear</button>
-        </div>
-        <pre id="log"></pre>
-      </section>
-
-      <section class="danger-zone">
-        <details>
-          <summary>⚠ Uninstall CARE Clinic</summary>
-          <p class="hint warn">
-            Removes CARE's containers and <b>all data volumes</b> (patient records and uploaded
-            files), the installed files, and the downloaded source. <b>This permanently deletes all
-            patient data and can't be undone.</b> Make sure you have a backup you can rely on first.
-          </p>
-          <label class="danger-opt">
-            <input type="checkbox" id="uninstall-images" />
-            <span>Also remove Docker images (frees disk; re-downloaded on next install)</span>
-          </label>
-          <label class="danger-opt">
-            <input type="checkbox" id="uninstall-backups" />
-            <span>Also delete backups — <b>no way to recover the data afterward</b></span>
-          </label>
-          <div class="danger-actions">
-            <button id="uninstall-run" class="danger">Uninstall everything</button>
-          </div>
-        </details>
       </section>
     </div>
+
+    <!-- toast -->
+    <div class="toast" id="toast" hidden><i class="ph-fill ph-check-circle"></i><span id="toast-msg"></span></div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

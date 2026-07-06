@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"care-clinic/app/internal/care"
+	"care-desktop/app/internal/care"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -125,7 +125,7 @@ func (a *App) configPath() string {
 	if err != nil {
 		dir, _ = os.UserHomeDir()
 	}
-	dir = filepath.Join(dir, "care-clinic")
+	dir = filepath.Join(dir, "care-desktop")
 	_ = os.MkdirAll(dir, 0o755)
 	return filepath.Join(dir, "config.json")
 }
@@ -150,7 +150,7 @@ func (a *App) saveConfig(cfg Config) error {
 // --- kit location + first-run unpack ----------------------------------------
 
 func (a *App) kitDir() string {
-	if d := os.Getenv("CARE_CLINIC_DIR"); d != "" {
+	if d := os.Getenv("CARE_DESKTOP_DIR"); d != "" {
 		return d
 	}
 	if cfg := a.loadConfig(); cfg.InstallDir != "" {
@@ -160,7 +160,7 @@ func (a *App) kitDir() string {
 	if err != nil {
 		base, _ = os.UserHomeDir()
 	}
-	return filepath.Join(base, "care-clinic", "kit")
+	return filepath.Join(base, "care-desktop", "kit")
 }
 
 // ensureKit unpacks the embedded kit into the writable kit dir once; existing
@@ -314,7 +314,7 @@ func (a *App) RunSetup(mdnsName, adminPassword, installDir, backupDir string) er
 	cfg := a.loadConfig()
 	cfg.MDNSName = mdns
 	if strings.TrimSpace(installDir) != "" {
-		cfg.InstallDir = filepath.Join(strings.TrimSpace(installDir), "CARE Clinic")
+		cfg.InstallDir = filepath.Join(strings.TrimSpace(installDir), "CARE Desktop")
 	}
 	if strings.TrimSpace(backupDir) != "" {
 		cfg.BackupDir = filepath.Join(strings.TrimSpace(backupDir), "care-db-backups")
@@ -401,7 +401,7 @@ func (a *App) ConfirmUninstall(removeBackups bool) bool {
 	msg += "\nThis cannot be undone. Continue?"
 	sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
 		Type:          wruntime.WarningDialog,
-		Title:         "Uninstall CARE Clinic?",
+		Title:         "Uninstall CARE Desktop?",
 		Message:       msg,
 		Buttons:       []string{"Uninstall", "Cancel"},
 		DefaultButton: "Cancel",

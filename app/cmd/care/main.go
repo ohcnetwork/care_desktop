@@ -5,7 +5,7 @@
 //	     status | backup-now | list-backups | restore <dump> [files.tar.gz] |
 //	     uninstall [--images] [--backups] --yes | mdns [name]
 //
-// The kit dir defaults to the current directory (override with CARE_CLINIC_DIR).
+// The kit dir defaults to the current directory (override with CARE_DESKTOP_DIR).
 package main
 
 import (
@@ -14,7 +14,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"care-clinic/app/internal/care"
+	"care-desktop/app/internal/care"
 )
 
 func main() {
@@ -22,7 +22,7 @@ func main() {
 		usage()
 		os.Exit(1)
 	}
-	kit := os.Getenv("CARE_CLINIC_DIR")
+	kit := os.Getenv("CARE_DESKTOP_DIR")
 	if kit == "" {
 		kit, _ = os.Getwd()
 	}
