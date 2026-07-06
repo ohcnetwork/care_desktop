@@ -66,7 +66,7 @@ File uploads/downloads use **presigned URLs** — the browser talks to MinIO
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `BUCKET_EXTERNAL_ENDPOINT` | `http://care.local:9100` | The URL devices use to reach files. **Never `localhost`** (that means *their* device). Use the server IP if devices can't resolve `care.local`. |
+| `BUCKET_EXTERNAL_ENDPOINT` | `http://care.local` | The URL devices use to reach files (served through Caddy on port 80, same as the app). **Never `localhost`** (that means *their* device). Use the server IP if devices can't resolve `care.local`. |
 | `BUCKET_ENDPOINT` | `http://minio:9000` | Internal endpoint the backend uses. Leave as-is. |
 | `BUCKET_REGION` | `ap-south-1` | S3 region label (any valid value). |
 | `BUCKET_KEY` | `minioadmin` | Access key. Change for a non-trivial deployment (keep equal to `MINIO_ACCESS_KEY`). |

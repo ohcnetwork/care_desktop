@@ -44,8 +44,8 @@ services:
       - minio-data:/data
       - ./minio/entrypoint.sh:/entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
-    ports:
-      - "9100:9000"   # browser ↔ files (presigned URLs at http://care.local:9100)
+    # No host port: browsers reach files through Caddy on :80 (/patient-bucket,
+    # /facility-bucket). One port to bind, and same-origin with the app.
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
       interval: 10s
@@ -102,6 +102,7 @@ services:
     depends_on:
       - backend
       - frontend
+      - minio
 
   backup:
     image: postgres:17-alpine

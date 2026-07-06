@@ -49,12 +49,13 @@ The actual CARE stack, defined in `docker-compose.yml`. Project name is
 | `caddy` | `caddy:2` | reverse proxy — the single front door on port 80 |
 | `backup` | `postgres:17-alpine` | daily DB dump + file archive |
 
-Only **two ports** are exposed to the WiFi:
-- **80** — the app + API, via Caddy.
-- **9100** — MinIO, for direct file upload/download (presigned URLs).
+Only **one port** is exposed to the WiFi:
+- **80** — everything, via Caddy: the app, the API, and file upload/download.
 
-Everything else (postgres 5432, redis 6379, the backend's 9000) is private inside
-the Docker network.
+Everything else (postgres 5432, redis 6379, the backend's 9000, MinIO's 9000) is
+private inside the Docker network. Files reach the browser through Caddy on port 80
+too (see below), so there's a single port to bind — no conflicts with other
+services, and nothing extra to open on the firewall.
 
 ---
 
@@ -68,14 +69,17 @@ A nurse opens `http://care.local` on her phone:
    reverse proxy / single front door).
 3. **Caddy routes by path** (`Caddyfile`):
    - `/api/*`, `/admin/*`, `/static/*`, `/ping/*`, `/health/*` → **backend:9000**
+   - `/patient-bucket/*`, `/facility-bucket/*` → **minio:9000** (files)
    - everything else → **frontend:80** (the React app)
 4. **The React app runs in the phone** and calls `/api/...` at the **same address**
    (`http://care.local`) — so it's *same-origin*, and there's **no CORS** to deal with.
 5. **Backend talks to** postgres (data) + redis (cache/jobs) and returns JSON.
 6. **Files** (X-rays, documents) use **presigned URLs**: the browser uploads/
-   downloads **directly** to MinIO at `http://care.local:9100`. (This is why
+   downloads at `http://care.local/patient-bucket/...`, which Caddy routes to MinIO.
+   Same origin as the app, on the same port 80 — no CORS, no extra port. (This is why
    `BUCKET_EXTERNAL_ENDPOINT` must be a name every device can reach — never
-   `localhost`.)
+   `localhost`.) The bucket name stays in the path and isn't rewritten, so MinIO's
+   SigV4 signature check on the presigned URL still passes.
 
 ---
 

@@ -72,7 +72,7 @@ Usually already allowed once the network is Private — add this only if devices
 
 **Option B — Static IP** (no extra software, no `.local`):
 - Give the PC a fixed IP (router DHCP reservation), e.g. `192.168.1.50`; staff open `http://192.168.1.50/`.
-- Also set `BUCKET_EXTERNAL_ENDPOINT=http://192.168.1.50:9100` in `backend.env`, and
+- Also set `BUCKET_EXTERNAL_ENDPOINT=http://192.168.1.50` in `backend.env`, and
   `REACT_CARE_API_URL=http://192.168.1.50` in `frontend.env` (then `care rebuild-frontend`).
 - Since the frontend is built for `care.local` by default, **Option A is smoother** — use the static IP only if mDNS is blocked on your network.
 

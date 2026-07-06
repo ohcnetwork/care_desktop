@@ -23,6 +23,13 @@
 		reverse_proxy backend:9000
 	}
 
+	handle /patient-bucket/* {
+		reverse_proxy minio:9000
+	}
+	handle /facility-bucket/* {
+		reverse_proxy minio:9000
+	}
+
 	handle {
 		reverse_proxy frontend:80
 	}

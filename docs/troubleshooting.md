@@ -14,7 +14,7 @@ not resolving, or the MinIO endpoint not reachable from other devices.
   - Linux: `hostname` → must be `care`, and `systemctl status avahi-daemon` active.
   - Windows: rename the PC to `care` (Settings → System → About → Rename), set the network to **Private**, and allow **UDP 5353** in Windows Firewall. Recent Windows 11 then advertises `care.local` natively; older builds need **Apple Bonjour**.
 - **Test from the server itself:** open `http://care.local/` on the server's own browser. If that works but phones don't, it's the device's mDNS.
-- **Fallback — use the IP:** find the server's IP (`ipconfig` / `ip addr` / `ifconfig`) and open `http://<ip>/`. If you'll use the IP permanently, also set `BUCKET_EXTERNAL_ENDPOINT=http://<ip>:9100` in `backend.env` and rebuild the frontend with `REACT_CARE_API_URL=http://<ip>` (see [configuration.md](configuration.md)).
+- **Fallback — use the IP:** find the server's IP (`ipconfig` / `ip addr` / `ifconfig`) and open `http://<ip>/`. If you'll use the IP permanently, also set `BUCKET_EXTERNAL_ENDPOINT=http://<ip>` in `backend.env` and rebuild the frontend with `REACT_CARE_API_URL=http://<ip>` (see [configuration.md](configuration.md)).
 - Give the server a **DHCP reservation** in the router so its IP never changes.
 
 ---
@@ -39,9 +39,10 @@ not resolving, or the MinIO endpoint not reachable from other devices.
 **Cause:** `BUCKET_EXTERNAL_ENDPOINT` points somewhere devices can't reach (often
 `localhost`).
 
-- It must be a host **every device** can resolve: `http://care.local:9100` (default)
-  or `http://<server-ip>:9100`.
-- Port **9100** must be open on the server. Check `care status` shows `minio running`.
+- It must be a host **every device** can resolve: `http://care.local` (default)
+  or `http://<server-ip>`. Files are served through Caddy on port 80 — the same
+  address as the app — so no extra port is involved.
+- Check `care status` shows `minio running` (Caddy proxies to it).
 - After changing it in `backend.env`, run `care start`.
 
 ---

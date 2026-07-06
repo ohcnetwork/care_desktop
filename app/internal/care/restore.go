@@ -146,9 +146,15 @@ func (e *Engine) Restore(dbDump, filesArchive string) error {
 	if err := e.dc("up", "-d", "db", "redis", "backend"); err != nil {
 		return err
 	}
-	e.migrate()
+	if err := e.migrate(); err != nil {
+		return err
+	}
 	e.logln("Bringing CARE back up...")
 	if err := e.dc("up", "-d"); err != nil {
+		return err
+	}
+	e.logln("Waiting for CARE to become healthy...")
+	if err := e.WaitHealthy(3 * time.Minute); err != nil {
 		return err
 	}
 	e.logln("")

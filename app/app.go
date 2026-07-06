@@ -267,9 +267,31 @@ func (a *App) run(e *care.Engine, fn func() error, markSetup bool) {
 			cfg.SetupDone = true
 			_ = a.saveConfig(cfg)
 			wruntime.EventsEmit(a.ctx, "setup-done", true)
+			a.notifyInstalled(cfg.MDNSName)
 		}
 		wruntime.EventsEmit(a.ctx, "care-done", code)
 	}()
+}
+
+// notifyInstalled shows the one-time native "install complete" pop-up. It's fired
+// from the setup-done branch, which only runs after the stack is verified healthy
+// (WaitHealthy), so this dialog is a truthful "it's up and reachable" signal.
+// Offers to open the app straight away.
+func (a *App) notifyInstalled(mdnsName string) {
+	if mdnsName == "" {
+		mdnsName = "care.local"
+	}
+	url := "http://" + mdnsName + "/"
+	sel, _ := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
+		Type:          wruntime.InfoDialog,
+		Title:         "CARE Desktop installed",
+		Message:       "CARE is installed and running.\n\nOpen it at " + url + "\nLogin: admin / admin (change the password in the app).",
+		Buttons:       []string{"Open CARE", "Close"},
+		DefaultButton: "Open CARE",
+	})
+	if sel == "Open CARE" {
+		wruntime.BrowserOpenURL(a.ctx, url)
+	}
 }
 
 // CareAction runs one whitelisted action against the existing kit.
@@ -337,6 +359,11 @@ func (a *App) RunSetup(mdnsName, adminPassword, installDir, backupDir string) er
 		"CARE_NO_MDNS":        "1", // naming is a verified wizard step; don't retry sudo here
 	})
 	a.run(e, func() error {
+		// Check port 80 before the ~10-min build, so a conflict fails immediately
+		// instead of after the wait (Start re-checks in case it's taken meanwhile).
+		if err := e.EnsurePortFree(); err != nil {
+			return err
+		}
 		if err := e.Setup(); err != nil {
 			return err
 		}

@@ -10,6 +10,9 @@ import (
 // Start brings the stack up: ensure both images, mDNS, `compose up -d`, migrate,
 // then a default admin. Mirrors `care.sh start`.
 func (e *Engine) Start() error {
+	if err := e.EnsurePortFree(); err != nil {
+		return err
+	}
 	if err := e.ensureBackendImage(); err != nil {
 		return err
 	}
@@ -27,11 +30,20 @@ func (e *Engine) Start() error {
 		return err
 	}
 	e.logln("Applying database migrations...")
-	e.migrate()
+	if err := e.migrate(); err != nil {
+		return err
+	}
 	if err := e.dc("up", "-d"); err != nil {
 		return err
 	}
 	e.createAdmin()
+	// Don't report success until the app actually answers on :80 — "up -d" only
+	// means the containers were created. This is the gate the installer relies on
+	// to mark the install complete.
+	e.logln("Waiting for CARE to become healthy...")
+	if err := e.WaitHealthy(3 * time.Minute); err != nil {
+		return err
+	}
 	e.logln("")
 	e.logln("CARE is up → http://" + e.mdnsName() + ".local/   (login: admin / admin)")
 	return nil
@@ -51,7 +63,9 @@ func (e *Engine) RebuildBackend() error {
 	if err := e.dc("up", "-d", "backend"); err != nil {
 		return err
 	}
-	e.migrate()
+	if err := e.migrate(); err != nil {
+		return err
+	}
 	if err := e.dc("up", "-d", "celery-worker", "celery-beat"); err != nil {
 		return err
 	}
@@ -89,22 +103,24 @@ func (e *Engine) BackupNow() error {
 	return nil
 }
 
-// migrate runs migrations, retrying until the backend/db are ready.
+// migrate runs migrations, retrying until the backend/db are ready. It returns an
+// error if they never come up, so callers don't proceed to report success on a
+// half-migrated stack.
 //
 // The api container's start.sh does NOT migrate, so we do (idempotent). But
 // celery-beat's entrypoint DOES run `migrate` on boot — so callers must run this
 // while celery-beat is stopped (bring up only db+redis+backend first), or the two
 // migrate processes race and fail with "column ... already exists" on any pending
 // migration. Start/RebuildBackend/Restore all order things that way.
-func (e *Engine) migrate() {
+func (e *Engine) migrate() error {
 	for n := 1; n <= 20; n++ {
 		if err := e.dc("exec", "-T", "backend", "python", "manage.py", "migrate", "--noinput"); err == nil {
-			return
+			return nil
 		}
 		e.logln(fmt.Sprintf("  waiting for backend/db... (%d)", n))
 		time.Sleep(5 * time.Second)
 	}
-	e.logln("backend not ready — run start again shortly")
+	return fmt.Errorf("database migrations did not complete — backend/db not ready")
 }
 
 // createAdmin makes a default admin/admin superuser. Idempotent: on an existing

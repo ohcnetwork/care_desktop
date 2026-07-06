@@ -117,6 +117,17 @@
             <pre id="wizard-log"></pre>
           </div>
         </div>
+
+        <!-- failed -->
+        <div id="wiz-failed" hidden>
+          <div class="fail-icon"><i class="ph-bold ph-warning-circle"></i></div>
+          <h2 class="inst-title">Installation failed</h2>
+          <p class="inst-sub">CARE couldn't finish setting up. The details are below — fix the issue and try again.</p>
+          <div class="fail-box"><pre id="fail-msg"></pre></div>
+          <div class="wiz-actions">
+            <button class="btn primary lg" id="fail-retry"><i class="ph-bold ph-arrow-counter-clockwise"></i>Try again</button>
+          </div>
+        </div>
       </section>
     </div>
 
@@ -188,7 +199,7 @@
 
             <div class="services-card">
               <div class="card-title">Services</div>
-              <div class="services-grid" id="services-grid"></div>
+              <div class="services-list" id="services-list"></div>
             </div>
           </div>
 

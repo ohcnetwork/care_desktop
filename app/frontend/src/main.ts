@@ -141,8 +141,12 @@ $("#pw-toggle").addEventListener("click", () => {
 // install
 const wizForm = $<HTMLDivElement>("#wiz-form");
 const wizInstalling = $<HTMLDivElement>("#wiz-installing");
+const wizFailed = $<HTMLDivElement>("#wiz-failed");
+const failMsg = $<HTMLPreElement>("#fail-msg");
 const installBar = $<HTMLDivElement>("#install-bar");
 const installPct = $<HTMLDivElement>("#install-pct");
+// last "error: …" line the engine streamed — shown on the failed screen.
+let lastError = "";
 
 // milestone-based progress derived from real engine log lines (setup emits no %).
 const MILESTONES: [RegExp, number][] = [
@@ -152,8 +156,11 @@ const MILESTONES: [RegExp, number][] = [
   [/Building the backend image/i, 40],
   [/Building the frontend image/i, 62],
   [/Starting CARE/i, 80],
-  [/database migrations/i, 90],
-  [/CARE is up|Setup done/i, 100],
+  [/database migrations/i, 88],
+  // 100% only on the post-health "CARE is up" line — NOT "Setup done." (which
+  // Setup() logs before Start() has even brought the stack up).
+  [/become healthy/i, 94],
+  [/CARE is up/i, 100],
 ];
 function bumpInstallProgress(line: string): void {
   for (const [re, pct] of MILESTONES) {
@@ -186,8 +193,35 @@ install.addEventListener("click", () => {
     $(".progress").classList.add("indet");
     installPct.textContent = "Working…";
     append("Starting one-time setup… (clones + builds the images; several minutes)");
-    void App.RunSetup("care.local", pwInput.value, installDir, backupDir).catch((e) => append(`error: ${String(e)}`));
+    // A synchronous rejection (e.g. kit unpack fails) never emits care-done, so
+    // surface the failed screen here too.
+    void App.RunSetup("care.local", pwInput.value, installDir, backupDir).catch((e) => {
+      lastError = String(e);
+      append(`error: ${String(e)}`);
+      showInstallFailed();
+    });
   })();
+});
+
+// Failed screen: shown when setup ends non-zero (e.g. port 80 taken, build failure).
+function showInstallFailed(): void {
+  wizInstalling.hidden = true;
+  wizForm.hidden = true;
+  failMsg.textContent = lastError || "Setup did not complete. See the setup log for details.";
+  wizFailed.hidden = false;
+}
+
+$("#fail-retry").addEventListener("click", () => {
+  lastError = "";
+  wlog.textContent = "";
+  installBar.style.width = "0%";
+  installPct.textContent = "Working…";
+  $(".progress").classList.remove("indet");
+  wizFailed.hidden = true;
+  wizInstalling.hidden = true;
+  wizForm.hidden = false;
+  // re-run the prerequisite checks; gate() re-enables Install if they pass.
+  void Promise.all([checkDocker(), checkGit(), checkMDNS()]);
 });
 
 // ===========================================================================
@@ -272,15 +306,15 @@ async function refresh(): Promise<void> {
 }
 
 function renderServices(ps: string): void {
-  const grid = $("#services-grid");
+  const list = $("#services-list");
   const lines = ps.split("\n").map((l) => l.trim()).filter(Boolean);
   if (lines.length === 0) {
-    grid.innerHTML = `<div class="svc"><span class="svc-dot down"></span><span class="svc-state">not running</span></div>`;
+    list.innerHTML = `<div class="svc"><span class="svc-dot down"></span><span class="svc-name">No services running</span></div>`;
     $("#stat-services").textContent = "0 up";
     return;
   }
   let up = 0;
-  grid.innerHTML = lines
+  list.innerHTML = lines
     .map((l) => {
       const [name, ...rest] = l.split(/\s+/);
       const state = rest.join(" ") || "";
@@ -509,14 +543,15 @@ $("#uninstall-run").addEventListener("click", () => {
 // ===========================================================================
 // Events
 // ===========================================================================
-on("care-log", (line: string) => append(line));
+on("care-log", (line: string) => {
+  if (line.startsWith("error:")) lastError = line.slice("error:".length).trim();
+  append(line);
+});
 on("care-done", (code: number) => {
   if (phase === "setup") {
     if (code !== 0) {
-      append(`\n✖ Setup failed (exit ${code}). Fix the issue above and try again.`);
-      wizInstalling.hidden = true;
-      wizForm.hidden = false;
-      install.disabled = false;
+      append(`\n✖ Setup failed (exit ${code}).`);
+      showInstallFailed();
     }
     return; // success handled by setup-done
   }
