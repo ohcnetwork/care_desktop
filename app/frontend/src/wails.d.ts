@@ -26,6 +26,7 @@ declare global {
           GitStatus(): Promise<DockerStatus>;
           MDNSStatus(): Promise<NameStatus>;
           CareHealth(): Promise<Health>;
+          ValidatePassword(pw: string): Promise<string>;
           CareAction(action: string): Promise<void>;
           CareStatus(): Promise<string>;
           RunSetup(

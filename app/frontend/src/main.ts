@@ -57,6 +57,11 @@ function append(line: string): void {
 const toast = $<HTMLDivElement>("#toast");
 const toastMsg = $<HTMLSpanElement>("#toast-msg");
 let toastTimer = 0;
+// the engine's errors can be multi-line (e.g. the port-80 message); a toast is one
+// line, so show just the headline.
+function firstLine(s: string): string {
+  return s.split("\n")[0].trim();
+}
 function showToast(msg: string): void {
   toastMsg.textContent = msg;
   toast.hidden = false;
@@ -67,7 +72,7 @@ function showToast(msg: string): void {
 // ===========================================================================
 // Wizard — checks
 // ===========================================================================
-let dockerOk = false, gitOk = false, mdnsOk = false;
+let dockerOk = false, gitOk = false, mdnsOk = false, pwOk = false;
 let installDir = "", backupDir = "";
 
 const install = $<HTMLButtonElement>("#install");
@@ -80,10 +85,13 @@ function setPill(id: string, state: "ok" | "checking" | "fail", label: string): 
 }
 
 function gate(): void {
-  install.disabled = !(dockerOk && gitOk && mdnsOk);
-  $("#install-note").textContent = install.disabled
+  const checksOk = dockerOk && gitOk && mdnsOk;
+  install.disabled = !(checksOk && pwOk);
+  $("#install-note").textContent = !checksOk
     ? "Complete the checks above to continue."
-    : "Ready — this takes 10–20 minutes.";
+    : !pwOk
+      ? "Set a strong admin password to continue."
+      : "Ready — this takes 10–20 minutes.";
 }
 
 async function checkDocker(): Promise<void> {
@@ -138,6 +146,29 @@ $("#pw-toggle").addEventListener("click", () => {
   $("#pw-eye").className = show ? "ph ph-eye-slash" : "ph ph-eye";
 });
 
+const pwHint = $<HTMLDivElement>("#pw-hint");
+const pwHintDefault = pwHint.textContent ?? "";
+let pwTimer = 0;
+async function validatePw(): Promise<void> {
+  const pw = pwInput.value;
+  if (pw === "") {
+    pwOk = false;
+    pwHint.className = "pw-hint";
+    pwHint.textContent = pwHintDefault;
+    gate();
+    return;
+  }
+  const reason = await App.ValidatePassword(pw);
+  pwOk = reason === "";
+  pwHint.className = "pw-hint " + (pwOk ? "ok" : "bad");
+  pwHint.textContent = pwOk ? "Looks good — strong enough." : reason;
+  gate();
+}
+pwInput.addEventListener("input", () => {
+  clearTimeout(pwTimer);
+  pwTimer = window.setTimeout(() => void validatePw(), 180);
+});
+
 // install
 const wizForm = $<HTMLDivElement>("#wiz-form");
 const wizInstalling = $<HTMLDivElement>("#wiz-installing");
@@ -182,7 +213,7 @@ install.addEventListener("click", () => {
     install.disabled = true;
     $("#install-note").textContent = "Re-checking requirements…";
     await Promise.all([checkDocker(), checkGit(), checkMDNS()]);
-    if (!(dockerOk && gitOk && mdnsOk)) {
+    if (!(dockerOk && gitOk && mdnsOk && pwOk)) {
       $("#install-note").textContent = "A requirement is no longer met — fix the red step and try again.";
       return;
     }
@@ -556,6 +587,9 @@ on("care-done", (code: number) => {
     return; // success handled by setup-done
   }
   append(`— done (exit ${code}) —`);
+  // A native error dialog already popped from the Go side; leave an in-app trace
+  // too, since that dialog is gone once dismissed and the log tab may be closed.
+  if (code !== 0) showToast(lastError ? firstLine(lastError) : "That action didn't complete — see the activity log.");
   setBusy(false);
   void refresh();
   void loadBackups();

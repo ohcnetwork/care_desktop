@@ -236,6 +236,15 @@ func (a *App) DockerStatus() care.DockerStatus { return a.engine(nil).DockerChec
 func (a *App) GitStatus() care.DockerStatus     { return a.engine(nil).GitCheck() }
 func (a *App) CareHealth() care.Health           { return a.engine(nil).Ping() }
 
+// ValidatePassword lets the wizard check the admin password live as the user types.
+// Returns "" when acceptable, otherwise a human-readable reason to show under the field.
+func (a *App) ValidatePassword(pw string) string {
+	if err := care.ValidatePassword(pw); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 // MDNSStatus is green whenever this app is actively advertising the name (advertise
 // mode), since that's exactly what makes care.local resolve. Otherwise it falls back
 // to the engine's resolution test + mode-specific guidance.
@@ -255,12 +264,19 @@ var allowed = map[string]bool{
 	"rebuild-backend": true, "rebuild-frontend": true, "backup-now": true,
 }
 
-func (a *App) run(e *care.Engine, fn func() error, markSetup bool) {
+func (a *App) run(e *care.Engine, fn func() error, markSetup bool, label string) {
 	go func() {
 		code := 0
 		if err := fn(); err != nil {
 			wruntime.EventsEmit(a.ctx, "care-log", "error: "+err.Error())
 			code = 1
+			// The installer shows a failed screen; the panel has none, so a failed
+			// action (e.g. Start when port 80 is taken) would otherwise be invisible
+			// unless the log tab happens to be open. Surface it natively. The engine's
+			// message is self-explanatory (the port-80 error even names what to quit).
+			if !markSetup {
+				a.notifyActionFailed(label, err.Error())
+			}
 		}
 		if markSetup && code == 0 {
 			cfg := a.loadConfig()
@@ -271,6 +287,31 @@ func (a *App) run(e *care.Engine, fn func() error, markSetup bool) {
 		}
 		wruntime.EventsEmit(a.ctx, "care-done", code)
 	}()
+}
+
+// notifyActionFailed pops a native error dialog when a panel action fails. It's the
+// counterpart to notifyInstalled: the panel has no failed screen, so this is how a
+// user learns (and why) an action didn't go through. label picks a fitting title.
+func (a *App) notifyActionFailed(label, detail string) {
+	title := "CARE couldn't finish that"
+	switch label {
+	case "start":
+		title = "CARE couldn't start"
+	case "restart":
+		title = "CARE couldn't restart"
+	case "stop":
+		title = "CARE couldn't stop"
+	case "restore":
+		title = "Restore didn't finish"
+	case "rebuild-backend", "rebuild-frontend":
+		title = "Rebuild didn't finish"
+	}
+	_, _ = wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
+		Type:    wruntime.ErrorDialog,
+		Title:   title,
+		Message: detail,
+		Buttons: []string{"OK"},
+	})
 }
 
 // notifyInstalled shows the one-time native "install complete" pop-up. It's fired
@@ -303,7 +344,7 @@ func (a *App) CareAction(action string) error {
 		return errString("not set up yet — run the first-time setup")
 	}
 	e := a.engine(nil)
-	a.run(e, actionFunc(e, action), false)
+	a.run(e, actionFunc(e, action), false, action)
 	return nil
 }
 
@@ -327,6 +368,12 @@ func actionFunc(e *care.Engine, action string) func() error {
 
 // RunSetup persists the wizard's choices, unpacks the kit, then runs setup+start.
 func (a *App) RunSetup(mdnsName, adminPassword, installDir, backupDir string) error {
+	// Check the password before we persist anything or unpack the kit — the wizard
+	// also checks live, but a caller could reach here directly.
+	if err := care.ValidatePassword(adminPassword); err != nil {
+		return err
+	}
+
 	mdns := strings.TrimSpace(mdnsName)
 	if mdns == "" {
 		mdns = "care.local"
@@ -349,13 +396,9 @@ func (a *App) RunSetup(mdnsName, adminPassword, installDir, backupDir string) er
 		return err
 	}
 
-	adminPw := adminPassword
-	if adminPw == "" {
-		adminPw = "admin"
-	}
 	e := a.engine(map[string]string{
 		"CARE_MDNS_NAME":      host,
-		"CARE_ADMIN_PASSWORD": adminPw,
+		"CARE_ADMIN_PASSWORD": adminPassword,
 		"CARE_NO_MDNS":        "1", // naming is a verified wizard step; don't retry sudo here
 	})
 	a.run(e, func() error {
@@ -368,7 +411,7 @@ func (a *App) RunSetup(mdnsName, adminPassword, installDir, backupDir string) er
 			return err
 		}
 		return e.Start()
-	}, true)
+	}, true, "setup")
 	return nil
 }
 
@@ -409,7 +452,7 @@ func (a *App) RestoreBackup(dbDump, filesArchive string) error {
 		return errString("not set up yet — run the first-time setup")
 	}
 	e := a.engine(nil)
-	a.run(e, func() error { return e.Restore(dbDump, filesArchive) }, false)
+	a.run(e, func() error { return e.Restore(dbDump, filesArchive) }, false, "restore")
 	return nil
 }
 
