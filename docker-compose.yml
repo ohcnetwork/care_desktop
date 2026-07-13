@@ -13,7 +13,7 @@ volumes:
 
 services:
   db:
-    image: postgres:17-alpine
+   image: ${POSTGRES_IMAGE:-postgres:17.10-alpine}
     restart: unless-stopped
     env_file: ./backend.env
     volumes:
@@ -25,7 +25,7 @@ services:
       start_period: 10s
 
   redis:
-    image: redis:8-alpine
+    image: ${REDIS_IMAGE:-redis:8.8.0-alpine}
     restart: unless-stopped
     volumes:
       - redis-data:/data
@@ -35,7 +35,7 @@ services:
       retries: 5
 
   minio:
-    image: minio/minio:latest
+    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2025-09-07T16-13-09Z}
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
@@ -91,7 +91,7 @@ services:
       - backend
 
   caddy:
-    image: caddy:2
+    image: ${CADDY_IMAGE:-caddy:2.11.4}
     restart: unless-stopped
     ports:
       - "80:80"               # the clinic app: http://care.local/
@@ -105,7 +105,7 @@ services:
       - minio
 
   backup:
-    image: postgres:17-alpine
+    image: ${POSTGRES_IMAGE:-postgres:17.10-alpine}
     restart: unless-stopped
     env_file: ./backend.env
     volumes:

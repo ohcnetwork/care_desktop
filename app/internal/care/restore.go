@@ -218,7 +218,7 @@ tar xzf "/backups/` + archive + `" -C /minio-data`
 	if err := e.run(nil, "docker", "run", "--rm",
 		"-v", vol+":/minio-data",
 		"-v", e.backupDir()+":/backups:ro",
-		"postgres:17-alpine", "sh", "-c", script); err != nil {
+		e.postgresImage(), "sh", "-c", script); err != nil {
 		return fmt.Errorf("file restore failed: %w", err)
 	}
 	return nil

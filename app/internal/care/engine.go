@@ -72,6 +72,12 @@ func (e *Engine) loadVersions() {
 
 func (e *Engine) backendImage() string  { return e.get("BACKEND_IMAGE", "care:clinic") }
 func (e *Engine) frontendImage() string { return e.get("FRONTEND_IMAGE", "care_fe:clinic") }
+func (e *Engine) postgresImage() string { return e.get("POSTGRES_IMAGE", "postgres:17.10-alpine") }
+func (e *Engine) redisImage() string    { return e.get("REDIS_IMAGE", "redis:8.8.0-alpine") }
+func (e *Engine) minioImage() string {
+	return e.get("MINIO_IMAGE", "minio/minio:RELEASE.2025-09-07T16-13-09Z")
+}
+func (e *Engine) caddyImage() string { return e.get("CADDY_IMAGE", "caddy:2.11.4") }
 func (e *Engine) beRepo() string {
 	return e.get("CARE_BE_REPO", "https://github.com/ohcnetwork/care.git")
 }
@@ -196,6 +202,10 @@ func (e *Engine) baseEnv() []string {
 	set("PATH", augmentedPath())
 	set("BACKEND_IMAGE", e.backendImage())
 	set("FRONTEND_IMAGE", e.frontendImage())
+	set("POSTGRES_IMAGE", e.postgresImage())
+	set("REDIS_IMAGE", e.redisImage())
+	set("MINIO_IMAGE", e.minioImage())
+	set("CADDY_IMAGE", e.caddyImage())
 	set("MINIO_ACCESS_KEY", "minioadmin")
 	set("MINIO_SECRET_KEY", "minioadmin")
 	set("BACKUP_DIR", e.backupDir())
