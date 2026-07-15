@@ -68,7 +68,7 @@ A nurse opens `http://care.local` on her phone:
 2. **Phone → Caddy.** It connects to the server on **port 80**, hitting Caddy (the
    reverse proxy / single front door).
 3. **Caddy routes by path** (`Caddyfile`):
-   - `/api/*`, `/admin/*`, `/static/*`, `/ping/*`, `/health/*` → **backend:9000**
+   - `/api/*`, `/static/*`, `/ping/*`, `/health/*` → **backend:9000**
    - `/patient-bucket/*`, `/facility-bucket/*` → **minio:9000** (files)
    - everything else → **frontend:80** (the React app)
 4. **The React app runs in the phone** and calls `/api/...` at the **same address**

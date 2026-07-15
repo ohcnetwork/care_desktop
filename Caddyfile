@@ -10,9 +10,6 @@
 	handle /api/* {
 		reverse_proxy backend:9000
 	}
-	handle /admin/* {
-		reverse_proxy backend:9000
-	}
 	handle /static/* {
 		reverse_proxy backend:9000
 	}
