@@ -45,13 +45,16 @@ function showView(v: "wizard" | "panel"): void {
 // ===========================================================================
 // Log + toast
 // ===========================================================================
-const wlog = $<HTMLPreElement>("#wizard-log");
 const logEl = $<HTMLPreElement>("#log");
+// The installer window has no console — setup lines only drive the progress bar and
+// its step label. The panel keeps its activity log.
 function append(line: string): void {
-  const el = phase === "setup" ? wlog : logEl;
-  el.textContent += line + "\n";
-  el.scrollTop = el.scrollHeight;
-  if (phase === "setup") bumpInstallProgress(line);
+  if (phase === "setup") {
+    bumpInstallProgress(line);
+    return;
+  }
+  logEl.textContent += line + "\n";
+  logEl.scrollTop = logEl.scrollHeight;
 }
 
 const toast = $<HTMLDivElement>("#toast");
@@ -176,31 +179,35 @@ const wizFailed = $<HTMLDivElement>("#wiz-failed");
 const failMsg = $<HTMLPreElement>("#fail-msg");
 const installBar = $<HTMLDivElement>("#install-bar");
 const installPct = $<HTMLDivElement>("#install-pct");
+const installStep = $<HTMLSpanElement>("#install-step-text");
 // last "error: …" line the engine streamed — shown on the failed screen.
 let lastError = "";
 
 // milestone-based progress derived from real engine log lines (setup emits no %).
-const MILESTONES: [RegExp, number][] = [
-  [/secret key/i, 8],
-  [/Cloning care backend/i, 15],
-  [/Cloning care frontend|Cloning care_fe|frontend \(/i, 25],
-  [/Building the backend image/i, 40],
-  [/Building the frontend image/i, 62],
-  [/Starting CARE/i, 80],
-  [/database migrations/i, 88],
+// The label replaces the console that used to sit on this screen: one plain-English
+// line saying what the 10–20 minute wait is doing right now.
+const MILESTONES: [RegExp, number, string][] = [
+  [/secret key/i, 8, "Preparing the configuration…"],
+  [/Cloning care backend/i, 15, "Downloading CARE (backend)…"],
+  [/Cloning care frontend|Cloning care_fe|frontend \(/i, 25, "Downloading CARE (app)…"],
+  [/Building the backend image/i, 40, "Building the backend — this is the long one…"],
+  [/Building the frontend image/i, 62, "Building the app…"],
+  [/Starting CARE/i, 80, "Starting the services…"],
+  [/database migrations/i, 88, "Setting up the database…"],
   // 100% only on the post-health "CARE is up" line — NOT "Setup done." (which
   // Setup() logs before Start() has even brought the stack up).
-  [/become healthy/i, 94],
-  [/CARE is up/i, 100],
+  [/become healthy/i, 94, "Waiting for CARE to answer…"],
+  [/CARE is up/i, 100, "Ready."],
 ];
 function bumpInstallProgress(line: string): void {
-  for (const [re, pct] of MILESTONES) {
+  for (const [re, pct, label] of MILESTONES) {
     if (re.test(line)) {
       const cur = parseInt(installBar.style.width) || 0;
       if (pct > cur) {
         $(".progress").classList.remove("indet");
         installBar.style.width = pct + "%";
         installPct.textContent = pct + "%";
+        installStep.textContent = label;
       }
       return;
     }
@@ -223,6 +230,7 @@ install.addEventListener("click", () => {
     wizInstalling.hidden = false;
     $(".progress").classList.add("indet");
     installPct.textContent = "Working…";
+    installStep.textContent = "Getting started…";
     append("Starting one-time setup… (clones + builds the images; several minutes)");
     // A synchronous rejection (e.g. kit unpack fails) never emits care-done, so
     // surface the failed screen here too.
@@ -238,15 +246,15 @@ install.addEventListener("click", () => {
 function showInstallFailed(): void {
   wizInstalling.hidden = true;
   wizForm.hidden = true;
-  failMsg.textContent = lastError || "Setup did not complete. See the setup log for details.";
+  failMsg.textContent = lastError || "Setup did not complete.";
   wizFailed.hidden = false;
 }
 
 $("#fail-retry").addEventListener("click", () => {
   lastError = "";
-  wlog.textContent = "";
   installBar.style.width = "0%";
   installPct.textContent = "Working…";
+  installStep.textContent = "Getting started…";
   $(".progress").classList.remove("indet");
   wizFailed.hidden = true;
   wizInstalling.hidden = true;
@@ -598,6 +606,7 @@ on("setup-done", () => {
   append("\n✔ Setup complete — opening the control panel…");
   installBar.style.width = "100%";
   installPct.textContent = "100%";
+  installStep.textContent = "Done — opening the control panel…";
   phase = "panel";
   showView("panel");
   void bootPanel();
