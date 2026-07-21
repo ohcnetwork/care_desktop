@@ -2,12 +2,24 @@
 # Pages and the API share http://care.local, so there is no CORS to configure.
 {
 	auto_https off
+	order coraza_waf first # must run before reverse_proxy
 }
 
 :80 {
 	encode gzip
 
+	# WAF on /api only (buckets excluded — uploads false-positive).
+	# SecRuleEngine: Off (inert) → DetectionOnly (log) → On (block); restart to apply.
 	handle /api/* {
+		coraza_waf {
+			load_owasp_crs
+			directives `
+				Include @coraza.conf-recommended
+				Include @crs-setup.conf.example
+				Include @owasp_crs/*.conf
+				SecRuleEngine Off
+			`
+		}
 		reverse_proxy backend:9000
 	}
 	handle /static/* {

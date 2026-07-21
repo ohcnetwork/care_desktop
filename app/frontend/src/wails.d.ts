@@ -13,7 +13,14 @@ type Backup = {
   files_archive: string;
   label: string;
   manual: boolean;
+  encrypted: boolean;
   size_bytes: number;
+};
+type CarePlugin = {
+  name: string;
+  package_name: string;
+  version?: string;
+  configs?: Record<string, unknown>;
 };
 
 declare global {
@@ -32,14 +39,25 @@ declare global {
           RunSetup(
             mdnsName: string,
             adminPassword: string,
+            backupPassword: string,
+            rememberBackup: boolean,
             installDir: string,
             backupDir: string,
           ): Promise<void>;
           ReadEnv(name: string): Promise<string>;
           WriteEnv(name: string, content: string): Promise<void>;
+          ReadPlugins(): Promise<CarePlugin[]>;
+          SavePlugins(plugins: CarePlugin[]): Promise<void>;
           ListBackups(): Promise<Backup[]>;
           ConfirmRestore(filesIncluded: boolean): Promise<boolean>;
-          RestoreBackup(dbDump: string, filesArchive: string): Promise<void>;
+          BackupEncryptionEnabled(): Promise<boolean>;
+          HasStoredBackupPassword(): Promise<boolean>;
+          RestoreBackup(
+            dbDump: string,
+            filesArchive: string,
+            passphrase: string,
+            remember: boolean,
+          ): Promise<void>;
           ConfirmUninstall(removeBackups: boolean): Promise<boolean>;
           RunUninstall(removeImages: boolean, removeBackups: boolean): Promise<void>;
           OpenURL(url: string): Promise<void>;

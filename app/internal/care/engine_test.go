@@ -66,12 +66,12 @@ func TestGetResolution(t *testing.T) {
 func TestListBackups(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{
-		"care-20260101-010000.dump",         // daily, has files
-		"files-20260101-010000.tar.gz",      // its pair
-		"care-manual-20260215-120000.dump",  // manual, DB only
-		"files-20260630-030000.tar.gz",      // orphan archive (no dump) — ignored
-		"care-20260630-030000.dump",         // daily, has files (newest)
-		"notes.txt",                         // junk — ignored
+		"care-20260101-010000.dump",        // daily, has files
+		"files-20260101-010000.tar.gz",     // its pair
+		"care-manual-20260215-120000.dump", // manual, DB only
+		"files-20260630-030000.tar.gz",     // orphan archive (no dump) — ignored
+		"care-20260630-030000.dump",        // daily, has files (newest)
+		"notes.txt",                        // junk — ignored
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
@@ -104,12 +104,57 @@ func TestListBackups(t *testing.T) {
 	}
 }
 
+// ListBackups must handle encrypted (.enc) and plaintext backups side by side —
+// pairing each dump to its same-timestamp files archive regardless of suffix, and
+// flagging the encrypted ones. This is the back-compat guarantee: a folder that
+// mixes old plaintext dumps with new encrypted ones still lists cleanly.
+func TestListBackupsEncrypted(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{
+		"care-20260101-010000.dump",            // legacy plaintext, has files
+		"files-20260101-010000.tar.gz",         // its plaintext pair
+		"care-20260701-020000.dump.enc",        // encrypted, has files (newest)
+		"files-20260701-020000.tar.gz.enc",     // its encrypted pair
+		"care-manual-20260215-120000.dump.enc", // encrypted manual, DB only
+		"backup-key.pem.enc",                   // the recovery key copy — must be ignored
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e := &Engine{Env: map[string]string{"BACKUP_DIR": dir}}
+	got, err := e.ListBackups()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("want 3 backups, got %d: %+v", len(got), got)
+	}
+	newest := got[0]
+	if newest.DBDump != "care-20260701-020000.dump.enc" || !newest.Encrypted {
+		t.Fatalf("newest encrypted dump mishandled: %+v", newest)
+	}
+	if newest.FilesArchive != "files-20260701-020000.tar.gz.enc" {
+		t.Fatalf("encrypted files archive not paired: %q", newest.FilesArchive)
+	}
+	// the legacy plaintext dump is still listed, paired, and not flagged encrypted.
+	var legacy Backup
+	for _, b := range got {
+		if b.DBDump == "care-20260101-010000.dump" {
+			legacy = b
+		}
+	}
+	if legacy.FilesArchive != "files-20260101-010000.tar.gz" || legacy.Encrypted {
+		t.Fatalf("legacy plaintext backup mishandled: %+v", legacy)
+	}
+}
+
 // Restore must reject anything that isn't one of our own backup filenames, before
 // it can reach a shell.
 func TestRestoreRejectsBadNames(t *testing.T) {
 	e := &Engine{Kit: t.TempDir()}
 	for _, bad := range []string{"care.dump; rm -rf /", "files-20260101-010000.tar.gz", "evil"} {
-		if err := e.Restore(bad, ""); err == nil {
+		if err := e.Restore(bad, "", ""); err == nil {
 			t.Fatalf("expected rejection for %q", bad)
 		}
 	}

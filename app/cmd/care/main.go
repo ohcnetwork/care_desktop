@@ -104,7 +104,9 @@ func restore(e *care.Engine, args []string) error {
 			}
 		}
 	}
-	return e.Restore(dump, files)
+	// Encrypted backups need the backup password; from the CLI it comes via the
+	// CARE_BACKUP_PASSWORD env var (the GUI reads it from the keychain instead).
+	return e.Restore(dump, files, os.Getenv("CARE_BACKUP_PASSWORD"))
 }
 
 // uninstall tears the install down. It removes the containers and ALL data

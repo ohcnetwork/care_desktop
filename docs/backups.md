@@ -17,6 +17,9 @@ startup), writes **two files** with a timestamp:
 
 Both are needed for a full restore — the database alone won't bring back an X-ray.
 
+> When backup encryption is on (see below), these are written as `care-<timestamp>.dump.enc`
+> and `files-<timestamp>.tar.gz.enc` — same contents, sealed.
+
 > On-demand: click **Backup now** in the app, or run `care backup-now`. That writes
 > an immediate `care-manual-<timestamp>.dump`.
 
@@ -38,6 +41,32 @@ Both are needed for a full restore — the database alone won't bring back an X-
 
 ---
 
+## Encryption
+
+At installation you set a **backup password**. From it, CARE generates an encryption
+keypair: the daily `backup` container holds only the *public* half, so it can seal
+every dump but can never open one. Backups are written as `*.enc` and are unreadable
+without the password — safe to keep on a USB stick, or on a Desktop that a cloud
+service (iCloud/OneDrive) happens to sync.
+
+- **The password can't be recovered.** There is no reset and no back door — that's
+  what makes the encryption real. If it's lost, every encrypted backup is lost with
+  it. Write it down and keep it somewhere safe, off the machine.
+- **You enter it once, at installation.** It's saved to this computer's OS keychain,
+  so restores on this machine never ask for it again — there's no separate password
+  prompt. (This does keep the password on the machine; the encryption's main job is
+  protecting the *backup files* once they're copied off to a USB stick or synced to a
+  cloud folder.)
+- **The backup folder is self-contained.** A copy of the (password-protected) private
+  key, `backup-key.pem.enc`, is dropped alongside the backups, so the folder can be
+  restored on a *different* computer. There you run the installer, enter the same
+  backup password in its backup section, and restore — the key travels with the folder.
+
+> Backups made **before** you had encryption stay plaintext and keep restoring
+> normally — the app handles a folder that mixes both.
+
+---
+
 ## Restore a backup
 
 Restore is **built in** — you don't run the SQL by hand. It stops the app services,
@@ -50,15 +79,22 @@ backup has them), then brings CARE back up and migrates.
 ### In the app
 
 Open the control panel → **Restore from a backup**. Pick a point from the dropdown
-(each is labelled with its date, whether it's a *daily* or *manual* backup, and
-whether it includes files), click **Restore**, and confirm. Progress streams to the
-log; the app restarts itself when it's done.
+(each is labelled with its date, whether it's a *daily* or *manual* backup, whether
+it includes files, and whether it's *encrypted*), click **Restore**, and confirm.
+Encrypted backups need no password prompt — the one you set at installation is read
+from this computer's keychain automatically. The app restarts itself when it's done.
 
 ### From the CLI
 
 ```bash
 care list-backups                      # newest first; copy the dump name
 care restore care-YYYYMMDD-HHMMSS.dump  # DB + same-timestamp files, if present
+```
+
+For an **encrypted** backup (`.enc`), supply the backup password via the environment:
+
+```bash
+CARE_BACKUP_PASSWORD='your-backup-password' care restore care-YYYYMMDD-HHMMSS.dump.enc
 ```
 
 - The matching `files-<timestamp>.tar.gz` is **paired automatically** by timestamp.
@@ -101,10 +137,14 @@ care start
 ## Moving the whole clinic to a new computer
 
 1. On the old server: take a fresh backup (**Backup now**), copy the backup folder to a USB.
+   If your backups are encrypted, that folder already contains `backup-key.pem.enc` —
+   keep it there, and make sure you know the backup password.
 2. On the new server: install CARE Desktop (it builds a fresh, empty stack), and point its
    backup folder at the USB (installer step 5, or `BACKUP_DIR` for the CLI).
 3. Restore that backup — **Restore from a backup** in the app, or `care restore <dump>`.
-   (Restore stops and restarts the stack itself.)
+   (Restore stops and restarts the stack itself.) For encrypted backups you'll enter the
+   backup password; the key travels with the folder, so no other file from the old machine
+   is needed.
 
 Because patient data lives in the Docker **volumes** (captured by the backups), this
 moves everything — records and files — to the new box.

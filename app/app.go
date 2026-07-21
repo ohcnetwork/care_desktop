@@ -163,13 +163,14 @@ func (a *App) kitDir() string {
 	return filepath.Join(base, "care-desktop", "kit")
 }
 
-// ensureKit unpacks the embedded kit into the writable kit dir once; existing
-// (user-edited) files are left untouched.
+// kitUserFiles are preserved on a kit refresh; everything else is app-owned.
+var kitUserFiles = map[string]bool{"backend.env": true, "frontend.env": true}
+
+// ensureKit syncs the embedded kit on every setup (not just the first) so an updated
+// app delivers new/changed files to an existing install, keeping edited env files.
+// Fixes the stale-kit failure where setup can't find a newly added kit file.
 func (a *App) ensureKit() (string, error) {
 	dest := a.kitDir()
-	if _, err := os.Stat(filepath.Join(dest, "docker-compose.yml")); err == nil {
-		return dest, nil
-	}
 	err := fs.WalkDir(a.kit, "kit", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -182,6 +183,11 @@ func (a *App) ensureKit() (string, error) {
 		target := filepath.Join(dest, rel)
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
+		}
+		if kitUserFiles[rel] { // keep the user's edits; only seed when absent
+			if _, err := os.Stat(target); err == nil {
+				return nil
+			}
 		}
 		data, err := fs.ReadFile(a.kit, p)
 		if err != nil {
@@ -233,8 +239,8 @@ func (a *App) GetState() AppState {
 }
 
 func (a *App) DockerStatus() care.DockerStatus { return a.engine(nil).DockerCheck() }
-func (a *App) GitStatus() care.DockerStatus     { return a.engine(nil).GitCheck() }
-func (a *App) CareHealth() care.Health           { return a.engine(nil).Ping() }
+func (a *App) GitStatus() care.DockerStatus    { return a.engine(nil).GitCheck() }
+func (a *App) CareHealth() care.Health         { return a.engine(nil).Ping() }
 
 // ValidatePassword lets the wizard check the admin password live as the user types.
 // Returns "" when acceptable, otherwise a human-readable reason to show under the field.
@@ -367,11 +373,15 @@ func actionFunc(e *care.Engine, action string) func() error {
 }
 
 // RunSetup persists the wizard's choices, unpacks the kit, then runs setup+start.
-func (a *App) RunSetup(mdnsName, adminPassword, installDir, backupDir string) error {
-	// Check the password before we persist anything or unpack the kit — the wizard
-	// also checks live, but a caller could reach here directly.
+// Empty backupPassword = encryption off; rememberBackup saves it to the keychain.
+func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberBackup bool, installDir, backupDir string) error {
 	if err := care.ValidatePassword(adminPassword); err != nil {
 		return err
+	}
+	if backupPassword != "" {
+		if err := care.ValidatePassword(backupPassword); err != nil {
+			return err
+		}
 	}
 
 	mdns := strings.TrimSpace(mdnsName)
@@ -396,11 +406,22 @@ func (a *App) RunSetup(mdnsName, adminPassword, installDir, backupDir string) er
 		return err
 	}
 
-	e := a.engine(map[string]string{
+	// Best-effort: a keychain failure shouldn't abort the install.
+	if backupPassword != "" && rememberBackup {
+		if err := care.StoreBackupPassword(backupPassword); err != nil {
+			wruntime.EventsEmit(a.ctx, "care-log", "note: couldn't save the backup password to the keychain ("+err.Error()+")")
+		}
+	}
+
+	env := map[string]string{
 		"CARE_MDNS_NAME":      host,
 		"CARE_ADMIN_PASSWORD": adminPassword,
 		"CARE_NO_MDNS":        "1", // naming is a verified wizard step; don't retry sudo here
-	})
+	}
+	if backupPassword != "" {
+		env["CARE_BACKUP_PASSWORD"] = backupPassword
+	}
+	e := a.engine(env)
 	a.run(e, func() error {
 		// Check port 80 before the ~10-min build, so a conflict fails immediately
 		// instead of after the wait (Start re-checks in case it's taken meanwhile).
@@ -445,16 +466,35 @@ func (a *App) ConfirmRestore(filesIncluded bool) bool {
 	return err == nil && sel == "Restore"
 }
 
-// RestoreBackup runs an async restore of the chosen dump (+ optional files
-// archive), streaming logs and finishing with a care-done event.
-func (a *App) RestoreBackup(dbDump, filesArchive string) error {
+// RestoreBackup restores async. For an encrypted backup, "" passphrase falls back to
+// the keychain; remember saves the one that worked.
+func (a *App) RestoreBackup(dbDump, filesArchive, passphrase string, remember bool) error {
 	if _, err := os.Stat(filepath.Join(a.kitDir(), "docker-compose.yml")); err != nil {
 		return errString("not set up yet — run the first-time setup")
 	}
+	if passphrase == "" {
+		passphrase = care.LoadBackupPassword()
+	}
+	if passphrase != "" && remember {
+		_ = care.StoreBackupPassword(passphrase)
+	}
 	e := a.engine(nil)
-	a.run(e, func() error { return e.Restore(dbDump, filesArchive) }, false, "restore")
+	a.run(e, func() error { return e.Restore(dbDump, filesArchive, passphrase) }, false, "restore")
 	return nil
 }
+
+// BackupEncryptionEnabled reports whether backups are encrypted (a keypair exists),
+// so the panel knows a restore will need the backup password.
+func (a *App) BackupEncryptionEnabled() bool {
+	if _, err := os.Stat(filepath.Join(a.kitDir(), "docker-compose.yml")); err != nil {
+		return false
+	}
+	return a.engine(nil).BackupEncryptionOn()
+}
+
+// HasStoredBackupPassword reports whether the backup password is remembered on this
+// machine — if so, the restore UI can skip the password prompt.
+func (a *App) HasStoredBackupPassword() bool { return care.HasBackupPassword() }
 
 // --- uninstall --------------------------------------------------------------
 
@@ -491,6 +531,7 @@ func (a *App) RunUninstall(removeImages, removeBackups bool) error {
 			RemoveBackups: removeBackups,
 		})
 		_ = a.SetAutostart(false)     // remove the login-item, if any
+		care.ForgetBackupPassword()   // drop the remembered backup password, if any
 		_ = os.Remove(a.configPath()) // forget setup — next launch shows the wizard
 		wruntime.EventsEmit(a.ctx, "care-log", "")
 		wruntime.EventsEmit(a.ctx, "care-log", "✔ Uninstalled. This computer's name was not changed back.")
@@ -526,6 +567,24 @@ func (a *App) WriteEnv(name, content string) error {
 		return err
 	}
 	return os.WriteFile(p, []byte(content), 0o644)
+}
+
+// --- backend plugins (ADDITIONAL_PLUGS in backend.env) ----------------------
+
+// ReadPlugins returns the backend plugins configured for this install.
+func (a *App) ReadPlugins() ([]care.Plugin, error) {
+	if _, err := os.Stat(filepath.Join(a.kitDir(), "backend.env")); err != nil {
+		return []care.Plugin{}, nil // not set up yet
+	}
+	return a.engine(nil).ReadPlugins()
+}
+
+// SavePlugins writes the plugin list; the UI follows with a rebuild-backend.
+func (a *App) SavePlugins(plugins []care.Plugin) error {
+	if _, err := os.Stat(filepath.Join(a.kitDir(), "backend.env")); err != nil {
+		return errString("not set up yet — run the first-time setup")
+	}
+	return a.engine(nil).WritePlugins(plugins)
 }
 
 // --- misc UI helpers --------------------------------------------------------

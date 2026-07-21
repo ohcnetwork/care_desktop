@@ -77,20 +77,30 @@ func (e *Engine) redisImage() string    { return e.get("REDIS_IMAGE", "redis:8.8
 func (e *Engine) minioImage() string {
 	return e.get("MINIO_IMAGE", "minio/minio:RELEASE.2025-09-07T16-13-09Z")
 }
-func (e *Engine) caddyImage() string { return e.get("CADDY_IMAGE", "caddy:2.11.4") }
+func (e *Engine) caddyImage() string  { return e.get("CADDY_IMAGE", "caddy:2.11.4") }
+func (e *Engine) backupImage() string { return e.get("BACKUP_IMAGE", "care-backup:clinic") }
+
+// wafCaddyImage is the custom Caddy image (Coraza WAF compiled in) the caddy service
+// actually runs; caddyImage() above is the pinned base it's built from.
+func (e *Engine) wafCaddyImage() string { return e.get("CADDY_WAF_IMAGE", "care-caddy:clinic") }
+
+// backupPassword is the passphrase that protects the backup keypair's private key.
+// Empty means backup encryption is disabled — dumps are written in plaintext, and
+// setup skips keypair generation. Set via CARE_BACKUP_PASSWORD at setup time.
+func (e *Engine) backupPassword() string { return e.get("CARE_BACKUP_PASSWORD", "") }
 func (e *Engine) beRepo() string {
 	return e.get("CARE_BE_REPO", "https://github.com/ohcnetwork/care.git")
 }
 func (e *Engine) feRepo() string {
 	return e.get("CARE_FE_REPO", "https://github.com/ohcnetwork/care_fe.git")
 }
-func (e *Engine) beRef() string  { return e.get("CARE_BE_REF", "develop") }
-func (e *Engine) feRef() string  { return e.get("CARE_FE_REF", "develop") }
-func (e *Engine) beDir() string  { return e.get("CARE_BE_DIR", filepath.Join(e.Kit, "care")) }
-func (e *Engine) feDir() string  { return e.get("CARE_FE_DIR", filepath.Join(e.Kit, "care_fe")) }
-func (e *Engine) mdnsName() string { return e.get("CARE_MDNS_NAME", "care") }
+func (e *Engine) beRef() string         { return e.get("CARE_BE_REF", "develop") }
+func (e *Engine) feRef() string         { return e.get("CARE_FE_REF", "develop") }
+func (e *Engine) beDir() string         { return e.get("CARE_BE_DIR", filepath.Join(e.Kit, "care")) }
+func (e *Engine) feDir() string         { return e.get("CARE_FE_DIR", filepath.Join(e.Kit, "care_fe")) }
+func (e *Engine) mdnsName() string      { return e.get("CARE_MDNS_NAME", "care") }
 func (e *Engine) adminPassword() string { return e.get("CARE_ADMIN_PASSWORD", "admin") }
-func (e *Engine) noMDNS() bool   { return e.get("CARE_NO_MDNS", "0") == "1" }
+func (e *Engine) noMDNS() bool          { return e.get("CARE_NO_MDNS", "0") == "1" }
 
 // MDNSName is the bare host label to advertise/resolve (e.g. "care"). Exported for
 // the app + CLI, which host the responder.
@@ -206,6 +216,8 @@ func (e *Engine) baseEnv() []string {
 	set("REDIS_IMAGE", e.redisImage())
 	set("MINIO_IMAGE", e.minioImage())
 	set("CADDY_IMAGE", e.caddyImage())
+	set("CADDY_WAF_IMAGE", e.wafCaddyImage())
+	set("BACKUP_IMAGE", e.backupImage())
 	set("MINIO_ACCESS_KEY", "minioadmin")
 	set("MINIO_SECRET_KEY", "minioadmin")
 	set("BACKUP_DIR", e.backupDir())

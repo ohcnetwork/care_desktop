@@ -82,6 +82,18 @@
               </div>
               <button class="btn ghost" id="choose-backup">Choose…</button>
             </div>
+            <div class="req-card col">
+              <div class="admin-pw">
+                <label>Backup password — encrypts the daily backups of patient data</label>
+                <div class="input-wrap">
+                  <i class="ph ph-shield-check lead-icon"></i>
+                  <input type="password" id="backuppw" placeholder="8–20 characters" autocomplete="new-password" />
+                  <button class="eye" id="bpw-toggle" title="show/hide"><i class="ph ph-eye" id="bpw-eye"></i></button>
+                </div>
+                <div class="pw-hint" id="bpw-hint">Keep this safe. Without it, encrypted backups can never be recovered — not by anyone.</div>
+              </div>
+              <div class="admin-note"><i class="ph ph-info"></i>Saved on this computer so restores don't ask for it again. Still write it down — it's the only way to open backups on another machine.</div>
+            </div>
           </div>
 
           <div class="section-label">Admin account</div>
@@ -141,13 +153,12 @@
           <button class="nav-item active" data-tab="overview"><i class="ph ph-squares-four"></i>Overview</button>
           <button class="nav-item" data-tab="settings"><i class="ph ph-sliders-horizontal"></i>Settings</button>
           <button class="nav-item" data-tab="backups"><i class="ph ph-archive"></i>Backups</button>
-          <button class="nav-item" data-tab="logs"><i class="ph ph-terminal-window"></i>Activity log</button>
           <button class="nav-item" data-tab="danger"><i class="ph ph-wrench"></i>Advanced</button>
         </div>
         <div class="nav-spacer"></div>
         <div class="mini-status">
           <span class="mini-dot" id="mini-dot"></span>
-          <div><div class="mini-label" id="mini-label">checking…</div><div class="mini-sub">CARE · offline</div></div>
+          <div class="mini-label" id="mini-label">checking…</div>
         </div>
       </nav>
 
@@ -189,16 +200,6 @@
               </div>
             </div>
 
-            <div class="stat-row">
-              <div class="stat"><div class="stat-k"><i class="ph ph-stack"></i>Services</div><div class="stat-v" id="stat-services">—</div></div>
-              <div class="stat"><div class="stat-k"><i class="ph ph-database"></i>Last backup</div><div class="stat-v" id="stat-lastbackup">—</div></div>
-              <div class="stat"><div class="stat-k"><i class="ph ph-archive"></i>Backups kept</div><div class="stat-v" id="stat-backups">—</div></div>
-            </div>
-
-            <div class="services-card">
-              <div class="card-title">Services</div>
-              <div class="services-list" id="services-list"></div>
-            </div>
           </div>
 
           <!-- SETTINGS -->
@@ -213,6 +214,17 @@
                 <button class="btn ghost" id="be-add"><i class="ph ph-plus"></i>Add variable</button>
                 <div class="grow"></div>
                 <button class="btn primary" id="be-save">Save &amp; apply</button>
+              </div>
+
+              <div class="settings-subhead">
+                <div><div class="card-title">Plugins</div><div class="card-sub warn">Adding or changing plugins rebuilds the backend (a few minutes, needs internet).</div></div>
+                <span class="tag">ADDITIONAL_PLUGS</span>
+              </div>
+              <div class="plugins-list" id="plugins-list"></div>
+              <div class="env-actions">
+                <select class="plugin-picker" id="plugin-picker"></select>
+                <div class="grow"></div>
+                <button class="btn primary" id="plugins-save">Save &amp; rebuild backend</button>
               </div>
             </div>
             <div class="settings-card">
@@ -234,6 +246,7 @@
             <div class="backups-bar">
               <button class="btn primary" id="btn-backup-now"><i class="ph-bold ph-download-simple"></i>Backup now</button>
               <span class="note">Automatic backups run daily.</span>
+              <span class="note" id="backups-summary"></span>
               <div class="grow"></div>
               <button class="btn ghost" id="backups-refresh"><i class="ph ph-arrows-clockwise"></i>Refresh</button>
             </div>
@@ -242,17 +255,6 @@
               <div>Restoring <b>replaces</b> the current database (and files) with the backup you pick. CARE stops during the restore and can't be undone — take a fresh backup first if unsure.</div>
             </div>
             <div class="backups-list" id="backups-list"></div>
-          </div>
-
-          <!-- LOGS -->
-          <div class="tab" id="tab-logs" hidden>
-            <div class="console tall">
-              <div class="console-head between">
-                <span><i class="ph ph-terminal-window"></i>Activity log</span>
-                <button class="btn tiny" id="clear-log">Clear</button>
-              </div>
-              <pre id="log"></pre>
-            </div>
           </div>
 
           <!-- ADVANCED -->

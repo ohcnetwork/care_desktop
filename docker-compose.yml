@@ -91,7 +91,7 @@ services:
       - backend
 
   caddy:
-    image: ${CADDY_IMAGE:-caddy:2.11.4}
+    image: ${CADDY_WAF_IMAGE:-care-caddy:clinic}   # caddy + Coraza WAF, built by `care setup`
     restart: unless-stopped
     ports:
       - "80:80"               # the clinic app: http://care.local/
@@ -105,12 +105,13 @@ services:
       - minio
 
   backup:
-    image: ${POSTGRES_IMAGE:-postgres:17.10-alpine}
+    image: ${BACKUP_IMAGE:-care-backup:clinic}   # postgres + openssl, built by `care setup`
     restart: unless-stopped
     env_file: ./backend.env
     volumes:
       - ./scripts/backup.sh:/backup.sh:ro
       - ${BACKUP_DIR:-./db-backups}:/backups     # the app points this at your Desktop/chosen folder
+      - ./keys:/keys:ro                          # backup-cert.pem (encrypt) + backup-key.pem.enc (restore); absent = plaintext
       - minio-data:/minio-data:ro
     entrypoint: ["/bin/sh", "/backup.sh"]
     depends_on:

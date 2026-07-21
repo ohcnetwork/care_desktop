@@ -11,6 +11,8 @@ const kit = join(here, "..", "..", "kit"); // app/kit
 
 const items = [
   "docker-compose.yml",
+  "backup.Dockerfile",
+  "caddy.Dockerfile",
   "backend.env",
   "frontend.env",
   "clinic_settings.py",

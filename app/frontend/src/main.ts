@@ -26,7 +26,7 @@ type DockerStatus = { ok: boolean; message: string };
 type NameStatus = { ok: boolean; message: string; how: string };
 type Health = { active: boolean; code: number; detail: string };
 type AppState = { setup_done: boolean; mdns_name: string; docker: DockerStatus };
-type Backup = { db_dump: string; files_archive: string; label: string; manual: boolean; size_bytes: number };
+type Backup = { db_dump: string; files_archive: string; label: string; manual: boolean; encrypted: boolean; size_bytes: number };
 type State = "running" | "partial" | "stopped" | "unknown";
 
 let phase: "setup" | "panel" = "setup";
@@ -45,16 +45,17 @@ function showView(v: "wizard" | "panel"): void {
 // ===========================================================================
 // Log + toast
 // ===========================================================================
-const logEl = $<HTMLPreElement>("#log");
-// The installer window has no console — setup lines only drive the progress bar and
-// its step label. The panel keeps its activity log.
+// Setup lines drive the progress bar (panel lines → devtools console). Buffered so
+// the fail screen can show the real build error, not just "exit status 1".
+const setupLog: string[] = [];
 function append(line: string): void {
   if (phase === "setup") {
+    setupLog.push(line);
+    if (setupLog.length > 300) setupLog.shift();
     bumpInstallProgress(line);
     return;
   }
-  logEl.textContent += line + "\n";
-  logEl.scrollTop = logEl.scrollHeight;
+  console.log(line);
 }
 
 const toast = $<HTMLDivElement>("#toast");
@@ -75,7 +76,7 @@ function showToast(msg: string): void {
 // ===========================================================================
 // Wizard — checks
 // ===========================================================================
-let dockerOk = false, gitOk = false, mdnsOk = false, pwOk = false;
+let dockerOk = false, gitOk = false, mdnsOk = false, pwOk = false, bpwOk = false;
 let installDir = "", backupDir = "";
 
 const install = $<HTMLButtonElement>("#install");
@@ -89,12 +90,14 @@ function setPill(id: string, state: "ok" | "checking" | "fail", label: string): 
 
 function gate(): void {
   const checksOk = dockerOk && gitOk && mdnsOk;
-  install.disabled = !(checksOk && pwOk);
+  install.disabled = !(checksOk && pwOk && bpwOk);
   $("#install-note").textContent = !checksOk
     ? "Complete the checks above to continue."
     : !pwOk
       ? "Set a strong admin password to continue."
-      : "Ready — this takes 10–20 minutes.";
+      : !bpwOk
+        ? "Set a backup password to continue."
+        : "Ready — this takes 10–20 minutes.";
 }
 
 async function checkDocker(): Promise<void> {
@@ -172,6 +175,36 @@ pwInput.addEventListener("input", () => {
   pwTimer = window.setTimeout(() => void validatePw(), 180);
 });
 
+// backup password — same strength policy as the admin password (reuses ValidatePassword)
+const backupPwInput = $<HTMLInputElement>("#backuppw");
+$("#bpw-toggle").addEventListener("click", () => {
+  const show = backupPwInput.type === "password";
+  backupPwInput.type = show ? "text" : "password";
+  $("#bpw-eye").className = show ? "ph ph-eye-slash" : "ph ph-eye";
+});
+const bpwHint = $<HTMLDivElement>("#bpw-hint");
+const bpwHintDefault = bpwHint.textContent ?? "";
+let bpwTimer = 0;
+async function validateBackupPw(): Promise<void> {
+  const pw = backupPwInput.value;
+  if (pw === "") {
+    bpwOk = false;
+    bpwHint.className = "pw-hint";
+    bpwHint.textContent = bpwHintDefault;
+    gate();
+    return;
+  }
+  const reason = await App.ValidatePassword(pw);
+  bpwOk = reason === "";
+  bpwHint.className = "pw-hint " + (bpwOk ? "ok" : "bad");
+  bpwHint.textContent = bpwOk ? "Looks good. Store it somewhere safe — it can't be recovered." : reason;
+  gate();
+}
+backupPwInput.addEventListener("input", () => {
+  clearTimeout(bpwTimer);
+  bpwTimer = window.setTimeout(() => void validateBackupPw(), 180);
+});
+
 // install
 const wizForm = $<HTMLDivElement>("#wiz-form");
 const wizInstalling = $<HTMLDivElement>("#wiz-installing");
@@ -187,8 +220,11 @@ let lastError = "";
 // The label replaces the console that used to sit on this screen: one plain-English
 // line saying what the 10–20 minute wait is doing right now.
 const MILESTONES: [RegExp, number, string][] = [
-  [/secret key/i, 8, "Preparing the configuration…"],
-  [/Cloning care backend/i, 15, "Downloading CARE (backend)…"],
+  [/secret key/i, 6, "Preparing the configuration…"],
+  [/Building the backup image/i, 9, "Preparing encrypted backups…"],
+  [/Generating the backup encryption key/i, 11, "Securing your backups…"],
+  [/Building the Caddy/i, 13, "Building the security proxy…"],
+  [/Cloning care backend/i, 16, "Downloading CARE (backend)…"],
   [/Cloning care frontend|Cloning care_fe|frontend \(/i, 25, "Downloading CARE (app)…"],
   [/Building the backend image/i, 40, "Building the backend — this is the long one…"],
   [/Building the frontend image/i, 62, "Building the app…"],
@@ -220,7 +256,7 @@ install.addEventListener("click", () => {
     install.disabled = true;
     $("#install-note").textContent = "Re-checking requirements…";
     await Promise.all([checkDocker(), checkGit(), checkMDNS()]);
-    if (!(dockerOk && gitOk && mdnsOk && pwOk)) {
+    if (!(dockerOk && gitOk && mdnsOk && pwOk && bpwOk)) {
       $("#install-note").textContent = "A requirement is no longer met — fix the red step and try again.";
       return;
     }
@@ -232,9 +268,11 @@ install.addEventListener("click", () => {
     installPct.textContent = "Working…";
     installStep.textContent = "Getting started…";
     append("Starting one-time setup… (clones + builds the images; several minutes)");
-    // A synchronous rejection (e.g. kit unpack fails) never emits care-done, so
-    // surface the failed screen here too.
-    void App.RunSetup("care.local", pwInput.value, installDir, backupDir).catch((e) => {
+    // rememberBackup=true: installer is the only place the password is entered, so
+    // restore reads it from the keychain. A sync rejection needs the fail screen too.
+    void App.RunSetup(
+      "care.local", pwInput.value, backupPwInput.value, true, installDir, backupDir,
+    ).catch((e) => {
       lastError = String(e);
       append(`error: ${String(e)}`);
       showInstallFailed();
@@ -242,16 +280,19 @@ install.addEventListener("click", () => {
   })();
 });
 
-// Failed screen: shown when setup ends non-zero (e.g. port 80 taken, build failure).
+// Fail screen: headline + tail of real build output (not just "exit status 1").
 function showInstallFailed(): void {
   wizInstalling.hidden = true;
   wizForm.hidden = true;
-  failMsg.textContent = lastError || "Setup did not complete.";
+  const tail = setupLog.slice(-40).join("\n").trim();
+  const headline = (lastError || "Setup did not complete.").trim();
+  failMsg.textContent = tail ? `${headline}\n\n———— last output ————\n${tail}` : headline;
   wizFailed.hidden = false;
 }
 
 $("#fail-retry").addEventListener("click", () => {
   lastError = "";
+  setupLog.length = 0;
   installBar.style.width = "0%";
   installPct.textContent = "Working…";
   installStep.textContent = "Getting started…";
@@ -270,12 +311,11 @@ const TAB_META: Record<string, [string, string]> = {
   overview: ["Overview", "Your clinic server at a glance."],
   settings: ["Settings", "Configuration for the backend and frontend."],
   backups: ["Backups", "Restore points for patient data and files."],
-  logs: ["Activity log", "Live output from the CARE engine."],
   danger: ["Advanced", "Rebuild and uninstall."],
 };
 function showTab(id: string): void {
   document.querySelectorAll<HTMLElement>(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.tab === id));
-  for (const t of ["overview", "settings", "backups", "logs", "danger"]) $(`#tab-${t}`).hidden = t !== id;
+  for (const t of ["overview", "settings", "backups", "danger"]) $(`#tab-${t}`).hidden = t !== id;
   const [title, sub] = TAB_META[id];
   $("#tab-title").textContent = title;
   $("#tab-sub").textContent = sub;
@@ -317,8 +357,8 @@ function applyState(state: State): void {
   $("#mini-label").textContent = running ? "Running" : partial ? "Starting…" : stopped ? "Stopped" : "checking…";
 
   // panel-wide busy lock
-  for (const id of ["#be-save", "#fe-save", "#be-add", "#fe-add", "#btn-backup-now", "#btn-rebuild-frontend",
-    "#uninstall-run", "#backups-refresh"]) {
+  for (const id of ["#be-save", "#fe-save", "#be-add", "#fe-add", "#plugin-picker", "#plugins-save",
+    "#btn-backup-now", "#btn-rebuild-frontend", "#uninstall-run", "#backups-refresh"]) {
     ($(id) as HTMLButtonElement).disabled = busy;
   }
   btnStop.disabled = busy || stopped;
@@ -329,40 +369,18 @@ async function refresh(): Promise<void> {
   let state: State;
   try {
     const h: Health = await App.CareHealth();
+    // Health alone can't tell "still coming up" from "not running at all", so when
+    // it's down we ask compose whether anything exists — the only thing the
+    // container list is still needed for.
     if (h.active) state = "running";
     else {
       let ps = "";
       try { ps = await App.CareStatus(); } catch { ps = ""; }
       state = ps.trim() ? "partial" : "stopped";
-      renderServices(ps);
     }
   } catch { state = "stopped"; }
-  if (state === "running") {
-    try { renderServices(await App.CareStatus()); } catch { /* ignore */ }
-  }
   lastState = state;
   applyState(state);
-}
-
-function renderServices(ps: string): void {
-  const list = $("#services-list");
-  const lines = ps.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length === 0) {
-    list.innerHTML = `<div class="svc"><span class="svc-dot down"></span><span class="svc-name">No services running</span></div>`;
-    $("#stat-services").textContent = "0 up";
-    return;
-  }
-  let up = 0;
-  list.innerHTML = lines
-    .map((l) => {
-      const [name, ...rest] = l.split(/\s+/);
-      const state = rest.join(" ") || "";
-      const ok = /running|healthy|up/i.test(state);
-      if (ok) up++;
-      return `<div class="svc"><span class="svc-dot ${ok ? "up" : "down"}"></span><span class="svc-name">${name}</span><span class="svc-state">${state}</span></div>`;
-    })
-    .join("");
-  $("#stat-services").textContent = `${up} / ${lines.length} up`;
 }
 
 function setBusy(b: boolean): void {
@@ -449,6 +467,17 @@ function serializeEnv(entries: Entry[]): string {
   return out.join("\n") + "\n";
 }
 
+// System/infrastructure keys — hidden under "Advanced" so the everyday view stays clean.
+const ADV_PREFIXES = ["POSTGRES_", "MINIO_", "BUCKET_", "CELERY_", "SNS_", "DJANGO_SECURE_"];
+const ADV_KEYS = new Set([
+  "DATABASE_URL", "REDIS_URL", "DJANGO_SECRET_KEY", "DJANGO_SETTINGS_MODULE", "PYTHONPATH",
+  "DJANGO_ALLOWED_HOSTS", "DJANGO_DEBUG", "DJANGO_ADMIN_URL", "CSRF_TRUSTED_ORIGINS",
+  "FILE_UPLOAD_BUCKET", "FACILITY_S3_BUCKET",
+]);
+function isAdvancedKey(key: string): boolean {
+  return ADV_KEYS.has(key) || ADV_PREFIXES.some((p) => key.startsWith(p));
+}
+
 class EnvEditor {
   entries: Entry[] = [];
   constructor(private name: "backend" | "frontend", private container: HTMLElement) {}
@@ -458,34 +487,54 @@ class EnvEditor {
     catch (e) { this.entries = [{ kind: "comment", raw: `# could not read ${this.name}.env: ${String(e)}` }]; }
     this.render();
   }
+  private makeRow(e: Entry, idx: number): HTMLDivElement {
+    const row = document.createElement("div");
+    row.className = "env-row";
+    if (e.isNew) {
+      const k = document.createElement("input");
+      k.type = "text"; k.placeholder = "NEW_KEY"; k.value = e.key ?? ""; k.className = "env-key-input";
+      k.addEventListener("input", () => (this.entries[idx].key = k.value));
+      row.appendChild(k);
+    } else {
+      const label = document.createElement("label");
+      label.className = "env-key"; label.textContent = e.key ?? "";
+      row.appendChild(label);
+    }
+    const v = document.createElement("input");
+    v.type = "text"; v.value = e.value ?? ""; v.spellcheck = false;
+    v.addEventListener("input", () => (this.entries[idx].value = v.value));
+    row.appendChild(v);
+    if (e.isNew) {
+      const rm = document.createElement("button");
+      rm.className = "btn ghost env-remove"; rm.textContent = "×"; rm.title = "remove";
+      rm.addEventListener("click", () => { this.entries.splice(idx, 1); this.render(); });
+      row.appendChild(rm);
+    }
+    return row;
+  }
   render(): void {
     this.container.innerHTML = "";
+    const advanced = document.createElement("div");
+    advanced.className = "advanced-body"; advanced.hidden = true;
+    let advCount = 0;
     this.entries.forEach((e, idx) => {
       if (e.kind !== "kv") return;
-      const row = document.createElement("div");
-      row.className = "env-row";
-      if (e.isNew) {
-        const k = document.createElement("input");
-        k.type = "text"; k.placeholder = "NEW_KEY"; k.value = e.key ?? ""; k.className = "env-key-input";
-        k.addEventListener("input", () => (this.entries[idx].key = k.value));
-        row.appendChild(k);
-      } else {
-        const label = document.createElement("label");
-        label.className = "env-key"; label.textContent = e.key ?? "";
-        row.appendChild(label);
-      }
-      const v = document.createElement("input");
-      v.type = "text"; v.value = e.value ?? ""; v.spellcheck = false;
-      v.addEventListener("input", () => (this.entries[idx].value = v.value));
-      row.appendChild(v);
-      if (e.isNew) {
-        const rm = document.createElement("button");
-        rm.className = "btn ghost env-remove"; rm.textContent = "×"; rm.title = "remove";
-        rm.addEventListener("click", () => { this.entries.splice(idx, 1); this.render(); });
-        row.appendChild(rm);
-      }
-      this.container.appendChild(row);
+      if (e.key === "ADDITIONAL_PLUGS") return; // managed by the Plugins subsection
+      const row = this.makeRow(e, idx);
+      if (!e.isNew && isAdvancedKey(e.key ?? "")) { advanced.appendChild(row); advCount++; }
+      else this.container.appendChild(row);
     });
+    if (advCount > 0) {
+      const toggle = document.createElement("button");
+      toggle.className = "btn ghost adv-toggle";
+      toggle.innerHTML = `<i class="ph ph-caret-right"></i>Advanced — system configuration (${advCount})`;
+      toggle.addEventListener("click", () => {
+        advanced.hidden = !advanced.hidden;
+        toggle.querySelector("i")!.className = advanced.hidden ? "ph ph-caret-right" : "ph ph-caret-down";
+      });
+      this.container.appendChild(toggle);
+      this.container.appendChild(advanced);
+    }
   }
   add(): void { this.entries.push({ kind: "kv", key: "", value: "", isNew: true }); this.render(); }
   async save(): Promise<void> { await App.WriteEnv(this.name, serializeEnv(this.entries)); }
@@ -511,13 +560,192 @@ $("#fe-save").addEventListener("click", () => {
 });
 
 // ===========================================================================
+// Panel — plugins (ADDITIONAL_PLUGS). Saving rebuilds the backend.
+// ===========================================================================
+// CarePlugin: local mirror of the bridge type (renamed to dodge the DOM's Plugin).
+type CarePlugin = { name: string; package_name: string; version?: string; configs?: Record<string, unknown> };
+type PluginConfigRow = { key: string; value: string };
+type PluginRow = { name: string; package_name: string; version: string; configs: PluginConfigRow[] };
+
+// Curated catalog of known plugins with a working config baked in, so a clinic can
+// add one without knowing its package URL or required settings. "Custom" stays for
+// anything not listed.
+type CatalogEntry = { label: string; name: string; package_name: string; version: string; configs: PluginConfigRow[] };
+const PLUGIN_CATALOG: CatalogEntry[] = [
+  {
+    label: "Notifications (care_notifications)",
+    name: "care_notifications",
+    package_name: "git+https://github.com/ohcnetwork/care_notifications_be.git",
+    version: "@main",
+    // web push needs VAPID keys the clinic doesn't have — off by default (typed false).
+    configs: [{ key: "WEBPUSH_NOTIFICATIONS_ENABLED", value: "false" }],
+  },
+];
+
+// Config values keep their JSON type: false/true → boolean, digits → number, else string.
+// A boolean false actually disables a plugin flag; the string "false" would be truthy.
+function parseConfigValue(v: string): unknown {
+  const t = v.trim();
+  if (t === "true") return true;
+  if (t === "false") return false;
+  if (/^-?\d+$/.test(t)) return parseInt(t, 10);
+  if (/^-?\d*\.\d+$/.test(t)) return parseFloat(t);
+  return v;
+}
+
+class PluginEditor {
+  plugins: PluginRow[] = [];
+  constructor(private container: HTMLElement) {}
+
+  async load(): Promise<void> {
+    try {
+      const raw = await App.ReadPlugins();
+      this.plugins = raw.map((p) => ({
+        name: p.name ?? "",
+        package_name: p.package_name ?? "",
+        version: p.version ?? "",
+        configs: Object.entries(p.configs ?? {}).map(([key, value]) => ({ key, value: String(value) })),
+      }));
+    } catch { this.plugins = []; }
+    this.render();
+  }
+
+  private field(label: string, placeholder: string, value: string, onInput: (v: string) => void): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "plugin-field";
+    const lab = document.createElement("label");
+    lab.textContent = label;
+    const inp = document.createElement("input");
+    inp.type = "text"; inp.placeholder = placeholder; inp.value = value; inp.spellcheck = false;
+    inp.addEventListener("input", () => onInput(inp.value));
+    wrap.append(lab, inp);
+    return wrap;
+  }
+
+  render(): void {
+    this.container.innerHTML = "";
+    if (this.plugins.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "plugins-empty";
+      empty.textContent = "No plugins yet. Click “Add plugin” to extend CARE.";
+      this.container.appendChild(empty);
+      return;
+    }
+    this.plugins.forEach((p, pi) => {
+      const card = document.createElement("div");
+      card.className = "plugin-card";
+
+      const head = document.createElement("div");
+      head.className = "plugin-head";
+      const name = document.createElement("input");
+      name.className = "plugin-name"; name.placeholder = "plugin name (e.g. hcx)"; name.value = p.name; name.spellcheck = false;
+      name.addEventListener("input", () => (this.plugins[pi].name = name.value));
+      const rm = document.createElement("button");
+      rm.className = "btn ghost env-remove"; rm.textContent = "×"; rm.title = "remove plugin";
+      rm.addEventListener("click", () => { this.plugins.splice(pi, 1); this.render(); });
+      head.append(name, rm);
+      card.appendChild(head);
+
+      card.appendChild(this.field("Package URL", "git+https://github.com/ohcnetwork/care_hcx.git",
+        p.package_name, (v) => (this.plugins[pi].package_name = v)));
+      card.appendChild(this.field("Version (optional)", "@master or ==1.2.3",
+        p.version, (v) => (this.plugins[pi].version = v)));
+
+      const cfgLabel = document.createElement("div");
+      cfgLabel.className = "plugin-cfg-label"; cfgLabel.textContent = "Configuration";
+      card.appendChild(cfgLabel);
+
+      const cfgForm = document.createElement("div");
+      cfgForm.className = "env-form";
+      p.configs.forEach((c, ci) => {
+        const row = document.createElement("div");
+        row.className = "env-row";
+        const k = document.createElement("input");
+        k.type = "text"; k.placeholder = "CONFIG_KEY"; k.value = c.key; k.className = "env-key-input";
+        k.addEventListener("input", () => (this.plugins[pi].configs[ci].key = k.value));
+        const v = document.createElement("input");
+        v.type = "text"; v.placeholder = "value"; v.value = c.value; v.spellcheck = false;
+        v.addEventListener("input", () => (this.plugins[pi].configs[ci].value = v.value));
+        const crm = document.createElement("button");
+        crm.className = "btn ghost env-remove"; crm.textContent = "×"; crm.title = "remove";
+        crm.addEventListener("click", () => { this.plugins[pi].configs.splice(ci, 1); this.render(); });
+        row.append(k, v, crm);
+        cfgForm.appendChild(row);
+      });
+      card.appendChild(cfgForm);
+
+      const addCfg = document.createElement("button");
+      addCfg.className = "btn ghost tiny plugin-add-cfg";
+      addCfg.innerHTML = `<i class="ph ph-plus"></i>Add config`;
+      addCfg.addEventListener("click", () => { this.plugins[pi].configs.push({ key: "", value: "" }); this.render(); });
+      card.appendChild(addCfg);
+
+      this.container.appendChild(card);
+    });
+  }
+
+  add(): void {
+    this.plugins.push({ name: "", package_name: "", version: "", configs: [] });
+    this.render();
+  }
+  addFromCatalog(c: CatalogEntry): void {
+    this.plugins.push({
+      name: c.name, package_name: c.package_name, version: c.version,
+      configs: c.configs.map((cf) => ({ ...cf })),
+    });
+    this.render();
+  }
+
+  serialize(): CarePlugin[] {
+    return this.plugins
+      .filter((p) => p.name.trim() !== "" && p.package_name.trim() !== "")
+      .map((p) => {
+        const out: CarePlugin = { name: p.name.trim(), package_name: p.package_name.trim() };
+        if (p.version.trim() !== "") out.version = p.version.trim();
+        const configs: Record<string, unknown> = {};
+        for (const c of p.configs) if (c.key.trim() !== "") configs[c.key.trim()] = parseConfigValue(c.value);
+        if (Object.keys(configs).length) out.configs = configs;
+        return out;
+      });
+  }
+
+  async save(): Promise<void> { await App.SavePlugins(this.serialize()); }
+}
+
+const pluginEditor = new PluginEditor($("#plugins-list"));
+// Picker: catalog entries + a "Custom" escape hatch. Selecting one adds it, then resets.
+const pluginPicker = $<HTMLSelectElement>("#plugin-picker");
+pluginPicker.innerHTML =
+  `<option value="">+ Add a plugin…</option>` +
+  PLUGIN_CATALOG.map((c, i) => `<option value="cat:${i}">${c.label}</option>`).join("") +
+  `<option value="custom">Custom — add by URL</option>`;
+pluginPicker.addEventListener("change", () => {
+  const v = pluginPicker.value;
+  if (v === "custom") pluginEditor.add();
+  else if (v.startsWith("cat:")) pluginEditor.addFromCatalog(PLUGIN_CATALOG[Number(v.slice(4))]);
+  pluginPicker.value = "";
+});
+$("#plugins-save").addEventListener("click", () => {
+  if (busy) return;
+  void (async () => {
+    try {
+      await pluginEditor.save();
+      append("\nsaved plugins (ADDITIONAL_PLUGS)");
+      showToast("Rebuilding backend with new plugins");
+      await run("rebuild-backend", "rebuild backend with new plugins");
+    } catch (e) { append(`error saving plugins: ${String(e)}`); showToast("Couldn't save plugins"); }
+  })();
+});
+
+// ===========================================================================
 // Panel — backups + restore
 // ===========================================================================
 async function loadBackups(): Promise<void> {
   try { backups = await App.ListBackups(); } catch { backups = []; }
   const list = $("#backups-list");
-  $("#stat-backups").textContent = String(backups.length);
-  $("#stat-lastbackup").textContent = backups.length ? shortDate(backups[0].label) : "—";
+  $("#backups-summary").textContent = backups.length
+    ? `${backups.length} kept · last ${shortDate(backups[0].label)}`
+    : "";
   if (backups.length === 0) {
     list.innerHTML = `<div class="backups-empty">No backups yet. Click <b>Backup now</b> or wait for the daily backup.</div>`;
     return;
@@ -555,12 +783,12 @@ async function runRestore(idx: number): Promise<void> {
   setBusy(true);
   append(`\n$ care restore ${b.db_dump}${b.files_archive ? ` ${b.files_archive}` : ""}   # replaces current data`);
   showToast("Restore started — data will be replaced");
-  try { await App.RestoreBackup(b.db_dump, b.files_archive); }
+  // "" passphrase → Go reads it from the keychain (set at install).
+  try { await App.RestoreBackup(b.db_dump, b.files_archive, "", false); }
   catch (e) { append(`error: ${String(e)}`); setBusy(false); }
 }
 
 $("#backups-refresh").addEventListener("click", () => void loadBackups());
-$("#clear-log").addEventListener("click", () => { logEl.textContent = ""; });
 
 // ===========================================================================
 // Panel — uninstall
@@ -597,7 +825,7 @@ on("care-done", (code: number) => {
   append(`— done (exit ${code}) —`);
   // A native error dialog already popped from the Go side; leave an in-app trace
   // too, since that dialog is gone once dismissed and the log tab may be closed.
-  if (code !== 0) showToast(lastError ? firstLine(lastError) : "That action didn't complete — see the activity log.");
+  if (code !== 0) showToast(lastError ? firstLine(lastError) : "That action didn't complete.");
   setBusy(false);
   void refresh();
   void loadBackups();
@@ -628,6 +856,7 @@ async function bootPanel(): Promise<void> {
   showTab("overview");
   await beEditor.load();
   await feEditor.load();
+  await pluginEditor.load();
   await loadBackups();
   await refresh();
   await syncAutostart();

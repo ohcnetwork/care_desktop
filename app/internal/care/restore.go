@@ -17,20 +17,21 @@ const composeProject = "care-desktop"
 // daily backups, the matching uploaded-files archive (same timestamp). Manual
 // ("Backup now") dumps are DB-only, so FilesArchive is empty.
 type Backup struct {
-	DBDump       string `json:"db_dump"`       // e.g. care-20260701-020000.dump
-	FilesArchive string `json:"files_archive"` // e.g. files-20260701-020000.tar.gz, or ""
+	DBDump       string `json:"db_dump"`       // e.g. care-20260701-020000.dump[.enc]
+	FilesArchive string `json:"files_archive"` // e.g. files-20260701-020000.tar.gz[.enc], or ""
 	Label        string `json:"label"`         // human-friendly, for the UI dropdown
 	Manual       bool   `json:"manual"`        // a "Backup now" dump (DB only)
+	Encrypted    bool   `json:"encrypted"`     // written by an encrypted sidecar (.enc)
 	SizeBytes    int64  `json:"size_bytes"`    // size of the DB dump
 }
 
 // dumpRe pulls the 20060102-150405 timestamp out of care-<ts>.dump and
-// care-manual-<ts>.dump.
-var dumpRe = regexp.MustCompile(`^care-(?:manual-)?(\d{8}-\d{6})\.dump$`)
+// care-manual-<ts>.dump, with or without the encrypted .enc suffix.
+var dumpRe = regexp.MustCompile(`^care-(?:manual-)?(\d{8}-\d{6})\.dump(?:\.enc)?$`)
 
 // safeName gates filenames coming from the UI/CLI before they reach a shell:
-// only our own backup files — no path separators, no metacharacters.
-var safeName = regexp.MustCompile(`^(?:care-(?:manual-)?\d{8}-\d{6}\.dump|files-\d{8}-\d{6}\.tar\.gz)$`)
+// only our own backup files (optionally .enc) — no path separators, no metacharacters.
+var safeName = regexp.MustCompile(`^(?:care-(?:manual-)?\d{8}-\d{6}\.dump(?:\.enc)?|files-\d{8}-\d{6}\.tar\.gz(?:\.enc)?)$`)
 
 // ListBackups returns the restorable points in the backup folder, newest first.
 // Missing folder (nothing backed up yet) is not an error — it returns nil.
@@ -43,12 +44,13 @@ func (e *Engine) ListBackups() ([]Backup, error) {
 		}
 		return nil, err
 	}
-	// index the files-*.tar.gz archives by timestamp so we can pair them to dumps.
+	// index the files-*.tar.gz[.enc] archives by timestamp so we can pair them to dumps.
 	files := map[string]string{}
 	for _, en := range entries {
 		n := en.Name()
-		if ts, ok := strings.CutPrefix(n, "files-"); ok {
-			if ts, ok := strings.CutSuffix(ts, ".tar.gz"); ok {
+		if core, ok := strings.CutPrefix(n, "files-"); ok {
+			core = strings.TrimSuffix(core, ".enc")
+			if ts, ok := strings.CutSuffix(core, ".tar.gz"); ok {
 				files[ts] = n
 			}
 		}
@@ -64,11 +66,12 @@ func (e *Engine) ListBackups() ([]Backup, error) {
 			DBDump:       en.Name(),
 			FilesArchive: files[ts],
 			Manual:       strings.HasPrefix(en.Name(), "care-manual-"),
+			Encrypted:    strings.HasSuffix(en.Name(), ".enc"),
 		}
 		if info, err := en.Info(); err == nil {
 			b.SizeBytes = info.Size()
 		}
-		b.Label = backupLabel(ts, b.Manual, b.FilesArchive != "")
+		b.Label = backupLabel(ts, b.Manual, b.FilesArchive != "", b.Encrypted)
 		out = append(out, b)
 	}
 	// sort by the embedded timestamp (newest first) — the "manual-" infix means
@@ -83,7 +86,7 @@ func (e *Engine) ListBackups() ([]Backup, error) {
 	return out, nil
 }
 
-func backupLabel(ts string, manual, withFiles bool) string {
+func backupLabel(ts string, manual, withFiles, encrypted bool) string {
 	when := ts
 	if t, err := time.Parse("20060102-150405", ts); err == nil {
 		when = t.Format("2006-01-02 15:04")
@@ -96,14 +99,18 @@ func backupLabel(ts string, manual, withFiles bool) string {
 	if withFiles {
 		scope = "DB + files"
 	}
-	return fmt.Sprintf("%s · %s · %s", when, kind, scope)
+	label := fmt.Sprintf("%s · %s · %s", when, kind, scope)
+	if encrypted {
+		label += " · encrypted"
+	}
+	return label
 }
 
 // Restore replaces the live data with a chosen backup. Destructive: the current
 // database is dropped and re-created, and (when filesArchive is given) the MinIO
 // volume is overwritten. App services are stopped during the swap and brought
 // back up afterward. Mirrors the manual steps in docs/backups.md.
-func (e *Engine) Restore(dbDump, filesArchive string) error {
+func (e *Engine) Restore(dbDump, filesArchive, passphrase string) error {
 	dbDump = filepath.Base(dbDump) // tolerate a pasted path; we only ever read from the backup dir
 	if !safeName.MatchString(dbDump) || !strings.HasPrefix(dbDump, "care-") {
 		return fmt.Errorf("not a database dump: %q", dbDump)
@@ -121,6 +128,17 @@ func (e *Engine) Restore(dbDump, filesArchive string) error {
 		}
 	}
 
+	// Check password + key up front, before we stop services and drop the database.
+	encrypted := strings.HasSuffix(dbDump, ".enc") || strings.HasSuffix(filesArchive, ".enc")
+	if encrypted {
+		if passphrase == "" {
+			return fmt.Errorf("this backup is encrypted — the backup password is required to restore it")
+		}
+		if e.privateKeyLocation() == "" {
+			return fmt.Errorf("backup encryption key not found — restore on the original computer, or copy %s into the backup folder next to the dumps", e.encKeyName())
+		}
+	}
+
 	e.logln("Restoring from backup — this replaces the current data.")
 	// Release DB connections + halt writes so the swap is clean.
 	e.logln("Stopping app services...")
@@ -130,11 +148,11 @@ func (e *Engine) Restore(dbDump, filesArchive string) error {
 	if err := e.dc("up", "-d", "db", "backup"); err != nil {
 		return err
 	}
-	if err := e.restoreDB(dbDump); err != nil {
+	if err := e.restoreDB(dbDump, passphrase); err != nil {
 		return err
 	}
 	if filesArchive != "" {
-		if err := e.restoreFiles(filesArchive); err != nil {
+		if err := e.restoreFiles(filesArchive, passphrase); err != nil {
 			return err
 		}
 	}
@@ -169,21 +187,39 @@ func (e *Engine) mustExist(name string) error {
 	return nil
 }
 
-// restoreDB drops + re-creates the database and pg_restores the dump, from inside
-// the backup container (the dump is already mounted there at /backups). The dump
-// name is validated by safeName, so embedding it in the script is safe.
-func (e *Engine) restoreDB(dump string) error {
+// restoreDB drops + re-creates the DB and pg_restores, inside the backup container.
+// dump is validated by safeName, so embedding it is safe. A .enc dump is decrypted
+// to a tmpfile first — before the drop, so a wrong password fails harmlessly.
+func (e *Engine) restoreDB(dump, passphrase string) error {
 	e.waitForDB()
 	e.logln("Restoring database from " + dump + " ...")
+	encrypted := strings.HasSuffix(dump, ".enc")
+	src := "/backups/" + dump
+	prep := `RESTORE_FILE="` + src + `"`
+	if encrypted {
+		// Key from the backup folder (travels with it); fall back to /keys.
+		prep = `KEY=/backups/` + e.encKeyName() + `
+[ -f "$KEY" ] || KEY=/keys/` + e.encKeyName() + `
+RESTORE_FILE=/tmp/care-restore.dump
+trap 'rm -f "$RESTORE_FILE"' EXIT
+openssl cms -decrypt -binary -inform DER -in "` + src + `" -out "$RESTORE_FILE" -inkey "$KEY" -passin env:BACKUP_PASS`
+	}
 	script := `set -e
 export PGPASSWORD="$POSTGRES_PASSWORD"
 DB="${POSTGRES_DB:-care}"; H="${POSTGRES_HOST:-db}"; U="${POSTGRES_USER:-postgres}"
+` + prep + `
 psql -h "$H" -U "$U" -d postgres -v ON_ERROR_STOP=1 \
   -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$DB' AND pid<>pg_backend_pid();"
 dropdb -h "$H" -U "$U" --if-exists "$DB"
 createdb -h "$H" -U "$U" "$DB"
-pg_restore -h "$H" -U "$U" -d "$DB" --no-owner --no-privileges "/backups/` + dump + `"`
-	if err := e.dc("exec", "-T", "backup", "sh", "-c", script); err != nil {
+pg_restore -h "$H" -U "$U" -d "$DB" --no-owner --no-privileges "$RESTORE_FILE"`
+	args := []string{"exec", "-T"}
+	if encrypted {
+		// passphrase briefly visible in host argv — acceptable on a single-op box.
+		args = append(args, "-e", "BACKUP_PASS="+passphrase)
+	}
+	args = append(args, "backup", "sh", "-c", script)
+	if err := e.dc(args...); err != nil {
 		return fmt.Errorf("database restore failed: %w", err)
 	}
 	return nil
@@ -204,21 +240,37 @@ func (e *Engine) waitForDB() {
 // restoreFiles overwrites the MinIO volume with the archive. The long-running
 // backup container mounts minio-data read-only on purpose, so we use a throwaway
 // container to mount it read-write. minio is stopped first so nothing is mid-write;
-// the caller's `up -d` restarts it. Uses the postgres image (already present, and
-// its busybox has tar+gzip) so this works fully offline.
-func (e *Engine) restoreFiles(archive string) error {
+// the caller's `up -d` restarts it. Uses the backup image (postgres + openssl, and
+// its busybox has tar+gzip) so decrypt + extract both work fully offline.
+func (e *Engine) restoreFiles(archive, passphrase string) error {
 	e.logln("Restoring uploaded files from " + archive + " ...")
 	_ = e.dc("stop", "minio")
 	vol := composeProject + "_minio-data"
+	encrypted := strings.HasSuffix(archive, ".enc")
+	src := "/backups/" + archive
+	extract := `tar xzf "` + src + `" -C /minio-data`
+	if encrypted {
+		extract = `KEY=/backups/` + e.encKeyName() + `
+[ -f "$KEY" ] || KEY=/keys/` + e.encKeyName() + `
+openssl cms -decrypt -binary -inform DER -in "` + src + `" -out /tmp/files.tar.gz -inkey "$KEY" -passin env:BACKUP_PASS
+tar xzf /tmp/files.tar.gz -C /minio-data
+rm -f /tmp/files.tar.gz`
+	}
 	// clear the volume (incl. dotfiles) then extract the archive into it.
 	script := `set -e
 cd /minio-data
 rm -rf ./* ./.[!.]* ./..?* 2>/dev/null || true
-tar xzf "/backups/` + archive + `" -C /minio-data`
-	if err := e.run(nil, "docker", "run", "--rm",
+` + extract
+	args := []string{"run", "--rm"}
+	if encrypted {
+		args = append(args, "-e", "BACKUP_PASS="+passphrase)
+	}
+	args = append(args,
 		"-v", vol+":/minio-data",
 		"-v", e.backupDir()+":/backups:ro",
-		e.postgresImage(), "sh", "-c", script); err != nil {
+		"-v", e.keysDir()+":/keys:ro",
+		e.backupImage(), "sh", "-c", script)
+	if err := e.run(nil, "docker", args...); err != nil {
 		return fmt.Errorf("file restore failed: %w", err)
 	}
 	return nil

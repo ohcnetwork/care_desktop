@@ -20,6 +20,19 @@ func (e *Engine) Setup() error {
 		return err
 	}
 	e.logln("Backups will go to: " + e.backupDir())
+	// Backup image + keypair + WAF image, before the long clones (small build context).
+	if err := e.ensureKeysDir(); err != nil {
+		return err
+	}
+	if err := e.buildBackup(); err != nil {
+		return err
+	}
+	if err := e.GenBackupKeypair(e.backupPassword()); err != nil {
+		return err
+	}
+	if err := e.buildCaddy(); err != nil {
+		return err
+	}
 	if err := e.buildBackend(); err != nil {
 		return err
 	}
@@ -70,7 +83,14 @@ func (e *Engine) buildBackend() error {
 	}
 	e.logln("Building the backend image (" + e.backendImage() + ")... (several minutes)")
 	df := filepath.Join(e.beDir(), "docker", "prod.Dockerfile")
-	return e.run(nil, "docker", "build", "-f", df, "-t", e.backendImage(), e.beDir())
+	args := []string{"build", "-f", df, "-t", e.backendImage()}
+	// CARE pip-installs plugins at build time from ADDITIONAL_PLUGS.
+	if plugs := e.additionalPlugs(); plugs != "" {
+		e.logln("Building with plugins (ADDITIONAL_PLUGS set)")
+		args = append(args, "--build-arg", "ADDITIONAL_PLUGS="+plugs)
+	}
+	args = append(args, e.beDir())
+	return e.run(nil, "docker", args...)
 }
 
 func (e *Engine) ensureBackendImage() error {
@@ -78,6 +98,39 @@ func (e *Engine) ensureBackendImage() error {
 		return nil
 	}
 	return e.buildBackend()
+}
+
+// buildBackup builds the Postgres+openssl backup image. Runs before the clones land
+// so the daemon isn't sent the (unused) hundreds of MB of source as build context.
+func (e *Engine) buildBackup() error {
+	e.logln("Building the backup image (" + e.backupImage() + ")...")
+	df := filepath.Join(e.Kit, "backup.Dockerfile")
+	return e.run(nil, "docker", "build", "-f", df,
+		"--build-arg", "POSTGRES_IMAGE="+e.postgresImage(),
+		"-t", e.backupImage(), e.Kit)
+}
+
+func (e *Engine) ensureBackupImage() error {
+	if e.imageExists(e.backupImage()) {
+		return nil
+	}
+	return e.buildBackup()
+}
+
+// buildCaddy builds the reverse-proxy image with the Coraza WAF compiled in (xcaddy).
+func (e *Engine) buildCaddy() error {
+	e.logln("Building the Caddy + WAF image (" + e.wafCaddyImage() + ")... (compiles Caddy; a few minutes)")
+	df := filepath.Join(e.Kit, "caddy.Dockerfile")
+	return e.run(nil, "docker", "build", "-f", df,
+		"--build-arg", "CADDY_IMAGE="+e.caddyImage(),
+		"-t", e.wafCaddyImage(), e.Kit)
+}
+
+func (e *Engine) ensureCaddyImage() error {
+	if e.imageExists(e.wafCaddyImage()) {
+		return nil
+	}
+	return e.buildCaddy()
 }
 
 func (e *Engine) buildFrontend() error {

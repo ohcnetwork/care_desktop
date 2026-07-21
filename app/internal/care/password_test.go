@@ -14,7 +14,7 @@ func TestValidatePassword(t *testing.T) {
 		{"no uppercase", "abcdef12", true},
 		{"no lowercase", "ABCDEF12", true},
 		{"no number", "Abcdefgh", true},
-		{"ok min", "Abcdef12", false},           // 8 chars, has all three
+		{"ok min", "Abcdef12", false},            // 8 chars, has all three
 		{"ok max", "Abcdefghij012345678", false}, // 19 chars
 		{"ok exactly 20", "Abcdefghij0123456789", false},
 	}
