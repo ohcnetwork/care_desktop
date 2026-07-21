@@ -13,7 +13,7 @@ clinic. Other devices install nothing; they open `http://care.local`.
 | Need | Why | How |
 |---|---|---|
 | **Windows 10/11** (64-bit) | the server OS | — |
-| **Docker Desktop**, running (WSL 2 backend) | runs the whole stack | [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/) → install → enable WSL 2 if prompted → open it |
+| **Docker**, running (WSL 2 backend, + `docker compose` v2) | runs the whole stack | Docker Desktop is simplest ([docker.com](https://www.docker.com/products/docker-desktop/) → install → enable WSL 2 → open). Rancher Desktop, or Docker Engine inside WSL 2, also work. |
 | **Git for Windows** | downloads + builds CARE once | [git-scm.com/download/win](https://git-scm.com/download/win) → install with defaults |
 | Working **mDNS** for `care.local` | so devices find the server by name (see step 2) | native on recent Windows 11; otherwise [Apple Bonjour](https://support.apple.com/kb/DL999) or a static IP |
 
@@ -93,7 +93,7 @@ Usually already allowed once the network is Private — add this only if devices
 
 The installer shows gated steps — each must be green before **Install & Start** enables:
 
-1. **Docker** — green when Docker Desktop is running.
+1. **Docker** — green when your Docker engine is running.
 2. **Git** — green when Git for Windows is installed.
 3. **Network name — care.local** — green once `care.local` resolves (native on recent Windows 11 with a Private network + UDP 5353 allowed; otherwise via Bonjour — see step 2).
 4. **Install location** *(optional)*.
@@ -117,8 +117,8 @@ Open **http://care.local/** (or `http://<your-static-ip>/`) on any device on the
 
 ## Notes
 
-- Tick **Start at login** in the panel so CARE returns after a reboot. Also set
-  **Docker Desktop → Settings → General → Start Docker Desktop when you log in**, so
-  the containers come back automatically.
+- Tick **Start at login** in the panel so CARE returns after a reboot. Also set your
+  Docker engine to start at login (Docker Desktop: **Settings → General → Start
+  Docker Desktop when you log in**), so the containers come back automatically.
 - Closing the window leaves CARE running.
 - See [troubleshooting.md](troubleshooting.md) for `care.local` and Docker issues.

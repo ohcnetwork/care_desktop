@@ -34,6 +34,7 @@ declare global {
           MDNSStatus(): Promise<NameStatus>;
           CareHealth(): Promise<Health>;
           ValidatePassword(pw: string): Promise<string>;
+          VerifyAdminPassword(pw: string): Promise<boolean>;
           CareAction(action: string): Promise<void>;
           CareStatus(): Promise<string>;
           RunSetup(

@@ -13,6 +13,7 @@ import (
 	"care-desktop/app/internal/care"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // App is the Wails bridge: every exported method is callable from the web UI as
@@ -114,10 +115,11 @@ func (a *App) watchAdvertise() {
 // --- persisted config -------------------------------------------------------
 
 type Config struct {
-	SetupDone  bool   `json:"setup_done"`
-	MDNSName   string `json:"mdns_name"`
-	InstallDir string `json:"install_dir"`
-	BackupDir  string `json:"backup_dir"`
+	SetupDone   bool   `json:"setup_done"`
+	MDNSName    string `json:"mdns_name"`
+	InstallDir  string `json:"install_dir"`
+	BackupDir   string `json:"backup_dir"`
+	AdminPwHash string `json:"admin_pw_hash,omitempty"` // bcrypt of the install-time admin password; gates Advanced
 }
 
 func (a *App) configPath() string {
@@ -249,6 +251,17 @@ func (a *App) ValidatePassword(pw string) string {
 		return err.Error()
 	}
 	return ""
+}
+
+// VerifyAdminPassword gates the Advanced screen. It checks against the bcrypt hash
+// stored at setup. Legacy installs (set up before the hash existed) have none, so
+// any non-empty entry passes — a speed bump, not verification.
+func (a *App) VerifyAdminPassword(pw string) bool {
+	h := a.loadConfig().AdminPwHash
+	if h == "" {
+		return strings.TrimSpace(pw) != ""
+	}
+	return bcrypt.CompareHashAndPassword([]byte(h), []byte(pw)) == nil
 }
 
 // MDNSStatus is green whenever this app is actively advertising the name (advertise
@@ -392,6 +405,9 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 
 	cfg := a.loadConfig()
 	cfg.MDNSName = mdns
+	if h, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost); err == nil {
+		cfg.AdminPwHash = string(h) // so Advanced can be gated behind the admin password, offline
+	}
 	if strings.TrimSpace(installDir) != "" {
 		cfg.InstallDir = filepath.Join(strings.TrimSpace(installDir), "CARE Desktop")
 	}

@@ -16,19 +16,32 @@ type DockerStatus struct {
 	Message string `json:"message"`
 }
 
-// DockerCheck is the one prerequisite the app can't bundle.
+// DockerCheck is the one prerequisite the app can't bundle. Any Docker-compatible
+// engine works (Docker Engine, Colima, Podman, Rancher Desktop, OrbStack, Docker
+// Desktop) — we just need `docker` + the `docker compose` v2 plugin reachable.
 func (e *Engine) DockerCheck() DockerStatus {
 	cmd := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
 	cmd.Env = e.baseEnv()
 	out, err := cmd.Output()
 	switch {
 	case err == nil:
+		if !e.hasCompose() {
+			return DockerStatus{OK: false, Message: "Docker is running, but the Compose plugin is missing — install 'docker compose' (v2)."}
+		}
 		return DockerStatus{OK: true, Message: "Docker " + strings.TrimSpace(string(out))}
 	case isNotFound(err):
-		return DockerStatus{OK: false, Message: "Docker not found — install Docker Desktop to continue."}
+		return DockerStatus{OK: false, Message: "Docker not found — install Docker (Docker Engine, Colima, or Docker Desktop) and start it."}
 	default:
-		return DockerStatus{OK: false, Message: "Docker is installed but not running — start Docker Desktop."}
+		return DockerStatus{OK: false, Message: "Docker is installed but not running — start it (Docker Desktop, Colima, …)."}
 	}
+}
+
+// hasCompose reports whether the `docker compose` v2 plugin is available — often
+// missing on non-Desktop installs, and the stack can't come up without it.
+func (e *Engine) hasCompose() bool {
+	cmd := exec.Command("docker", "compose", "version")
+	cmd.Env = e.baseEnv()
+	return cmd.Run() == nil
 }
 
 func isNotFound(err error) bool {

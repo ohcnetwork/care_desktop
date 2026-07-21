@@ -29,8 +29,9 @@ not resolving, or the MinIO endpoint not reachable from other devices.
 
 ## Docker step is red / "Docker is installed but not running"
 
-- Open **Docker Desktop** and wait until it says *running*, then click **Check**.
+- Start your Docker engine and wait until it's running, then click **Check**. (Docker Desktop: open it, wait for "running". Colima: `colima start`.)
 - Linux: `sudo systemctl start docker`; make sure your user is in the `docker` group (`sudo usermod -aG docker $USER`, then re-login).
+- "Compose plugin is missing": install `docker compose` v2 — bundled with Docker Desktop, but a separate package (e.g. `docker-compose-plugin`) on some Docker Engine / Colima setups.
 
 ---
 

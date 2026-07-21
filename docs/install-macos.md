@@ -14,10 +14,10 @@ clinic. Other devices (phones, laptops) install nothing; they just open
 | Need | Why | How |
 |---|---|---|
 | **macOS** 12+ (Apple Silicon or Intel) | the server OS | — |
-| **Docker Desktop**, running | runs the whole stack | [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/) → install → open it → wait for "Docker Desktop is running" |
+| **Docker**, running (+ `docker compose` v2) | runs the whole stack | Docker Desktop is the simplest ([docker.com](https://www.docker.com/products/docker-desktop/) → install → open → wait for "running"). Colima (`brew install colima docker docker-compose && colima start`), OrbStack, or Podman also work. |
 | **Git** | downloads + builds CARE once | `git --version` — if missing, it prompts to install the Command Line Tools, or run `xcode-select --install` |
 
-> **Hardware:** any Mac that can run Docker Desktop comfortably. 8 GB RAM minimum,
+> **Hardware:** any Mac that can run Docker comfortably. 8 GB RAM minimum,
 > 16 GB recommended. ~10 GB free disk for the images + data.
 
 ---
@@ -60,7 +60,7 @@ the `care` CLI, then jump to [cli.md](cli.md).
 
 Open **CARE Desktop**. The installer shows gated steps — each must be green:
 
-1. **Docker** — green when Docker Desktop is running. (If red: start Docker, click **Check**.)
+1. **Docker** — green when your Docker engine is running. (If red: start Docker, click **Check**.)
 2. **Git** — green when git is installed.
 3. **Network name — care.local** — green when step 2 above is done.
 4. **Install location** *(optional)* — where the app's files go. Leave default if unsure.

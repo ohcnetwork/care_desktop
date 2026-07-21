@@ -28,7 +28,7 @@ Full docs are in **[`docs/`](docs/README.md)**:
 
 ## Quick start
 
-1. **Install Docker Desktop + Git** on the server computer, and start Docker. *(Windows also needs Apple Bonjour or a static IP — see the Windows guide.)*
+1. **Install Docker + Git** on the server computer, and start Docker. Any Docker engine works — Docker Engine, Colima, Podman, or Docker Desktop. *(Windows also needs Apple Bonjour or a static IP — see the Windows guide.)*
 2. **Download the app** for your OS from the **Releases** page (or build it — see [building.md](docs/building.md)).
 3. **Open it** and complete the wizard: the three checks (Docker, Git, `care.local`) must be green, then click **Install & Start**.
 4. **Open `http://care.local/`** on any device on the WiFi → log in **`admin` / `admin`** → change the password.

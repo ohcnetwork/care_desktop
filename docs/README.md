@@ -53,7 +53,7 @@ the same engine and behave identically.
 ```
 
 ## Requirements at a glance
-- **Docker Desktop** (or Docker Engine), running. *Required on every OS.*
+- **Docker**, running — any engine (Docker Engine, Colima, Podman, Rancher Desktop, OrbStack, or Docker Desktop), with the `docker compose` v2 plugin. *Required on every OS.*
 - **git** — used once to download + build CARE.
 - A way to be found as `care.local`: automatic on macOS/Linux (the setup sets the
   hostname), **Apple Bonjour or a static IP** on Windows. See your OS install guide.
