@@ -1,4 +1,4 @@
-# CARE clinic reverse proxy — ONE origin, plain HTTP, trusted LAN only.
+# CARE clinic reverse proxy - ONE origin, plain HTTP, trusted LAN only.
 # Pages and the API share http://care.local, so there is no CORS to configure.
 {
 	auto_https off
@@ -8,8 +8,8 @@
 :80 {
 	encode gzip
 
-	# WAF on /api only (buckets excluded — uploads false-positive).
-	# SecRuleEngine: Off (inert) → DetectionOnly (log) → On (block); restart to apply.
+	# WAF on /api only (buckets excluded - uploads false-positive).
+	# SecRuleEngine: Off (inert) -> DetectionOnly (log) -> On (block); restart to apply.
 	handle /api/* {
 		coraza_waf {
 			load_owasp_crs

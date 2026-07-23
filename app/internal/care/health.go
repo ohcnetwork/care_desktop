@@ -18,7 +18,7 @@ type DockerStatus struct {
 
 // DockerCheck is the one prerequisite the app can't bundle. Any Docker-compatible
 // engine works (Docker Engine, Colima, Podman, Rancher Desktop, OrbStack, Docker
-// Desktop) — we just need `docker` + the `docker compose` v2 plugin reachable.
+// Desktop) - we just need `docker` + the `docker compose` v2 plugin reachable.
 func (e *Engine) DockerCheck() DockerStatus {
 	cmd := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
 	cmd.Env = e.baseEnv()
@@ -26,17 +26,17 @@ func (e *Engine) DockerCheck() DockerStatus {
 	switch {
 	case err == nil:
 		if !e.hasCompose() {
-			return DockerStatus{OK: false, Message: "Docker is running, but the Compose plugin is missing — install 'docker compose' (v2)."}
+			return DockerStatus{OK: false, Message: "Docker is running, but the Compose plugin is missing - install 'docker compose' (v2)."}
 		}
 		return DockerStatus{OK: true, Message: "Docker " + strings.TrimSpace(string(out))}
 	case isNotFound(err):
-		return DockerStatus{OK: false, Message: "Docker not found — install Docker (Docker Engine, Colima, or Docker Desktop) and start it."}
+		return DockerStatus{OK: false, Message: "Docker not found - install Docker (Docker Engine, Colima, or Docker Desktop) and start it."}
 	default:
-		return DockerStatus{OK: false, Message: "Docker is installed but not running — start it (Docker Desktop, Colima, …)."}
+		return DockerStatus{OK: false, Message: "Docker is installed but not running - start it (Docker Desktop, Colima, ...)."}
 	}
 }
 
-// hasCompose reports whether the `docker compose` v2 plugin is available — often
+// hasCompose reports whether the `docker compose` v2 plugin is available - often
 // missing on non-Desktop installs, and the stack can't come up without it.
 func (e *Engine) hasCompose() bool {
 	cmd := exec.Command("docker", "compose", "version")
@@ -49,7 +49,7 @@ func isNotFound(err error) bool {
 		strings.Contains(err.Error(), "cannot find the file")
 }
 
-// Health reports whether the app answers on :80 (through Caddy → backend /ping/).
+// Health reports whether the app answers on :80 (through Caddy -> backend /ping/).
 type Health struct {
 	Active bool   `json:"active"`
 	Code   int    `json:"code"`
@@ -70,9 +70,9 @@ func (e *Engine) Ping() Health {
 	return Health{Active: false, Code: resp.StatusCode, Detail: "HTTP " + strings.TrimSpace(resp.Status)}
 }
 
-// WaitHealthy blocks until the stack actually answers healthy on :80 (Caddy →
+// WaitHealthy blocks until the stack actually answers healthy on :80 (Caddy ->
 // backend /ping/), or the timeout elapses. `docker compose up -d` only means the
-// containers were *created* — the app server, Caddy, and its upstreams still need
+// containers were *created* - the app server, Caddy, and its upstreams still need
 // to come up before anything is really serving. Callers gate their success
 // message (and the installer's "complete") on this so it's only reported once
 // http://<name>.local is genuinely reachable.
@@ -86,7 +86,7 @@ func (e *Engine) WaitHealthy(timeout time.Duration) error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("CARE did not become healthy within %s (%s)", timeout, last.Detail)
 		}
-		e.logln(fmt.Sprintf("  waiting for CARE to answer... (%d) — %s", n, last.Detail))
+		e.logln(fmt.Sprintf("  waiting for CARE to answer... (%d) - %s", n, last.Detail))
 		time.Sleep(3 * time.Second)
 	}
 }
@@ -125,7 +125,7 @@ func (e *Engine) caddyRunning() bool {
 }
 
 // tcpBusy reports whether something is already listening at addr (a successful
-// connect means the port is taken). Unprivileged and cross-platform — unlike trying
+// connect means the port is taken). Unprivileged and cross-platform - unlike trying
 // to bind :80, which a non-root GUI app can't do even when the port is free.
 func tcpBusy(addr string) bool {
 	conn, err := net.DialTimeout("tcp", addr, 700*time.Millisecond)
@@ -137,7 +137,7 @@ func tcpBusy(addr string) bool {
 }
 
 // portOccupant returns " by '<name>'" naming the process holding the port, or "" if
-// it can't tell. Best-effort — the message reads fine without it.
+// it can't tell. Best-effort - the message reads fine without it.
 func portOccupant(port int) string {
 	var name string
 	switch runtime.GOOS {
@@ -152,7 +152,7 @@ func portOccupant(port int) string {
 			}
 		}
 	case "windows":
-		// netstat -ano yields only a PID; mapping it to a name is extra work — skip.
+		// netstat -ano yields only a PID; mapping it to a name is extra work - skip.
 	}
 	if name == "" {
 		return ""
@@ -168,7 +168,7 @@ func (e *Engine) GitCheck() DockerStatus {
 	if err == nil {
 		return DockerStatus{OK: true, Message: strings.TrimSpace(string(out))}
 	}
-	return DockerStatus{OK: false, Message: "Git not found — install Git (Git for Windows / Xcode CLT / apt-get git)."}
+	return DockerStatus{OK: false, Message: "Git not found - install Git (Git for Windows / Xcode CLT / apt-get git)."}
 }
 
 // NameStatus reports whether this machine is reachable as <name>.local, with a
@@ -179,7 +179,7 @@ type NameStatus struct {
 	How     string `json:"how"`
 }
 
-// MDNSCheck verifies that <name>.local actually resolves right now — a real
+// MDNSCheck verifies that <name>.local actually resolves right now - a real
 // functional test (does the LAN answer?), uniform across OSes. It's gated in the
 // installer because the frontend is baked to http://care.local. The "how" text when
 // it fails depends on the mDNS mode. Note: in "advertise" mode the app answers this
@@ -198,7 +198,7 @@ func (e *Engine) MDNSCheck() NameStatus {
 			Message: full + " not advertised (mDNS is off)",
 			How:     "You're on static-IP mode. Open http://<server-ip>/ instead of " + full + ", or set CARE_MDNS_MODE=advertise."}
 	default: // advertise
-		how := "Open (and keep open) the CARE Desktop app — it advertises " + full +
+		how := "Open (and keep open) the CARE Desktop app - it advertises " + full +
 			" on the LAN while running. Then re-check."
 		if runtime.GOOS == "windows" {
 			how += "\nOn Windows, also allow inbound UDP 5353 (PowerShell as Admin):\n" +
@@ -216,7 +216,7 @@ func renameHow(name, full string) NameStatus {
 	case "darwin":
 		return NameStatus{OK: false,
 			Message: full + " not set yet",
-			How:     "In Terminal: sudo scutil --set LocalHostName " + name + "  — or System Settings → General → Sharing → Local hostname → " + name + ". Then re-check."}
+			How:     "In Terminal: sudo scutil --set LocalHostName " + name + "  - or System Settings -> General -> Sharing -> Local hostname -> " + name + ". Then re-check."}
 	case "linux":
 		return NameStatus{OK: false,
 			Message: full + " not set yet",

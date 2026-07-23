@@ -9,8 +9,8 @@ import (
 )
 
 // Advertiser answers mDNS queries for "<name>.local" with this host's LAN IPv4
-// address(es). It runs as a HOST process — never inside a container, since Docker
-// Desktop's VM can't multicast onto the physical LAN — so the same pure-Go path
+// address(es). It runs as a HOST process - never inside a container, since Docker
+// Desktop's VM can't multicast onto the physical LAN - so the same pure-Go path
 // works identically on macOS, Linux, and Windows. Unlike renaming the machine's
 // hostname it needs no sudo and changes nothing on the box; it only resolves while
 // running (which is fine: the app serves nothing when it's down anyway).
@@ -52,7 +52,7 @@ func (a *Advertiser) Stop() {
 }
 
 // IPsChanged reports whether the host's current LAN IPv4s differ from what this
-// Advertiser is announcing — the app polls this to catch DHCP address changes and
+// Advertiser is announcing - the app polls this to catch DHCP address changes and
 // re-advertise, so "care.local" doesn't point at a stale IP.
 func (a *Advertiser) IPsChanged() bool {
 	cur, err := lanIPv4s()
@@ -69,7 +69,7 @@ func newMDNSServer(name string, ips []net.IP) (*mdns.Server, error) {
 		name,           // instance name
 		"_http._tcp",   // service type (also lists it for DNS-SD browsers)
 		"local.",       // domain
-		name+".local.", // hostName — answers A/AAAA for <name>.local
+		name+".local.", // hostName - answers A/AAAA for <name>.local
 		80,             // port
 		ips,
 		[]string{"CARE Desktop"},

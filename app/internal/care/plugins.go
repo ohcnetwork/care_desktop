@@ -9,12 +9,12 @@ import (
 
 // ADDITIONAL_PLUGS (in backend.env) is CARE's plugin list. It's read at build time
 // (pip-installs packages) AND runtime, so enabling a plugin needs a backend rebuild,
-// not a restart — buildBackend passes it as a --build-arg.
+// not a restart - buildBackend passes it as a --build-arg.
 const additionalPlugsKey = "ADDITIONAL_PLUGS"
 
 // Plugin mirrors CARE's Plug dataclass. Configs is map[string]any so values keep
 // their JSON type (a boolean false actually disables a plugin flag; a string "false"
-// would be truthy in Python). omitempty: blank version → CARE's default, empty configs dropped.
+// would be truthy in Python). omitempty: blank version -> CARE's default, empty configs dropped.
 type Plugin struct {
 	Name        string         `json:"name"`
 	PackageName string         `json:"package_name"`

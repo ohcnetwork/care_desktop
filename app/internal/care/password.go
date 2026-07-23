@@ -6,7 +6,7 @@ import (
 )
 
 // ValidatePassword enforces a simple strength policy for the admin password:
-// 8–20 characters, with at least one uppercase letter, one lowercase letter, and one
+// 8-20 characters, with at least one uppercase letter, one lowercase letter, and one
 // number. Returns nil when acceptable, otherwise a human-readable reason to show.
 func ValidatePassword(password string) error {
 	n := len([]rune(password))

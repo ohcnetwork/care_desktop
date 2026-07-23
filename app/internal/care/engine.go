@@ -85,7 +85,7 @@ func (e *Engine) backupImage() string { return e.get("BACKUP_IMAGE", "care-backu
 func (e *Engine) wafCaddyImage() string { return e.get("CADDY_WAF_IMAGE", "care-caddy:clinic") }
 
 // backupPassword is the passphrase that protects the backup keypair's private key.
-// Empty means backup encryption is disabled — dumps are written in plaintext, and
+// Empty means backup encryption is disabled - dumps are written in plaintext, and
 // setup skips keypair generation. Set via CARE_BACKUP_PASSWORD at setup time.
 func (e *Engine) backupPassword() string { return e.get("CARE_BACKUP_PASSWORD", "") }
 func (e *Engine) beRepo() string {
@@ -107,7 +107,7 @@ func (e *Engine) noMDNS() bool          { return e.get("CARE_NO_MDNS", "0") == "
 func (e *Engine) MDNSName() string { return e.mdnsName() }
 
 // MDNSMode selects how http://<name>.local is made resolvable:
-//   - "advertise" (default): a pure-Go mDNS responder in the app / `care mdns` —
+//   - "advertise" (default): a pure-Go mDNS responder in the app / `care mdns` -
 //     no rename, no sudo, works on all 3 OSes.
 //   - "rename": the old scutil/hostnamectl path (a permanent OS-level hostname).
 //   - "off": do nothing (static-IP users). CARE_NO_MDNS=1 forces this too.
@@ -148,7 +148,7 @@ func augmentedPath() string {
 			`C:\Program Files\Git\cmd`,
 		}
 	} else {
-		// include /usr/sbin + /sbin (scutil, hostname) and homebrew sbin — a
+		// include /usr/sbin + /sbin (scutil, hostname) and homebrew sbin - a
 		// Finder-launched .app gets a minimal PATH that often omits these.
 		parts = []string{
 			"/opt/homebrew/bin", "/opt/homebrew/sbin",
@@ -162,13 +162,13 @@ func augmentedPath() string {
 }
 
 // FixPath augments the *process* PATH so binary lookups succeed. exec.Command
-// resolves a program against the process PATH (os.Getenv), not a command's Env —
+// resolves a program against the process PATH (os.Getenv), not a command's Env -
 // so a GUI-launched macOS app (minimal launchd PATH: /usr/bin:/bin:/usr/sbin:/sbin)
 // can't find docker/git until we widen it. Call once at startup.
 //
 // Order of preference, most authoritative first:
-//  1. the user's login-shell PATH (unix) — reflects wherever docker was actually
-//     installed, since installers update the shell PATH (homebrew, colima, ~/.docker/bin…);
+//  1. the user's login-shell PATH (unix) - reflects wherever docker was actually
+//     installed, since installers update the shell PATH (homebrew, colima, ~/.docker/bin...);
 //  2. the current process PATH (on Windows this already has everything);
 //  3. a few common dirs as a last-resort fallback.
 func FixPath() {
@@ -184,7 +184,7 @@ func FixPath() {
 	_ = os.Setenv("PATH", strings.Join(parts, sep))
 }
 
-// loginShellPath asks the user's login shell for its PATH — the same PATH the
+// loginShellPath asks the user's login shell for its PATH - the same PATH the
 // terminal sees, where docker/git are known to work. Unix only; bounded by a
 // timeout so a slow/broken shell profile can't hang startup.
 func loginShellPath() string {
@@ -227,7 +227,7 @@ func (e *Engine) baseEnv() []string {
 	return env
 }
 
-// workdir returns the kit dir only if it exists — before setup it doesn't, and a
+// workdir returns the kit dir only if it exists - before setup it doesn't, and a
 // command with a missing Dir fails to start (which silently broke the pre-setup
 // scutil/hostname checks). Empty means "inherit the current dir".
 func (e *Engine) workdir() string {
@@ -280,7 +280,7 @@ func (e *Engine) capture(name string, args ...string) (string, error) {
 }
 
 // dc runs `docker compose <args>` (streamed). Project name comes from the
-// compose `name:` key — we never pass -v, so volumes/data always survive.
+// compose `name:` key - we never pass -v, so volumes/data always survive.
 func (e *Engine) dc(args ...string) error {
 	return e.run(nil, "docker", append([]string{"compose"}, args...)...)
 }

@@ -62,10 +62,10 @@ func (e *Engine) GenBackupKeypair(passphrase string) error {
 	}
 	if e.backupEncryptionOn() {
 		if e.keyUnlocks(passphrase) {
-			return nil // same password — keep the existing keypair
+			return nil // same password - keep the existing keypair
 		}
 		if e.hasEncryptedBackups() {
-			return fmt.Errorf("this backup password doesn't match the one your existing encrypted backups were made with — enter the original password (a new key would leave those backups unrecoverable)")
+			return fmt.Errorf("this backup password doesn't match the one your existing encrypted backups were made with - enter the original password (a new key would leave those backups unrecoverable)")
 		}
 		// No encrypted backups depend on the old key: replace it to match the new password.
 		e.logln("Updating the backup encryption key for the new backup password...")
@@ -73,7 +73,7 @@ func (e *Engine) GenBackupKeypair(passphrase string) error {
 		_ = os.Remove(e.encKeyPath())
 	}
 	e.logln("Generating the backup encryption key...")
-	// passphrase via `-e PASS` (no value) → forwarded from our env, never in argv.
+	// passphrase via `-e PASS` (no value) -> forwarded from our env, never in argv.
 	script := `set -e
 openssl req -x509 -newkey rsa:4096 -sha256 -days 36500 \
   -keyout /keys/` + e.encKeyName() + ` -out /keys/backup-cert.pem \
@@ -85,7 +85,7 @@ chmod 600 /keys/` + e.encKeyName() + ``
 		e.backupImage(), "sh", "-c", script); err != nil {
 		return err
 	}
-	// Copy the (password-protected) key beside the backups → self-contained folder.
+	// Copy the (password-protected) key beside the backups -> self-contained folder.
 	if err := copyFile(e.encKeyPath(), filepath.Join(e.backupDir(), e.encKeyName())); err != nil {
 		e.logln("warning: couldn't copy the recovery key into the backup folder: " + err.Error())
 	}

@@ -47,7 +47,7 @@ func (e *Engine) Start() error {
 		return err
 	}
 	e.createAdmin()
-	// Don't report success until the app actually answers on :80 — "up -d" only
+	// Don't report success until the app actually answers on :80 - "up -d" only
 	// means the containers were created. This is the gate the installer relies on
 	// to mark the install complete.
 	e.logln("Waiting for CARE to become healthy...")
@@ -55,7 +55,7 @@ func (e *Engine) Start() error {
 		return err
 	}
 	e.logln("")
-	e.logln("CARE is up → http://" + e.mdnsName() + ".local/   (login: admin / admin)")
+	e.logln("CARE is up -> http://" + e.mdnsName() + ".local/   (login: admin / admin)")
 	return nil
 }
 
@@ -101,7 +101,7 @@ func (e *Engine) Status() (string, error) {
 	return e.capture("docker", "compose", "ps", "--format", "{{.Service}} {{.State}}")
 }
 
-// BackupNow writes an immediate DB dump (encrypted → .enc when encryption is on).
+// BackupNow writes an immediate DB dump (encrypted -> .enc when encryption is on).
 func (e *Engine) BackupNow() error {
 	ts := time.Now().Format("20060102-150405")
 	name := "care-manual-" + ts + ".dump"
@@ -126,7 +126,7 @@ func (e *Engine) BackupNow() error {
 // half-migrated stack.
 //
 // The api container's start.sh does NOT migrate, so we do (idempotent). But
-// celery-beat's entrypoint DOES run `migrate` on boot — so callers must run this
+// celery-beat's entrypoint DOES run `migrate` on boot - so callers must run this
 // while celery-beat is stopped (bring up only db+redis+backend first), or the two
 // migrate processes race and fail with "column ... already exists" on any pending
 // migration. Start/RebuildBackend/Restore all order things that way.
@@ -138,12 +138,12 @@ func (e *Engine) migrate() error {
 		e.logln(fmt.Sprintf("  waiting for backend/db... (%d)", n))
 		time.Sleep(5 * time.Second)
 	}
-	return fmt.Errorf("database migrations did not complete — backend/db not ready")
+	return fmt.Errorf("database migrations did not complete - backend/db not ready")
 }
 
 // createAdmin makes a default admin/admin superuser. Idempotent: on an existing
 // install createsuperuser exits 1 with "username already taken", which is the
-// normal case — we report it plainly. Output is captured (not streamed) so the
+// normal case - we report it plainly. Output is captured (not streamed) so the
 // raw "CommandError ... exit status 1" never leaks into the log.
 func (e *Engine) createAdmin() {
 	cmd := exec.Command("docker", "compose", "exec", "-T",
@@ -155,7 +155,7 @@ func (e *Engine) createAdmin() {
 	out, err := cmd.CombinedOutput()
 	switch {
 	case err == nil:
-		e.logln("Created admin login (username: admin) — change the password in the app.")
+		e.logln("Created admin login (username: admin) - change the password in the app.")
 	case strings.Contains(string(out), "already taken"):
 		e.logln("Admin login already exists (left unchanged).")
 	default:

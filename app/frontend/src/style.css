@@ -74,6 +74,7 @@ a { color: var(--green3); }
   border: 1px solid var(--border); border-radius: 8px; font-family: var(--mono); font-size: 13px; color: var(--ink);
 }
 .input-wrap input:focus { outline: none; border-color: var(--green); }
+.input-wrap input::placeholder { font-family: "IBM Plex Sans", sans-serif; color: var(--faint); }
 .eye { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--faint); padding: 6px; }
 .eye i { font-size: 16px; }
 label { font-size: 11.5px; color: var(--ink2); margin-bottom: 6px; display: block; }
@@ -98,9 +99,9 @@ label { font-size: 11.5px; color: var(--ink2); margin-bottom: 6px; display: bloc
 .wiz-rail p { font-size: 13.5px; color: var(--ink2); line-height: 1.65; margin: 0 0 28px; }
 .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
 .steps li { display: flex; gap: 13px; align-items: flex-start; }
-.step-n { width: 26px; height: 26px; border-radius: 8px; background: #fff; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--green2); flex: 0 0 auto; }
+.step-n { width: 26px; height: 26px; border-radius: 8px; background: #fff; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--green2); flex: 0 0 auto; line-height: 1; }
 .steps b { font-size: 13.5px; }
-.steps span { display: block; font-size: 12.5px; color: var(--ink2); line-height: 1.5; margin-top: 1px; }
+.steps li > div span { display: block; font-size: 12.5px; color: var(--ink2); line-height: 1.5; margin-top: 1px; }
 .rail-note { display: flex; gap: 10px; align-items: flex-start; background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 13px 14px; font-size: 12px; color: var(--ink2); line-height: 1.5; }
 .rail-note i { font-size: 18px; color: var(--green2); margin-top: 1px; }
 

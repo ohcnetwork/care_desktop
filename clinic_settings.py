@@ -1,4 +1,4 @@
-"""Plain-HTTP clinic settings — production settings reachable over http:// on a
+"""Plain-HTTP clinic settings - production settings reachable over http:// on a
 trusted offline LAN. Mounted into the backend image at /settings/ and selected via
 DJANGO_SETTINGS_MODULE=clinic_settings (see backend.env). It imports the image's own
 production settings and relaxes only the HTTPS-only guards, so /admin and the API

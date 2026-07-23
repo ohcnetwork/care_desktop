@@ -1,4 +1,4 @@
-// Command care is the terminal entrypoint to the CARE clinic engine — the Go
+// Command care is the terminal entrypoint to the CARE clinic engine - the Go
 // replacement for care.sh. It runs the same engine the desktop app uses.
 //
 //	care setup | start | stop | restart | rebuild-backend | rebuild-frontend |
@@ -123,7 +123,7 @@ func uninstall(e *care.Engine, args []string) error {
 		case "--yes", "-y":
 			yes = true
 		default:
-			return fmt.Errorf("unknown flag %q — usage: care uninstall [--images] [--backups] --yes", a)
+			return fmt.Errorf("unknown flag %q - usage: care uninstall [--images] [--backups] --yes", a)
 		}
 	}
 	if !yes {
@@ -133,9 +133,9 @@ func uninstall(e *care.Engine, args []string) error {
 			fmt.Println("  + Docker images")
 		}
 		if opts.RemoveBackups {
-			fmt.Println("  + the backup folder (recovery data — no way back after this)")
+			fmt.Println("  + the backup folder (recovery data - no way back after this)")
 		} else {
-			fmt.Println("  (backups are kept — pass --backups to remove them too)")
+			fmt.Println("  (backups are kept - pass --backups to remove them too)")
 		}
 		fmt.Println("\nRe-run with --yes to proceed.")
 		return nil
@@ -156,7 +156,7 @@ func mdnsServe(e *care.Engine, args []string) error {
 		return err
 	}
 	defer adv.Stop()
-	fmt.Printf("Advertising %s.local on the LAN — press Ctrl-C to stop.\n", adv.Name())
+	fmt.Printf("Advertising %s.local on the LAN - press Ctrl-C to stop.\n", adv.Name())
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	<-sig

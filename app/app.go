@@ -255,7 +255,7 @@ func (a *App) ValidatePassword(pw string) string {
 
 // VerifyAdminPassword gates the Advanced screen. It checks against the bcrypt hash
 // stored at setup. Legacy installs (set up before the hash existed) have none, so
-// any non-empty entry passes — a speed bump, not verification.
+// any non-empty entry passes - a speed bump, not verification.
 func (a *App) VerifyAdminPassword(pw string) bool {
 	h := a.loadConfig().AdminPwHash
 	if h == "" {
@@ -360,7 +360,7 @@ func (a *App) CareAction(action string) error {
 		return errString("action not allowed: " + action)
 	}
 	if _, err := os.Stat(filepath.Join(a.kitDir(), "docker-compose.yml")); err != nil {
-		return errString("not set up yet — run the first-time setup")
+		return errString("not set up yet - run the first-time setup")
 	}
 	e := a.engine(nil)
 	a.run(e, actionFunc(e, action), false, action)
@@ -460,7 +460,7 @@ func (a *App) CareStatus() (string, error) { return a.engine(nil).Status() }
 // for the panel's restore dropdown.
 func (a *App) ListBackups() ([]care.Backup, error) {
 	if _, err := os.Stat(filepath.Join(a.kitDir(), "docker-compose.yml")); err != nil {
-		return nil, nil // not set up yet — no backups to offer
+		return nil, nil // not set up yet - no backups to offer
 	}
 	return a.engine(nil).ListBackups()
 }
@@ -486,7 +486,7 @@ func (a *App) ConfirmRestore(filesIncluded bool) bool {
 // the keychain; remember saves the one that worked.
 func (a *App) RestoreBackup(dbDump, filesArchive, passphrase string, remember bool) error {
 	if _, err := os.Stat(filepath.Join(a.kitDir(), "docker-compose.yml")); err != nil {
-		return errString("not set up yet — run the first-time setup")
+		return errString("not set up yet - run the first-time setup")
 	}
 	if passphrase == "" {
 		passphrase = care.LoadBackupPassword()
@@ -509,7 +509,7 @@ func (a *App) BackupEncryptionEnabled() bool {
 }
 
 // HasStoredBackupPassword reports whether the backup password is remembered on this
-// machine — if so, the restore UI can skip the password prompt.
+// machine - if so, the restore UI can skip the password prompt.
 func (a *App) HasStoredBackupPassword() bool { return care.HasBackupPassword() }
 
 // --- uninstall --------------------------------------------------------------
@@ -517,10 +517,10 @@ func (a *App) HasStoredBackupPassword() bool { return care.HasBackupPassword() }
 // ConfirmUninstall shows a stern native warning before the (irreversible) teardown.
 func (a *App) ConfirmUninstall(removeBackups bool) bool {
 	msg := "This permanently deletes CARE and all of its data:\n" +
-		"• every container and data volume (patient records + uploaded files)\n" +
-		"• the installed files and downloaded source\n"
+		"- every container and data volume (patient records + uploaded files)\n" +
+		"- the installed files and downloaded source\n"
 	if removeBackups {
-		msg += "• your backups — there will be NO way to recover the data\n"
+		msg += "- your backups - there will be NO way to recover the data\n"
 	} else {
 		msg += "\nYour backups are kept.\n"
 	}
@@ -536,7 +536,7 @@ func (a *App) ConfirmUninstall(removeBackups bool) bool {
 }
 
 // RunUninstall tears the install down (async, streaming logs), then clears the
-// app's own state — autostart entry and saved config — and signals the UI to
+// app's own state - autostart entry and saved config - and signals the UI to
 // reset to first-run via an "uninstalled" event.
 func (a *App) RunUninstall(removeImages, removeBackups bool) error {
 	e := a.engine(nil)
@@ -548,9 +548,9 @@ func (a *App) RunUninstall(removeImages, removeBackups bool) error {
 		})
 		_ = a.SetAutostart(false)     // remove the login-item, if any
 		care.ForgetBackupPassword()   // drop the remembered backup password, if any
-		_ = os.Remove(a.configPath()) // forget setup — next launch shows the wizard
+		_ = os.Remove(a.configPath()) // forget setup - next launch shows the wizard
 		wruntime.EventsEmit(a.ctx, "care-log", "")
-		wruntime.EventsEmit(a.ctx, "care-log", "✔ Uninstalled. This computer's name was not changed back.")
+		wruntime.EventsEmit(a.ctx, "care-log", "Uninstalled. This computer's name was not changed back.")
 		wruntime.EventsEmit(a.ctx, "uninstalled", true)
 	}()
 	return nil
@@ -598,7 +598,7 @@ func (a *App) ReadPlugins() ([]care.Plugin, error) {
 // SavePlugins writes the plugin list; the UI follows with a rebuild-backend.
 func (a *App) SavePlugins(plugins []care.Plugin) error {
 	if _, err := os.Stat(filepath.Join(a.kitDir(), "backend.env")); err != nil {
-		return errString("not set up yet — run the first-time setup")
+		return errString("not set up yet - run the first-time setup")
 	}
 	return a.engine(nil).WritePlugins(plugins)
 }

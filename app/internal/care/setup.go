@@ -45,7 +45,7 @@ func (e *Engine) Setup() error {
 }
 
 // genSecret replaces DJANGO_SECRET_KEY=CHANGE_ME in backend.env with a random
-// key. crypto/rand — strong, and no python/shell needed.
+// key. crypto/rand - strong, and no python/shell needed.
 func (e *Engine) genSecret() error {
 	path := filepath.Join(e.Kit, "backend.env")
 	b, err := os.ReadFile(path)
@@ -73,7 +73,7 @@ func (e *Engine) clone(repo, ref, dir, label string) error {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		return nil // already cloned
 	}
-	e.logln("Cloning care " + label + " (" + ref + ") → " + dir)
+	e.logln("Cloning care " + label + " (" + ref + ") -> " + dir)
 	return e.run(nil, "git", "clone", "--depth", "1", "--branch", ref, repo, dir)
 }
 
@@ -163,7 +163,7 @@ func (e *Engine) imageExists(tag string) bool {
 }
 
 // ensureMDNS makes http://<name>.local resolve on the LAN by renaming the machine.
-// Only runs in "rename" mode now — the default "advertise" mode uses the in-app
+// Only runs in "rename" mode now - the default "advertise" mode uses the in-app
 // pure-Go responder (Advertise) instead, which needs no rename. Per-OS, best-effort:
 // failures never abort setup (naming can be fixed by hand / static IP).
 func (e *Engine) ensureMDNS() {
@@ -178,7 +178,7 @@ func (e *Engine) ensureMDNS() {
 		}
 		e.logln("Naming this Mac '" + name + "' so devices can use http://" + name + ".local ...")
 		if err := e.run(nil, "sudo", "scutil", "--set", "LocalHostName", name); err != nil {
-			e.logln("(skipped renaming — use the server IP)")
+			e.logln("(skipped renaming - use the server IP)")
 		}
 	case "linux":
 		if _, err := exec.LookPath("avahi-daemon"); err != nil {
@@ -189,6 +189,6 @@ func (e *Engine) ensureMDNS() {
 	case "windows":
 		// Windows can't advertise <name>.local itself. One-time at setup: install
 		// Apple Bonjour for a real care.local, or give the box a static IP.
-		e.logln("Windows: set naming once — install Bonjour (for http://" + name + ".local) or use a static IP.")
+		e.logln("Windows: set naming once - install Bonjour (for http://" + name + ".local) or use a static IP.")
 	}
 }

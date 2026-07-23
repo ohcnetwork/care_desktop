@@ -1,6 +1,6 @@
 #!/bin/sh
 # Daily backup sidecar: dump the DB + tar uploaded files into /backups, prune old.
-# If /keys/backup-cert.pem exists, dumps are streamed through `openssl cms` → .enc
+# If /keys/backup-cert.pem exists, dumps are streamed through `openssl cms` -> .enc
 # (sidecar holds only the public cert). No cert = plaintext.
 set -eu
 
@@ -14,7 +14,7 @@ DB_USER="${POSTGRES_USER:-postgres}"
 DB_NAME="${POSTGRES_DB:-care}"
 export PGPASSWORD="${POSTGRES_PASSWORD:-postgres}"
 
-# seal: stdin → encrypted CMS blob at $1 (streamed, no full-file buffering).
+# seal: stdin -> encrypted CMS blob at $1 (streamed, no full-file buffering).
 seal() {
 	openssl cms -encrypt -binary -aes-256-cbc -stream -outform DER -out "$1" "$CERT"
 }
@@ -52,11 +52,11 @@ run_backup() {
 }
 
 if [ -f "$CERT" ]; then
-	echo "[backup] sidecar started; ENCRYPTED backups → Desktop (retention ${RET}d)"
+	echo "[backup] sidecar started; ENCRYPTED backups -> Desktop (retention ${RET}d)"
 else
-	echo "[backup] sidecar started; backups → Desktop (retention ${RET}d)"
+	echo "[backup] sidecar started; backups -> Desktop (retention ${RET}d)"
 fi
 while true; do
-	run_backup || echo "[backup] FAILED — will retry next cycle"
+	run_backup || echo "[backup] FAILED - will retry next cycle"
 	sleep 86400
 done

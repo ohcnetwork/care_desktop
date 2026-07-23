@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// genSecret must replace the placeholder with a real, long key — exactly once.
+// genSecret must replace the placeholder with a real, long key - exactly once.
 func TestGenSecret(t *testing.T) {
 	dir := t.TempDir()
 	be := filepath.Join(dir, "backend.env")
@@ -69,9 +69,9 @@ func TestListBackups(t *testing.T) {
 		"care-20260101-010000.dump",        // daily, has files
 		"files-20260101-010000.tar.gz",     // its pair
 		"care-manual-20260215-120000.dump", // manual, DB only
-		"files-20260630-030000.tar.gz",     // orphan archive (no dump) — ignored
+		"files-20260630-030000.tar.gz",     // orphan archive (no dump) - ignored
 		"care-20260630-030000.dump",        // daily, has files (newest)
-		"notes.txt",                        // junk — ignored
+		"notes.txt",                        // junk - ignored
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
@@ -104,7 +104,7 @@ func TestListBackups(t *testing.T) {
 	}
 }
 
-// ListBackups must handle encrypted (.enc) and plaintext backups side by side —
+// ListBackups must handle encrypted (.enc) and plaintext backups side by side -
 // pairing each dump to its same-timestamp files archive regardless of suffix, and
 // flagging the encrypted ones. This is the back-compat guarantee: a folder that
 // mixes old plaintext dumps with new encrypted ones still lists cleanly.
@@ -116,7 +116,7 @@ func TestListBackupsEncrypted(t *testing.T) {
 		"care-20260701-020000.dump.enc",        // encrypted, has files (newest)
 		"files-20260701-020000.tar.gz.enc",     // its encrypted pair
 		"care-manual-20260215-120000.dump.enc", // encrypted manual, DB only
-		"backup-key.pem.enc",                   // the recovery key copy — must be ignored
+		"backup-key.pem.enc",                   // the recovery key copy - must be ignored
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
@@ -176,10 +176,10 @@ func TestLooksLikeSourceRepo(t *testing.T) {
 }
 
 // Uninstall with RemoveKit must delete a managed kit but refuse to delete a dir
-// that looks like a source checkout — even when asked to. No compose file present,
+// that looks like a source checkout - even when asked to. No compose file present,
 // so this never touches Docker.
 func TestUninstallKitRemovalGuard(t *testing.T) {
-	// managed kit → removed.
+	// managed kit -> removed.
 	kit := filepath.Join(t.TempDir(), "kit")
 	if err := os.MkdirAll(filepath.Join(kit, "care"), 0o755); err != nil {
 		t.Fatal(err)
@@ -193,7 +193,7 @@ func TestUninstallKitRemovalGuard(t *testing.T) {
 		t.Fatalf("managed kit not removed: %v", err)
 	}
 
-	// source checkout → left in place.
+	// source checkout -> left in place.
 	repo := t.TempDir()
 	os.Mkdir(filepath.Join(repo, ".git"), 0o755)
 	e2 := &Engine{Kit: repo, Env: map[string]string{"BACKUP_DIR": t.TempDir()}}

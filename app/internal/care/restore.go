@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// composeProject is the compose `name:` — volumes are named "<project>_<volume>".
+// composeProject is the compose `name:` - volumes are named "<project>_<volume>".
 const composeProject = "care-desktop"
 
 // Backup is one restorable point in the backup folder: a database dump and, for
@@ -30,11 +30,11 @@ type Backup struct {
 var dumpRe = regexp.MustCompile(`^care-(?:manual-)?(\d{8}-\d{6})\.dump(?:\.enc)?$`)
 
 // safeName gates filenames coming from the UI/CLI before they reach a shell:
-// only our own backup files (optionally .enc) — no path separators, no metacharacters.
+// only our own backup files (optionally .enc) - no path separators, no metacharacters.
 var safeName = regexp.MustCompile(`^(?:care-(?:manual-)?\d{8}-\d{6}\.dump(?:\.enc)?|files-\d{8}-\d{6}\.tar\.gz(?:\.enc)?)$`)
 
 // ListBackups returns the restorable points in the backup folder, newest first.
-// Missing folder (nothing backed up yet) is not an error — it returns nil.
+// Missing folder (nothing backed up yet) is not an error - it returns nil.
 func (e *Engine) ListBackups() ([]Backup, error) {
 	dir := e.backupDir()
 	entries, err := os.ReadDir(dir)
@@ -74,7 +74,7 @@ func (e *Engine) ListBackups() ([]Backup, error) {
 		b.Label = backupLabel(ts, b.Manual, b.FilesArchive != "", b.Encrypted)
 		out = append(out, b)
 	}
-	// sort by the embedded timestamp (newest first) — the "manual-" infix means
+	// sort by the embedded timestamp (newest first) - the "manual-" infix means
 	// the raw filename doesn't sort chronologically.
 	tsOf := func(name string) string {
 		if m := dumpRe.FindStringSubmatch(name); m != nil {
@@ -99,9 +99,9 @@ func backupLabel(ts string, manual, withFiles, encrypted bool) string {
 	if withFiles {
 		scope = "DB + files"
 	}
-	label := fmt.Sprintf("%s · %s · %s", when, kind, scope)
+	label := fmt.Sprintf("%s - %s - %s", when, kind, scope)
 	if encrypted {
-		label += " · encrypted"
+		label += " - encrypted"
 	}
 	return label
 }
@@ -132,14 +132,14 @@ func (e *Engine) Restore(dbDump, filesArchive, passphrase string) error {
 	encrypted := strings.HasSuffix(dbDump, ".enc") || strings.HasSuffix(filesArchive, ".enc")
 	if encrypted {
 		if passphrase == "" {
-			return fmt.Errorf("this backup is encrypted — the backup password is required to restore it")
+			return fmt.Errorf("this backup is encrypted - the backup password is required to restore it")
 		}
 		if e.privateKeyLocation() == "" {
-			return fmt.Errorf("backup encryption key not found — restore on the original computer, or copy %s into the backup folder next to the dumps", e.encKeyName())
+			return fmt.Errorf("backup encryption key not found - restore on the original computer, or copy %s into the backup folder next to the dumps", e.encKeyName())
 		}
 	}
 
-	e.logln("Restoring from backup — this replaces the current data.")
+	e.logln("Restoring from backup - this replaces the current data.")
 	// Release DB connections + halt writes so the swap is clean.
 	e.logln("Stopping app services...")
 	_ = e.dc("stop", "backend", "celery-worker", "celery-beat")
@@ -176,7 +176,7 @@ func (e *Engine) Restore(dbDump, filesArchive, passphrase string) error {
 		return err
 	}
 	e.logln("")
-	e.logln("Restore complete → http://" + e.mdnsName() + ".local/")
+	e.logln("Restore complete -> http://" + e.mdnsName() + ".local/")
 	return nil
 }
 
@@ -189,7 +189,7 @@ func (e *Engine) mustExist(name string) error {
 
 // restoreDB drops + re-creates the DB and pg_restores, inside the backup container.
 // dump is validated by safeName, so embedding it is safe. A .enc dump is decrypted
-// to a tmpfile first — before the drop, so a wrong password fails harmlessly.
+// to a tmpfile first - before the drop, so a wrong password fails harmlessly.
 func (e *Engine) restoreDB(dump, passphrase string) error {
 	e.waitForDB()
 	e.logln("Restoring database from " + dump + " ...")
@@ -215,7 +215,7 @@ createdb -h "$H" -U "$U" "$DB"
 pg_restore -h "$H" -U "$U" -d "$DB" --no-owner --no-privileges "$RESTORE_FILE"`
 	args := []string{"exec", "-T"}
 	if encrypted {
-		// passphrase briefly visible in host argv — acceptable on a single-op box.
+		// passphrase briefly visible in host argv - acceptable on a single-op box.
 		args = append(args, "-e", "BACKUP_PASS="+passphrase)
 	}
 	args = append(args, "backup", "sh", "-c", script)

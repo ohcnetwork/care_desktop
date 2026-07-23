@@ -3,7 +3,7 @@ package care
 import "github.com/zalando/go-keyring"
 
 // Backup password in the OS secret store (Keychain / Credential Manager / Secret
-// Service) so restores don't re-prompt — at the cost of putting it back on disk.
+// Service) so restores don't re-prompt - at the cost of putting it back on disk.
 
 const (
 	keychainService = "care-desktop"

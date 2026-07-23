@@ -1,3 +1,11 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CARE Desktop</title>
+</head>
+<body>
 <div id="app">
 
   <!-- ===================== WIZARD ===================== -->
@@ -34,14 +42,14 @@
             <div class="req-row">
               <div class="req-ico wait" id="runtime-ico"><i class="ph ph-circle-notch spin"></i></div>
               <div class="req-txt"><div class="t">Runtime engine</div><div class="s">Everything CARE needs to run (Docker + Compose + Git).</div></div>
-              <span class="req-badge wait" id="runtime-badge">Checking…</span>
+              <span class="req-badge wait" id="runtime-badge">Checking...</span>
             </div>
             <div class="req-how" id="runtime-how" hidden></div>
             <div class="req-div"></div>
             <div class="req-row">
               <div class="req-ico wait" id="mdns-ico"><i class="ph ph-circle-notch spin"></i></div>
-              <div class="req-txt"><div class="t">Network name · <code>care.local</code></div><div class="s">The address every device uses to reach the clinic.</div></div>
-              <span class="req-badge wait" id="mdns-badge">Checking…</span>
+              <div class="req-txt"><div class="t">Network name  <code>care.local</code></div><div class="s">The address every device uses to reach the clinic.</div></div>
+              <span class="req-badge wait" id="mdns-badge">Checking...</span>
             </div>
             <div class="req-how" id="mdns-how" hidden></div>
           </div>
@@ -55,17 +63,17 @@
                 <div class="path" id="backup-path">Desktop (default)</div>
                 <div class="tip">Tip: a USB or external drive means a dead computer can't take the backups with it.</div>
               </div>
-              <button class="btn" id="choose-backup">Choose…</button>
+              <button class="btn" id="choose-backup">Choose...</button>
             </div>
             <div class="card-div"></div>
             <div class="card-sub-h" style="margin-bottom:4px;">Backup password</div>
             <div class="card-hint" style="margin-bottom:10px;">Locks the daily backups so only your clinic can open them.</div>
             <div class="input-wrap">
               <i class="ph ph-shield-check lead"></i>
-              <input type="password" id="backuppw" placeholder="8–20 characters" autocomplete="new-password" />
+              <input type="password" id="backuppw" placeholder="8-20 characters" autocomplete="new-password" />
               <button class="eye" id="bpw-toggle"><i class="ph ph-eye" id="bpw-eye"></i></button>
             </div>
-            <div class="hint" id="bpw-hint">Keep this safe. Without it, encrypted backups can never be recovered — not by anyone.</div>
+            <div class="hint" id="bpw-hint">Keep this safe. Without it, encrypted backups can never be recovered - not by anyone.</div>
           </div>
 
           <div class="section-label">Admin login</div>
@@ -78,7 +86,7 @@
               <label>Password for the first admin login</label>
               <div class="input-wrap">
                 <i class="ph ph-lock-key lead"></i>
-                <input type="password" id="adminpw" placeholder="8–20 characters" autocomplete="new-password" />
+                <input type="password" id="adminpw" placeholder="8-20 characters" autocomplete="new-password" />
                 <button class="eye" id="pw-toggle"><i class="ph ph-eye" id="pw-eye"></i></button>
               </div>
               <div class="hint" id="pw-hint">8 to 20 characters, with an uppercase letter, a lowercase letter, and a number.</div>
@@ -97,11 +105,11 @@
     <div class="center-screen" id="wiz-installing" hidden>
       <div class="center-inner">
         <img src="/care_logo_mark.svg" alt="CARE" />
-        <h2>Setting up your clinic…</h2>
+        <h2>Setting up your clinic...</h2>
         <p>This needs the internet once and takes about 10 to 20 minutes, then it runs offline forever. You can leave this window open.</p>
         <div class="progress" id="install-progress"><div class="bar" id="install-bar"></div></div>
-        <div class="pct" id="install-pct">Working…</div>
-        <div class="step-chip"><i class="ph ph-circle-notch spin"></i><span id="install-step-text">Getting started…</span></div>
+        <div class="pct" id="install-pct">Working...</div>
+        <div class="step-chip"><i class="ph ph-circle-notch spin"></i><span id="install-step-text">Getting started...</span></div>
       </div>
     </div>
 
@@ -110,7 +118,7 @@
       <div class="center-inner">
         <div class="fail-ico"><i class="ph-fill ph-warning-circle"></i></div>
         <h2>Setup didn't finish</h2>
-        <p style="max-width:400px; margin-left:auto; margin-right:auto;">Something went wrong while setting up your clinic. Nothing was saved. The details are below — fix the issue and try again.</p>
+        <p style="max-width:400px; margin-left:auto; margin-right:auto;">Something went wrong while setting up your clinic. Nothing was saved. The details are below - fix the issue and try again.</p>
         <div class="fail-box"><pre id="fail-msg"></pre></div>
         <button class="btn primary lg" id="fail-retry"><i class="ph-bold ph-arrow-counter-clockwise"></i>Try again</button>
       </div>
@@ -130,7 +138,7 @@
       <button class="nav-item nav-adv" data-tab="advanced"><i class="ph ph-wrench"></i>Advanced<span class="grow"></span><i class="ph ph-lock-simple lock" id="adv-lock-icon"></i></button>
       <div class="mini-status">
         <span class="mini-dot" id="mini-dot"></span>
-        <div class="mini-label" id="mini-label">checking…</div>
+        <div class="mini-label" id="mini-label">checking...</div>
       </div>
     </nav>
 
@@ -148,7 +156,7 @@
             <div class="status-hero">
               <div class="status-line">
                 <div class="status-ico" id="sys-tint"><i class="ph-fill ph-pulse" id="sys-icon"></i></div>
-                <div><div class="status-label" id="sys-label">checking…</div><div class="status-sub" id="sys-sub"></div></div>
+                <div><div class="status-label" id="sys-label">checking...</div><div class="status-sub" id="sys-sub"></div></div>
               </div>
               <div class="hero-actions" id="hero-actions">
                 <button class="btn" id="btn-start"><i class="ph-fill ph-play"></i>Start</button>
@@ -176,7 +184,7 @@
           </div>
           <div class="strip">
             <div class="strip-ico"><i class="ph ph-shield-check"></i></div>
-            <div style="flex:1;"><div class="t" id="backup-strip-title">Backups</div><div class="s" id="backup-strip-sub">—</div></div>
+            <div style="flex:1;"><div class="t" id="backup-strip-title">Backups</div><div class="s" id="backup-strip-sub">-</div></div>
             <button class="btn" id="view-backups">View backups</button>
           </div>
         </div>
@@ -192,7 +200,7 @@
           </div>
           <div class="warn-banner">
             <i class="ph-fill ph-info"></i>
-            <div>Restoring replaces today's data with an older copy. CARE pauses for a moment while it restores. We'll ask you to confirm right here first — no surprises.</div>
+            <div>Restoring replaces today's data with an older copy. CARE pauses for a moment while it restores. We'll ask you to confirm right here first - no surprises.</div>
           </div>
           <div class="backups-list" id="backups-list"></div>
         </div>
@@ -301,3 +309,5 @@
 </div>
 
 <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

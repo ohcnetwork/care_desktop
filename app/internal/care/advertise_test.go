@@ -20,7 +20,7 @@ func TestMDNSLabel(t *testing.T) {
 }
 
 // lanIPv4s must only ever return non-loopback IPv4s. On a box with just loopback it
-// may legitimately return an error — that's not a test failure.
+// may legitimately return an error - that's not a test failure.
 func TestLANIPv4s(t *testing.T) {
 	ips, err := lanIPv4s()
 	if err != nil {

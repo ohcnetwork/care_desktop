@@ -1,4 +1,4 @@
-// CARE Desktop control app — installer + control panel, driven by the Go bridge
+// CARE Desktop control app - installer + control panel, driven by the Go bridge
 // (window.go.main.App) and Wails events. Fonts + icons are bundled locally (offline).
 import "@fontsource/ibm-plex-sans/400.css";
 import "@fontsource/ibm-plex-sans/500.css";
@@ -52,7 +52,7 @@ function showToast(msg: string): void {
   toastTimer = window.setTimeout(() => (toast.hidden = true), 2600);
 }
 
-// Setup lines drive the progress bar (panel lines → devtools console). Buffered so
+// Setup lines drive the progress bar (panel lines -> devtools console). Buffered so
 // the fail screen can show the real build error, not just "exit status 1".
 const setupLog: string[] = [];
 function append(line: string): void {
@@ -66,7 +66,7 @@ function append(line: string): void {
 }
 
 // ===========================================================================
-// Wizard — requirement checks
+// Wizard - requirement checks
 // ===========================================================================
 let runtimeOk = false, mdnsOk = false, pwOk = false, bpwOk = false;
 let backupDir = "";
@@ -88,14 +88,14 @@ function gate(): void {
   const checks = runtimeOk && mdnsOk;
   install.disabled = !(checks && pwOk && bpwOk);
   $("#install-note").textContent = !checks
-    ? "Waiting for your computer to be ready…"
+    ? "Waiting for your computer to be ready..."
     : !pwOk ? "Set a strong admin password to continue."
       : !bpwOk ? "Set a backup password to continue."
         : "Ready. This takes about 10 to 20 minutes.";
 }
 
 async function checkRuntime(): Promise<void> {
-  setReq("runtime", "wait", "Checking…");
+  setReq("runtime", "wait", "Checking...");
   const d: DockerStatus = await App.DockerStatus();
   const g: DockerStatus = await App.GitStatus();
   runtimeOk = d.ok && g.ok;
@@ -104,7 +104,7 @@ async function checkRuntime(): Promise<void> {
   gate();
 }
 async function checkMDNS(): Promise<void> {
-  setReq("mdns", "wait", "Checking…");
+  setReq("mdns", "wait", "Checking...");
   const d: NameStatus = await App.MDNSStatus();
   mdnsOk = d.ok;
   setReq("mdns", d.ok ? "ok" : "bad", d.ok ? "Ready" : "Not ready", d.ok ? "" : (d.how || d.message));
@@ -135,28 +135,28 @@ function wirePw(input: HTMLInputElement, toggle: string, eye: string, hint: HTML
   };
   input.addEventListener("input", () => { clearTimeout(t); t = window.setTimeout(() => void validate(), 180); });
 }
-wirePw($("#adminpw"), "pw-toggle", "pw-eye", $("#pw-hint"), "Looks good — strong enough.", (v) => (pwOk = v));
-wirePw($("#backuppw"), "bpw-toggle", "bpw-eye", $("#bpw-hint"), "Looks good. Store it somewhere safe — it can't be recovered.", (v) => (bpwOk = v));
+wirePw($("#adminpw"), "pw-toggle", "pw-eye", $("#pw-hint"), "Looks good - strong enough.", (v) => (pwOk = v));
+wirePw($("#backuppw"), "bpw-toggle", "bpw-eye", $("#bpw-hint"), "Looks good. Store it somewhere safe - it can't be recovered.", (v) => (bpwOk = v));
 
 // ===========================================================================
-// Wizard — install flow
+// Wizard - install flow
 // ===========================================================================
 const wizForm = $("#wiz-form"), wizInstalling = $("#wiz-installing"), wizFailed = $("#wiz-failed");
 const installBar = $<HTMLDivElement>("#install-bar"), installPct = $("#install-pct"), installStep = $("#install-step-text");
 let lastError = "";
 
 const MILESTONES: [RegExp, number, string][] = [
-  [/secret key/i, 6, "Preparing the configuration…"],
-  [/Building the backup image/i, 9, "Preparing encrypted backups…"],
-  [/Generating the backup encryption key/i, 11, "Securing your backups…"],
-  [/Building the Caddy/i, 13, "Building the secure gateway…"],
-  [/Cloning care backend/i, 16, "Downloading CARE…"],
-  [/Cloning care frontend|Cloning care_fe|frontend \(/i, 25, "Downloading the app…"],
-  [/Building the backend image/i, 42, "Building the backend — this is the long one…"],
-  [/Building the frontend image/i, 64, "Building the app…"],
-  [/Starting CARE/i, 82, "Starting the services…"],
-  [/database migrations/i, 90, "Setting up the database…"],
-  [/become healthy/i, 95, "Waiting for CARE to answer…"],
+  [/secret key/i, 6, "Preparing the configuration..."],
+  [/Building the backup image/i, 9, "Preparing encrypted backups..."],
+  [/Generating the backup encryption key/i, 11, "Securing your backups..."],
+  [/Building the Caddy/i, 13, "Building the secure gateway..."],
+  [/Cloning care backend/i, 16, "Downloading CARE..."],
+  [/Cloning care frontend|Cloning care_fe|frontend \(/i, 25, "Downloading the app..."],
+  [/Building the backend image/i, 42, "Building the backend - this is the long one..."],
+  [/Building the frontend image/i, 64, "Building the app..."],
+  [/Starting CARE/i, 82, "Starting the services..."],
+  [/database migrations/i, 90, "Setting up the database..."],
+  [/become healthy/i, 95, "Waiting for CARE to answer..."],
   [/CARE is up/i, 100, "Ready."],
 ];
 function bumpInstallProgress(line: string): void {
@@ -178,18 +178,18 @@ install.addEventListener("click", () => {
   if (install.disabled) return;
   void (async () => {
     install.disabled = true;
-    $("#install-note").textContent = "Re-checking your computer…";
+    $("#install-note").textContent = "Re-checking your computer...";
     await Promise.all([checkRuntime(), checkMDNS()]);
     if (!(runtimeOk && mdnsOk && pwOk && bpwOk)) {
-      $("#install-note").textContent = "A step is no longer met — fix it and try again.";
+      $("#install-note").textContent = "A step is no longer met - fix it and try again.";
       return;
     }
     phase = "setup";
     wizForm.hidden = true; wizInstalling.hidden = false;
     $("#install-progress").classList.add("indet");
-    installPct.textContent = "Working…";
-    installStep.textContent = "Getting started…";
-    append("Starting one-time setup…");
+    installPct.textContent = "Working...";
+    installStep.textContent = "Getting started...";
+    append("Starting one-time setup...");
     void App.RunSetup("care.local", $<HTMLInputElement>("#adminpw").value, $<HTMLInputElement>("#backuppw").value, true, "", backupDir).catch((e) => {
       lastError = String(e); append(`error: ${String(e)}`); showInstallFailed();
     });
@@ -200,19 +200,19 @@ function showInstallFailed(): void {
   wizInstalling.hidden = true; wizForm.hidden = true;
   const tail = setupLog.slice(-40).join("\n").trim();
   const headline = (lastError || "Setup did not complete.").trim();
-  $("#fail-msg").textContent = tail ? `${headline}\n\n———— last output ————\n${tail}` : headline;
+  $("#fail-msg").textContent = tail ? `${headline}\n\n---- last output ----\n${tail}` : headline;
   wizFailed.hidden = false;
 }
 $("#fail-retry").addEventListener("click", () => {
   lastError = ""; setupLog.length = 0;
-  installBar.style.width = "0%"; installPct.textContent = "Working…"; installStep.textContent = "Getting started…";
+  installBar.style.width = "0%"; installPct.textContent = "Working..."; installStep.textContent = "Getting started...";
   $("#install-progress").classList.remove("indet");
   wizFailed.hidden = true; wizInstalling.hidden = true; wizForm.hidden = false;
   recheck();
 });
 
 // ===========================================================================
-// Panel — tabs + status
+// Panel - tabs + status
 // ===========================================================================
 const TAB_META: Record<string, [string, string]> = {
   overview: ["Overview", "Your clinic server at a glance."],
@@ -232,18 +232,18 @@ document.querySelectorAll<HTMLElement>(".nav-item").forEach((b) => b.addEventLis
 const SYS: Record<Exclude<State, "unknown">, { label: string; sub: string; icon: string; cls: string }> = {
   running: { label: "Running", sub: "The clinic system is live and reachable.", icon: "ph-fill ph-pulse", cls: "" },
   stopped: { label: "Stopped", sub: "The clinic system is not running.", icon: "ph-fill ph-stop-circle", cls: "stopped" },
-  partial: { label: "Starting…", sub: "Some services are still coming up.", icon: "ph ph-circle-notch", cls: "partial" },
+  partial: { label: "Starting...", sub: "Some services are still coming up.", icon: "ph ph-circle-notch", cls: "partial" },
 };
 function applyState(state: State): void {
   const hero = $(".status-hero");
   if (busy) {
     hero.className = "status-hero partial";
     $("#sys-icon").className = "ph ph-circle-notch spin";
-    $("#sys-label").textContent = busyLabel + "…";
+    $("#sys-label").textContent = busyLabel + "...";
     $("#sys-sub").textContent = "Please wait a moment.";
     $("#hero-actions").hidden = true; $("#busy-banner").hidden = false;
     $("#busy-text").textContent = `${busyLabel} the clinic system. This usually takes a few seconds, please wait.`;
-    $("#mini-dot").className = "mini-dot busy"; $("#mini-label").textContent = busyLabel + "…";
+    $("#mini-dot").className = "mini-dot busy"; $("#mini-label").textContent = busyLabel + "...";
     lockPanel(true);
     return;
   }
@@ -251,7 +251,7 @@ function applyState(state: State): void {
   const s = state === "unknown" ? SYS.stopped : SYS[state];
   hero.className = "status-hero " + s.cls;
   $("#sys-icon").className = s.icon + (state === "partial" ? " spin" : "");
-  $("#sys-label").textContent = state === "unknown" ? "checking…" : s.label;
+  $("#sys-label").textContent = state === "unknown" ? "checking..." : s.label;
   $("#sys-sub").textContent = state === "unknown" ? "" : s.sub;
   const running = state === "running", partial = state === "partial", stopped = !running && !partial;
   ($("#btn-start") as HTMLButtonElement).disabled = running || partial;
@@ -259,7 +259,7 @@ function applyState(state: State): void {
   ($("#btn-stop") as HTMLButtonElement).disabled = stopped;
   ($("#btn-restart") as HTMLButtonElement).disabled = stopped;
   $("#mini-dot").className = "mini-dot " + (running ? "running" : partial ? "busy" : "stopped");
-  $("#mini-label").textContent = running ? "Running" : partial ? "Starting…" : "Stopped";
+  $("#mini-label").textContent = running ? "Running" : partial ? "Starting..." : "Stopped";
   lockPanel(false);
 }
 function lockPanel(b: boolean): void {
@@ -323,7 +323,7 @@ async function syncAutostart(): Promise<void> {
 }
 
 // ===========================================================================
-// Env editors (backend/frontend) — everyday + Advanced split
+// Env editors (backend/frontend) - everyday + Advanced split
 // ===========================================================================
 type Entry = { kind: "comment" | "blank" | "kv"; raw?: string; key?: string; value?: string; isNew?: boolean };
 function parseEnv(text: string): Entry[] {
@@ -377,7 +377,7 @@ class EnvEditor {
     row.appendChild(v);
     if (e.isNew) {
       const rm = document.createElement("button");
-      rm.className = "btn ghost env-remove"; rm.textContent = "×"; rm.title = "remove";
+      rm.className = "btn ghost env-remove"; rm.textContent = "x"; rm.title = "remove";
       rm.addEventListener("click", () => { this.entries.splice(idx, 1); this.render(); });
       row.appendChild(rm);
     }
@@ -418,7 +418,7 @@ $("#env-save").addEventListener("click", () => {
 });
 
 // ===========================================================================
-// Plugins (backend only — ADDITIONAL_PLUGS)
+// Plugins (backend only - ADDITIONAL_PLUGS)
 // ===========================================================================
 type PluginConfigRow = { key: string; value: string };
 type PluginRow = { name: string; package_name: string; version: string; configs: PluginConfigRow[] };
@@ -477,7 +477,7 @@ class PluginEditor {
       name.className = "plugin-name"; name.placeholder = "plugin name (e.g. hcx)"; name.value = p.name; name.spellcheck = false;
       name.addEventListener("input", () => (this.plugins[pi].name = name.value));
       const rm = document.createElement("button");
-      rm.className = "btn ghost env-remove"; rm.textContent = "×"; rm.title = "remove plugin"; rm.style.color = "var(--red)";
+      rm.className = "btn ghost env-remove"; rm.textContent = "x"; rm.title = "remove plugin"; rm.style.color = "var(--red)";
       rm.addEventListener("click", () => { this.plugins.splice(pi, 1); this.render(); });
       head.append(name, rm); card.appendChild(head);
       card.appendChild(this.field("Package URL", "git+https://github.com/ohcnetwork/care_hcx.git", p.package_name, (v) => (this.plugins[pi].package_name = v)));
@@ -490,7 +490,7 @@ class PluginEditor {
         k.addEventListener("input", () => (this.plugins[pi].configs[ci].key = k.value));
         const v = document.createElement("input"); v.type = "text"; v.placeholder = "value"; v.value = c.value; v.spellcheck = false;
         v.addEventListener("input", () => (this.plugins[pi].configs[ci].value = v.value));
-        const crm = document.createElement("button"); crm.className = "btn ghost env-remove"; crm.textContent = "×";
+        const crm = document.createElement("button"); crm.className = "btn ghost env-remove"; crm.textContent = "x";
         crm.addEventListener("click", () => { this.plugins[pi].configs.splice(ci, 1); this.render(); });
         row.append(k, v, crm); cf.appendChild(row);
       });
@@ -521,9 +521,9 @@ class PluginEditor {
 }
 const pluginEditor = new PluginEditor($("#plugins-list"));
 const pluginPicker = $<HTMLSelectElement>("#plugin-picker");
-pluginPicker.innerHTML = `<option value="">+ Add a plugin…</option>` +
+pluginPicker.innerHTML = `<option value="">+ Add a plugin...</option>` +
   PLUGIN_CATALOG.map((c, i) => `<option value="cat:${i}">${c.label}</option>`).join("") +
-  `<option value="custom">Custom — add by URL</option>`;
+  `<option value="custom">Custom - add by URL</option>`;
 pluginPicker.addEventListener("change", () => {
   const v = pluginPicker.value;
   if (v === "custom") pluginEditor.add();
@@ -539,7 +539,7 @@ $("#plugins-save").addEventListener("click", () => {
 });
 
 // ===========================================================================
-// System configuration — backend / frontend section switch
+// System configuration - backend / frontend section switch
 // ===========================================================================
 async function selectSection(section: "backend" | "frontend"): Promise<void> {
   $("#sel-backend").classList.toggle("on", section === "backend");
@@ -562,14 +562,14 @@ function showPluginsFor(section: "backend" | "frontend"): void {
   } else {
     $("#plugins-hint").textContent = "Frontend plugins are coming in a future update.";
     picker.hidden = true; save.hidden = true;
-    $("#plugins-list").innerHTML = `<div class="plugins-empty">Frontend plugins are coming soon.</div>`;
+    $("#plugins-list").innerHTML = `<div class="plugins-empty">Frontend plugins.</div>`;
   }
 }
 $("#sel-backend").addEventListener("click", () => void selectSection("backend"));
 $("#sel-frontend").addEventListener("click", () => void selectSection("frontend"));
 
 // ===========================================================================
-// Advanced — password gate + navigation + uninstall
+// Advanced - password gate + navigation + uninstall
 // ===========================================================================
 let advUnlocked = false;
 let advScreen: "home" | "sysconfig" = "home";
@@ -615,14 +615,14 @@ $("#uninstall-yes").addEventListener("click", () => {
 let confirmingRestore = -1;
 async function loadBackups(): Promise<void> {
   try { backups = await App.ListBackups(); } catch { backups = []; }
-  $("#backups-summary").textContent = backups.length ? `${backups.length} kept · last ${shortDate(backups[0].label)}` : "";
+  $("#backups-summary").textContent = backups.length ? `${backups.length} kept - last ${shortDate(backups[0].label)}` : "";
   // overview strip
   if (backups.length) {
     $("#backup-strip-title").textContent = "Backups are up to date";
-    $("#backup-strip-sub").textContent = `Last backup ${shortDate(backups[0].label)}${backups[0].encrypted ? " · encrypted" : ""}.`;
+    $("#backup-strip-sub").textContent = `Last backup ${shortDate(backups[0].label)}${backups[0].encrypted ? " - encrypted" : ""}.`;
   } else {
     $("#backup-strip-title").textContent = "No backups yet";
-    $("#backup-strip-sub").textContent = "Click “Back up now”, or wait for the daily backup.";
+    $("#backup-strip-sub").textContent = 'Click "Back up now", or wait for the daily backup.';
   }
   const list = $("#backups-list");
   if (backups.length === 0) {
@@ -632,7 +632,7 @@ async function loadBackups(): Promise<void> {
   list.innerHTML = backups.map((b, i) => {
     const size = b.size_bytes ? (b.size_bytes / 1e6).toFixed(1) + " MB" : "";
     const files = b.files_archive ? "DB + files" : "DB only";
-    const meta = [size, files, b.encrypted ? "encrypted" : ""].filter(Boolean).join(" · ");
+    const meta = [size, files, b.encrypted ? "encrypted" : ""].filter(Boolean).join(" - ");
     const badge = b.manual ? `<span class="badge manual">Manual</span>` : `<span class="badge">Automatic</span>`;
     const confirm = i === confirmingRestore ? `
       <div class="confirm-strip">
@@ -659,14 +659,14 @@ async function loadBackups(): Promise<void> {
 }
 function shortDate(label: string): string {
   const m = label.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}:\d{2})/);
-  return m ? `${m[3]}/${m[2]} ${m[4]}` : label.split(" · ")[0] || label;
+  return m ? `${m[3]}/${m[2]} ${m[4]}` : label.split(" - ")[0] || label;
 }
 async function doRestore(idx: number): Promise<void> {
   const b = backups[idx]; if (!b || busy) return;
   confirmingRestore = -1;
   setBusy(true, "Restoring");
   append(`\n$ care restore ${b.db_dump}${b.files_archive ? ` ${b.files_archive}` : ""}`);
-  showToast("Restore started — data will be replaced");
+  showToast("Restore started - data will be replaced");
   try { await App.RestoreBackup(b.db_dump, b.files_archive, "", false); }
   catch (e) { append(`error: ${String(e)}`); setBusy(false); }
 }
@@ -677,13 +677,13 @@ $("#backups-refresh").addEventListener("click", () => { confirmingRestore = -1; 
 // ===========================================================================
 on("care-log", (line: string) => { if (line.startsWith("error:")) lastError = line.slice("error:".length).trim(); append(line); });
 on("care-done", (code: number) => {
-  if (phase === "setup") { if (code !== 0) { append(`\n✖ Setup failed (exit ${code}).`); showInstallFailed(); } return; }
-  append(`— done (exit ${code}) —`);
+  if (phase === "setup") { if (code !== 0) { append(`\nx Setup failed (exit ${code}).`); showInstallFailed(); } return; }
+  append(`- done (exit ${code}) -`);
   if (code !== 0) showToast(lastError ? firstLine(lastError) : "That action didn't complete.");
   setBusy(false); void refresh(); void loadBackups();
 });
 on("setup-done", () => {
-  installBar.style.width = "100%"; installPct.textContent = "100%"; installStep.textContent = "Done — opening the control panel…";
+  installBar.style.width = "100%"; installPct.textContent = "100%"; installStep.textContent = "Done - opening the control panel...";
   phase = "panel"; showView("panel"); void bootPanel();
 });
 on("uninstalled", () => { showToast("Uninstalled"); setTimeout(() => window.location.reload(), 1800); });
@@ -703,7 +703,7 @@ async function bootPanel(): Promise<void> {
   try {
     if (await App.WasAutostartLaunched()) {
       const h = await App.CareHealth();
-      if (!h.active && !busy) { append("\nLaunched at startup — starting CARE…"); await run("start"); }
+      if (!h.active && !busy) { append("\nLaunched at startup - starting CARE..."); await run("start"); }
     }
   } catch { /* ignore */ }
 }
