@@ -539,6 +539,170 @@ $("#plugins-save").addEventListener("click", () => {
 });
 
 // ===========================================================================
+// Frontend plugins (CARE plug_config — edited here, loaded by CARE at runtime)
+// ===========================================================================
+// A frontend plugin is one plug_config row: a slug + a meta blob whose meta.url is
+// the remoteEntry.js the browser loads. Adding, editing, or removing one is a
+// database write — no rebuild, nothing to download. This editor loads the live rows
+// (the same set CARE's own Apps page shows) and saves the whole set back, so the two
+// never drift apart. Structured fields stand in for CARE admin's raw meta JSON.
+type FeConfigRow = { key: string; value: string };
+type FrontendPlugin = { slug: string; meta: Record<string, unknown> };
+type FePluginRow = { slug: string; url: string; configs: FeConfigRow[]; meta: Record<string, unknown> };
+type FeCatalogEntry = { label: string; slug: string; url: string };
+const FE_PLUGIN_CATALOG: FeCatalogEntry[] = [
+  {
+    label: "Hello World (sample)",
+    slug: "care_hello_fe",
+    url: "https://ohcnetwork.github.io/care_hello_fe/assets/remoteEntry.js",
+  },
+];
+
+class FrontendPluginEditor {
+  plugins: FePluginRow[] = [];
+  private loaded = false;
+  private loadError = "";
+  constructor(private container: HTMLElement) {}
+
+  private empty(text: string): void {
+    this.container.textContent = "";
+    const box = document.createElement("div");
+    box.className = "plugins-empty";
+    box.textContent = text;
+    this.container.appendChild(box);
+  }
+
+  async load(): Promise<void> {
+    this.loaded = false;
+    this.loadError = "";
+    this.empty("Checking…");
+    let raw: FrontendPlugin[];
+    try {
+      raw = (await App.ReadFrontendPlugins()) ?? [];
+    } catch (e) {
+      this.loadError = firstLine(String(e));
+      this.empty(this.loadError);
+      return;
+    }
+    this.plugins = raw.map((p) => {
+      const meta = (p.meta ?? {}) as Record<string, unknown>;
+      const cfg = (meta.config ?? {}) as Record<string, unknown>;
+      return {
+        slug: p.slug,
+        url: typeof meta.url === "string" ? meta.url : "",
+        configs: Object.entries(cfg).map(([key, value]) => ({ key, value: String(value) })),
+        meta,
+      };
+    });
+    this.loaded = true;
+    this.render();
+  }
+
+  private field(label: string, ph: string, value: string, onInput: (v: string) => void): HTMLElement {
+    const wrap = document.createElement("div"); wrap.className = "plugin-field";
+    const lab = document.createElement("label"); lab.textContent = label;
+    const inp = document.createElement("input");
+    inp.type = "text"; inp.placeholder = ph; inp.value = value; inp.spellcheck = false;
+    inp.addEventListener("input", () => onInput(inp.value));
+    wrap.append(lab, inp);
+    return wrap;
+  }
+
+  render(): void {
+    this.container.textContent = "";
+    if (this.plugins.length === 0) {
+      this.empty("No frontend plugins yet. Add one with the picker below.");
+      return;
+    }
+    this.plugins.forEach((p, pi) => {
+      const card = document.createElement("div"); card.className = "plugin-card";
+      const head = document.createElement("div"); head.className = "plugin-head";
+      const pz = document.createElement("i"); pz.className = "ph ph-puzzle-piece pz"; head.appendChild(pz);
+      const slug = document.createElement("input");
+      slug.className = "plugin-name"; slug.placeholder = "plugin name (e.g. care_hello_fe)"; slug.value = p.slug; slug.spellcheck = false;
+      slug.addEventListener("input", () => (this.plugins[pi].slug = slug.value));
+      const rm = document.createElement("button");
+      rm.className = "btn ghost env-remove"; rm.textContent = "x"; rm.title = "remove plugin"; rm.style.color = "var(--red)";
+      rm.addEventListener("click", () => { this.plugins.splice(pi, 1); this.render(); });
+      head.append(slug, rm); card.appendChild(head);
+
+      card.appendChild(this.field("Remote entry URL", "https://…/assets/remoteEntry.js", p.url, (v) => (this.plugins[pi].url = v)));
+
+      const cl = document.createElement("div"); cl.className = "plugin-cfg-label"; cl.textContent = "Configuration (optional)"; card.appendChild(cl);
+      const cf = document.createElement("div"); cf.className = "env-form";
+      p.configs.forEach((c, ci) => {
+        const row = document.createElement("div"); row.className = "env-row";
+        const k = document.createElement("input"); k.type = "text"; k.placeholder = "CONFIG_KEY"; k.value = c.key; k.className = "env-key-input";
+        k.addEventListener("input", () => (this.plugins[pi].configs[ci].key = k.value));
+        const v = document.createElement("input"); v.type = "text"; v.placeholder = "value"; v.value = c.value; v.spellcheck = false;
+        v.addEventListener("input", () => (this.plugins[pi].configs[ci].value = v.value));
+        const crm = document.createElement("button"); crm.className = "btn ghost env-remove"; crm.textContent = "x";
+        crm.addEventListener("click", () => { this.plugins[pi].configs.splice(ci, 1); this.render(); });
+        row.append(k, v, crm); cf.appendChild(row);
+      });
+      card.appendChild(cf);
+      const addCfg = document.createElement("button");
+      addCfg.className = "btn ghost tiny"; addCfg.style.marginTop = "8px"; addCfg.innerHTML = `<i class="ph ph-plus"></i>Add config`;
+      addCfg.addEventListener("click", () => { this.plugins[pi].configs.push({ key: "", value: "" }); this.render(); });
+      card.appendChild(addCfg);
+      this.container.appendChild(card);
+    });
+  }
+
+  add(): void { this.plugins.push({ slug: "", url: "", configs: [], meta: {} }); this.render(); }
+  addFromCatalog(c: FeCatalogEntry): void {
+    this.plugins.push({ slug: c.slug, url: c.url, configs: [], meta: {} }); this.render();
+  }
+
+  serialize(): FrontendPlugin[] {
+    return this.plugins.filter((p) => p.slug.trim() !== "" && p.url.trim() !== "").map((p) => {
+      const meta: Record<string, unknown> = { ...p.meta, name: p.slug.trim(), url: p.url.trim() };
+      const config: Record<string, unknown> = {};
+      for (const c of p.configs) if (c.key.trim() !== "") config[c.key.trim()] = parseConfigValue(c.value);
+      if (Object.keys(config).length) meta.config = config; else delete meta.config;
+      return { slug: p.slug.trim(), meta };
+    });
+  }
+
+  async save(): Promise<void> {
+    if (!this.loaded) {
+      // The panel opened before CARE was ready, so we never got a clean snapshot.
+      // Read one now — this is also the data-loss guard: without a baseline a save
+      // could delete rows we simply failed to read. Then keep the user's edits on top.
+      const pending = this.plugins;
+      await this.load();
+      if (!this.loaded) {
+        throw new Error(this.loadError || "Couldn't read the current plugins from CARE — is it running?");
+      }
+      const bySlug = new Map(this.plugins.map((p) => [p.slug, p]));
+      for (const p of pending) if (p.slug.trim() || p.url.trim()) bySlug.set(p.slug, p);
+      this.plugins = [...bySlug.values()];
+      this.render();
+    }
+    await App.SaveFrontendPlugins(this.serialize());
+  }
+}
+
+const feEditor = new FrontendPluginEditor($("#plugins-list"));
+const fePicker = $<HTMLSelectElement>("#fe-plugin-picker");
+fePicker.innerHTML = `<option value="">+ Add a plugin...</option>` +
+  FE_PLUGIN_CATALOG.map((c, i) => `<option value="cat:${i}">${c.label}</option>`).join("") +
+  `<option value="custom">Custom - add by URL</option>`;
+fePicker.addEventListener("change", () => {
+  const v = fePicker.value;
+  if (v === "custom") feEditor.add();
+  else if (v.startsWith("cat:")) feEditor.addFromCatalog(FE_PLUGIN_CATALOG[Number(v.slice(4))]);
+  fePicker.value = "";
+});
+$("#fe-plugins-save").addEventListener("click", () => {
+  if (busy) return;
+  void (async () => {
+    try { await feEditor.save(); showToast("Frontend plugins saved — staff refresh their browser"); await feEditor.load(); }
+    catch (e) { append(`error saving frontend plugins: ${String(e)}`); showToast(firstLine(String(e))); }
+  })();
+});
+
+// ===========================================================================
 // System configuration - backend / frontend section switch
 // ===========================================================================
 async function selectSection(section: "backend" | "frontend"): Promise<void> {
@@ -554,15 +718,18 @@ async function selectSection(section: "backend" | "frontend"): Promise<void> {
   showPluginsFor(section);
 }
 function showPluginsFor(section: "backend" | "frontend"): void {
-  const picker = pluginPicker, save = $("#plugins-save");
+  const be = $("#be-plugins-actions"), fe = $("#fe-plugins-actions");
+  const tag = $("#plugins-card .tag");
   if (section === "backend") {
     $("#plugins-hint").textContent = "Extra features for the backend. Adding or changing plugins rebuilds it, which needs the internet.";
-    picker.hidden = false; save.hidden = false;
+    if (tag) { tag.textContent = "rebuilds on save"; tag.classList.add("warn"); }
+    be.hidden = false; fe.hidden = true;
     void pluginEditor.load();
   } else {
-    $("#plugins-hint").textContent = "Frontend plugins are coming in a future update.";
-    picker.hidden = true; save.hidden = true;
-    $("#plugins-list").innerHTML = `<div class="plugins-empty">Frontend plugins.</div>`;
+    $("#plugins-hint").textContent = "Optional apps for staff. Add one by its published URL — changes are instant, no rebuild.";
+    if (tag) { tag.textContent = "instant · no rebuild"; tag.classList.remove("warn"); }
+    be.hidden = true; fe.hidden = false;
+    void feEditor.load();
   }
 }
 $("#sel-backend").addEventListener("click", () => void selectSection("backend"));

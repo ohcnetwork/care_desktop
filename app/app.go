@@ -603,6 +603,58 @@ func (a *App) SavePlugins(plugins []care.Plugin) error {
 	return a.engine(nil).WritePlugins(plugins)
 }
 
+// --- frontend plugins (CARE plug_config table, synced with /admin/apps) ------
+//
+// Unlike backend plugins, frontend plugins load at runtime from CARE's plug_config
+// table, so a toggle is a single database write - no rebuild. The engine reads and
+// writes those rows directly, the same ones CARE's own Apps page edits, so the two
+// panels stay in sync.
+
+// appsEngine pins the clinic's chosen mDNS name, which the plugin bundle URLs are
+// built from. engine(nil) would fall back to "care" on a clinic that picked another
+// name.
+func (a *App) appsEngine() *care.Engine {
+	host := strings.TrimSuffix(strings.TrimSpace(a.loadConfig().MDNSName), ".local")
+	if host == "" {
+		host = "care"
+	}
+	return a.engine(map[string]string{"CARE_MDNS_NAME": host})
+}
+
+// ListApps returns the optional frontend plugins for the Frontend plugins panel:
+// the apps.json catalogue merged with CARE's live plug_config rows, which are the
+// only record of what's switched on.
+func (a *App) ListApps() ([]care.ClinicApp, error) {
+	if _, err := os.Stat(filepath.Join(a.kitDir(), "docker-compose.yml")); err != nil {
+		return nil, nil // not set up yet - nothing to offer
+	}
+	return a.appsEngine().ListApps()
+}
+
+// SetAppEnabled switches one catalogue app on or off by writing CARE's plug_config
+// table - instant, no rebuild. Staff refresh their browser to see the change.
+func (a *App) SetAppEnabled(slug string, enabled bool) error {
+	return a.appsEngine().SetAppEnabled(slug, enabled)
+}
+
+// ReadFrontendPlugins returns CARE's live frontend plugins (plug_config rows) for
+// the Frontend plugins editor - the same set CARE's own Apps page shows.
+func (a *App) ReadFrontendPlugins() ([]care.FrontendPlugin, error) {
+	if _, err := os.Stat(filepath.Join(a.kitDir(), "docker-compose.yml")); err != nil {
+		return []care.FrontendPlugin{}, nil // not set up yet
+	}
+	return a.appsEngine().ReadFrontendPlugins()
+}
+
+// SaveFrontendPlugins writes the whole plugin list to CARE's plug_config table
+// (add + edit + remove). Instant - no rebuild, since CARE loads them at runtime.
+func (a *App) SaveFrontendPlugins(plugins []care.FrontendPlugin) error {
+	if _, err := os.Stat(filepath.Join(a.kitDir(), "docker-compose.yml")); err != nil {
+		return errString("not set up yet - run the first-time setup")
+	}
+	return a.appsEngine().WriteFrontendPlugins(plugins)
+}
+
 // --- misc UI helpers --------------------------------------------------------
 
 func (a *App) OpenURL(url string) { wruntime.BrowserOpenURL(a.ctx, url) }

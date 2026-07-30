@@ -22,6 +22,21 @@ type CarePlugin = {
   version?: string;
   configs?: Record<string, unknown>;
 };
+type ClinicApp = {
+  slug: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  managed: boolean;
+  ready: boolean;
+  url: string;
+  warning: string;
+  needs_backend_plug: string;
+};
+type FrontendPlugin = {
+  slug: string;
+  meta: Record<string, unknown>;
+};
 
 declare global {
   interface Window {
@@ -49,6 +64,10 @@ declare global {
           WriteEnv(name: string, content: string): Promise<void>;
           ReadPlugins(): Promise<CarePlugin[]>;
           SavePlugins(plugins: CarePlugin[]): Promise<void>;
+          ListApps(): Promise<ClinicApp[]>;
+          SetAppEnabled(slug: string, enabled: boolean): Promise<void>;
+          ReadFrontendPlugins(): Promise<FrontendPlugin[]>;
+          SaveFrontendPlugins(plugins: FrontendPlugin[]): Promise<void>;
           ListBackups(): Promise<Backup[]>;
           ConfirmRestore(filesIncluded: boolean): Promise<boolean>;
           BackupEncryptionEnabled(): Promise<boolean>;

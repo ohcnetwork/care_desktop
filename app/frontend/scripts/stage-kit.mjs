@@ -18,6 +18,7 @@ const items = [
   "clinic_settings.py",
   "Caddyfile",
   "versions.env",
+  "apps.json",
   "minio",
   "scripts",
 ];

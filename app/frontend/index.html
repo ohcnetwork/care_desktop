@@ -290,10 +290,15 @@
                 </div>
                 <div class="card-hint" id="plugins-hint">Extra features for the backend. Adding or changing plugins rebuilds it, which needs the internet.</div>
                 <div class="plugins-list" id="plugins-list"></div>
-                <div class="env-actions">
+                <div class="env-actions" id="be-plugins-actions">
                   <select class="plugin-picker" id="plugin-picker"></select>
                   <div class="grow"></div>
                   <button class="btn primary" id="plugins-save">Save &amp; rebuild backend</button>
+                </div>
+                <div class="env-actions" id="fe-plugins-actions" hidden>
+                  <select class="plugin-picker" id="fe-plugin-picker"></select>
+                  <div class="grow"></div>
+                  <button class="btn primary" id="fe-plugins-save">Save frontend plugins</button>
                 </div>
               </div>
             </div>
