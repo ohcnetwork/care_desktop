@@ -1,33 +1,4 @@
 {
-  "_comment": [
-    "Catalogue of optional CARE apps (frontend plugins) that the Apps tab in CARE",
-    "Desktop can turn on and off for staff.",
-    "",
-    "This file does NOT record which apps are on. That lives only in CARE's own",
-    "plug_config table — the same rows CARE's Apps admin page (http://care.local/",
-    "admin/apps) edits — so the panel and that page can never disagree.",
-    "",
-    "Each entry:",
-    "  slug         required. Must match the plugin's own slug (its repo name).",
-    "  name         what staff see in the panel.",
-    "  description  one plain sentence: what it does for them, not how it works.",
-    "  bundle       folder inside the facility-bucket holding the built plugin,",
-    "               e.g. 'apps/care_hello_fe'. Served offline at",
-    "               http://care.local/facility-bucket/<bundle>/ via Caddy.",
-    "  url          optional. A full remoteEntry.js URL, for clinics with internet",
-    "               that load the app from a CDN instead. Overrides 'bundle'.",
-    "  remote_entry optional. Defaults to 'assets/remoteEntry.js'.",
-    "  needs_backend_plug  optional. Name of the Django plug this app also needs;",
-    "               set it and the panel warns that `care rebuild-backend` is",
-    "               required, which needs internet and several minutes.",
-    "",
-    "To install a bundle onto an offline clinic box:",
-    "  docker compose exec -T minio mc cp --recursive \\",
-    "    --attr 'Content-Type=text/javascript' \\",
-    "    /path/to/plugin/dist/ local/facility-bucket/apps/<slug>/",
-    "The Content-Type matters: the browser loads the plugin as an ES module and",
-    "refuses anything MinIO labels application/octet-stream."
-  ],
   "apps": [
     {
       "slug": "care_hello_fe",
