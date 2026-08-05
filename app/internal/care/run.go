@@ -11,8 +11,20 @@ import (
 // Start brings the stack up: ensure both images, mDNS, `compose up -d`, migrate,
 // then a default admin. Mirrors `care.sh start`.
 func (e *Engine) Start() error {
+	if err := e.ValidateTLS(); err != nil {
+		return err
+	}
 	if err := e.EnsurePortFree(); err != nil {
 		return err
+	}
+	e.logln(e.tlsBanner())
+	// Point the clinic's DNS record at wherever the router put us this time. Done
+	// early so the change has the whole startup to propagate, and best-effort: an
+	// unreachable Cloudflare must not stop a clinic that is otherwise fine from
+	// coming up, and the record is usually already correct anyway.
+	if err := e.SyncDNS(); err != nil {
+		e.logln("note: couldn't update the DNS record (" + err.Error() + ")")
+		e.logln("      devices can only reach CARE once " + e.publicHost() + " points at this computer")
 	}
 	if err := e.ensureBackendImage(); err != nil {
 		return err
@@ -29,7 +41,6 @@ func (e *Engine) Start() error {
 	if err := e.ensureKeysDir(); err != nil { // ./keys bind-mount source (empty = plaintext)
 		return err
 	}
-	e.ensureMDNS()
 	e.logln("Starting CARE...")
 	// Migrate with a SINGLE migrator: bring up the api backend (its start.sh does
 	// NOT migrate) + its deps, migrate to completion, then start the rest.
@@ -47,15 +58,21 @@ func (e *Engine) Start() error {
 		return err
 	}
 	e.createAdmin()
-	// Don't report success until the app actually answers on :80 - "up -d" only
-	// means the containers were created. This is the gate the installer relies on
-	// to mark the install complete.
-	e.logln("Waiting for CARE to become healthy...")
-	if err := e.WaitHealthy(3 * time.Minute); err != nil {
-		return err
+	// Don't report success until the app actually answers - "up -d" only means the
+	// containers were created. This is the gate the installer relies on to mark the
+	// install complete.
+	// A first start also waits on the ACME DNS-01 round trip: write the TXT record,
+	// wait for it to propagate, then issuance. Well under 5 minutes normally, but
+	// slow DNS propagation can push it - hence the generous budget.
+	e.logln("Waiting for CARE to become healthy (a first run also obtains the certificate)...")
+	if err := e.WaitHealthy(8 * time.Minute); err != nil {
+		return fmt.Errorf("%w\n\nIf this is the first start, check the certificate step:\n"+
+			"  docker compose logs caddy | grep -i acme\n"+
+			"Most failures here are the API token lacking Zone:DNS:Edit, or the domain "+
+			"not being on Cloudflare's nameservers yet. See docs/tls.md", err)
 	}
 	e.logln("")
-	e.logln("CARE is up -> http://" + e.mdnsName() + ".local/   (login: admin / admin)")
+	e.logln("CARE is up -> " + e.PublicOrigin() + "/   (login: admin / admin)")
 	return nil
 }
 

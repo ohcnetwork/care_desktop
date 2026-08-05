@@ -97,16 +97,14 @@ func remoteEntryOf(entry catalogEntry) string {
 	return defaultRemoteEntry
 }
 
-// host is the address devices use, without a doubled ".local".
-func (e *Engine) host() string {
-	return strings.TrimSuffix(e.mdnsName(), ".local") + ".local"
-}
-
 // bundleURL is the remoteEntry.js address for a bundle served out of the public
-// facility bucket — same origin as the app itself, so no CORS.
+// facility bucket — same origin as the app itself, so no CORS. It must follow
+// PublicOrigin rather than hardcoding http://<name>.local: on an HTTPS install a
+// plain-http bundle URL is blocked as mixed content, and plugins would silently
+// stop loading with nothing in the UI to explain why.
 func (e *Engine) bundleURL(entry catalogEntry) string {
-	return fmt.Sprintf("http://%s/%s/%s/%s",
-		e.host(), facilityBucket, strings.Trim(entry.Bundle, "/"), remoteEntryOf(entry))
+	return fmt.Sprintf("%s/%s/%s/%s",
+		e.PublicOrigin(), facilityBucket, strings.Trim(entry.Bundle, "/"), remoteEntryOf(entry))
 }
 
 // bundlePath is the directory the plugin's own translations sit under. CARE reads

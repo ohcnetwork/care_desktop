@@ -7,7 +7,7 @@ export {};
 type DockerStatus = { ok: boolean; message: string };
 type NameStatus = { ok: boolean; message: string; how: string };
 type Health = { active: boolean; code: number; detail: string };
-type AppState = { setup_done: boolean; mdns_name: string; docker: DockerStatus };
+type AppState = { setup_done: boolean; origin: string; docker: DockerStatus };
 type Backup = {
   db_dump: string;
   files_archive: string;
@@ -44,16 +44,18 @@ declare global {
       main: {
         App: {
           GetState(): Promise<AppState>;
+          PublicOrigin(): Promise<string>;
           DockerStatus(): Promise<DockerStatus>;
           GitStatus(): Promise<DockerStatus>;
-          MDNSStatus(): Promise<NameStatus>;
+          CheckAddress(host: string, token: string): Promise<NameStatus>;
           CareHealth(): Promise<Health>;
           ValidatePassword(pw: string): Promise<string>;
           VerifyAdminPassword(pw: string): Promise<boolean>;
           CareAction(action: string): Promise<void>;
           CareStatus(): Promise<string>;
           RunSetup(
-            mdnsName: string,
+            publicHost: string,
+            dnsToken: string,
             adminPassword: string,
             backupPassword: string,
             rememberBackup: boolean,

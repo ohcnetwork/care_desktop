@@ -24,7 +24,8 @@ care status
 
 | Command | What it does |
 |---|---|
-| `care setup` | One-time: generate a secret, clone + build the backend and frontend images, set up `care.local`. |
+| `care setup` | One-time: generate a secret, clone + build the backend and frontend images. Requires `tls.env` to be filled in. |
+| `care dns-sync` | Point the clinic's DNS record at this computer's current address. Runs automatically on `start`; useful by hand after moving networks. |
 | `care start` | Ensure images exist → `docker compose up -d` → run migrations → create the default `admin`. |
 | `care stop` | Stop the containers. **All data is kept.** |
 | `care restart` | Restart the running containers. |

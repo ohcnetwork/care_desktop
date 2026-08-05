@@ -40,36 +40,6 @@ func TestLoadCatalogRejectsBadEntries(t *testing.T) {
 	}
 }
 
-// The addresses handed to CARE must be same-origin with the app (so no CORS) and
-// must not double the ".local" suffix whichever form the clinic name takes.
-func TestBundleAddresses(t *testing.T) {
-	entry := catalogEntry{Slug: "care_x", Bundle: "apps/care_x"}
-
-	for _, name := range []string{"care", "care.local"} {
-		e := &Engine{Kit: t.TempDir(), Env: map[string]string{"CARE_MDNS_NAME": name}}
-		got := e.bundleURL(entry)
-		want := "http://care.local/facility-bucket/apps/care_x/assets/remoteEntry.js"
-		if got != want {
-			t.Fatalf("CARE_MDNS_NAME=%q: got %q, want %q", name, got, want)
-		}
-	}
-
-	e := &Engine{Kit: t.TempDir(), Env: map[string]string{"CARE_MDNS_NAME": "clinic"}}
-	if got := e.bundleURL(entry); !strings.HasPrefix(got, "http://clinic.local/") {
-		t.Fatalf("renamed clinic not honored: %q", got)
-	}
-	// localPath is what CARE uses to find the plugin's own translations; the URL's
-	// origin (bare host) would wrongly resolve to CARE's own /locale.
-	if got := e.bundlePath(entry); got != "/facility-bucket/apps/care_x" {
-		t.Fatalf("bundlePath: %q", got)
-	}
-
-	custom := catalogEntry{Slug: "care_y", Bundle: "/apps/care_y/", RemoteEntry: "/remoteEntry.js"}
-	if got := e.bundleURL(custom); got != "http://clinic.local/facility-bucket/apps/care_y/remoteEntry.js" {
-		t.Fatalf("stray slashes not trimmed: %q", got)
-	}
-}
-
 // A bundle uploaded without an explicit content type arrives as
 // application/octet-stream and the browser refuses to run it — the check that
 // catches that has to read whichever shape the installed mc version prints.

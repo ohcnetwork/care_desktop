@@ -6,13 +6,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
-// Setup is the one-time bootstrap: secret, backup dir, clone+build both images,
-// then mDNS. Mirrors `care.sh setup`.
+// Setup is the one-time bootstrap: secret, backup dir, clone+build every image.
 func (e *Engine) Setup() error {
+	// Before the ~10-minute builds: a bad HTTPS setting is otherwise only discovered
+	// at the very end, after the whole wait.
+	if err := e.ValidateTLS(); err != nil {
+		return err
+	}
 	if err := e.genSecret(); err != nil {
 		return err
 	}
@@ -39,7 +42,6 @@ func (e *Engine) Setup() error {
 	if err := e.buildFrontend(); err != nil {
 		return err
 	}
-	e.ensureMDNS()
 	e.logln("Setup done.")
 	return nil
 }
@@ -133,62 +135,68 @@ func (e *Engine) ensureCaddyImage() error {
 	return e.buildCaddy()
 }
 
+// frontendOriginFile records the origin the current frontend image was built for.
+// Vite bakes REACT_CARE_API_URL in at build time, so changing the clinic's public
+// name needs a rebuild, not a restart. Without this marker the running app would keep
+// calling the old origin and every API request would fail as cross-origin - a
+// confusing half-broken state.
+const frontendOriginFile = ".frontend-origin"
+
 func (e *Engine) buildFrontend() error {
 	if err := e.clone(e.feRepo(), e.feRef(), e.feDir(), "frontend"); err != nil {
 		return err
 	}
-	// frontend.env overrides care_fe's committed .env (Vite reads .env.local).
+	// frontend.env overrides care_fe's committed .env (Vite reads .env.local). The
+	// API URL is forced to the live origin so it can't drift from what Caddy serves.
 	src, err := os.ReadFile(filepath.Join(e.Kit, "frontend.env"))
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(e.feDir(), ".env.local"), src, 0o644); err != nil {
+	origin := e.PublicOrigin()
+	text := setEnvValue(string(src), "REACT_CARE_API_URL", origin)
+	if err := os.WriteFile(filepath.Join(e.feDir(), ".env.local"), []byte(text), 0o644); err != nil {
 		return err
 	}
-	e.logln("Building the frontend image (" + e.frontendImage() + ")... (a few minutes)")
-	return e.run(nil, "docker", "build", "-t", e.frontendImage(), e.feDir())
+	e.logln("Building the frontend image (" + e.frontendImage() + ") for " + origin + "... (a few minutes)")
+	if err := e.run(nil, "docker", "build", "-t", e.frontendImage(), e.feDir()); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(e.Kit, frontendOriginFile), []byte(origin), 0o644)
 }
 
 func (e *Engine) ensureFrontendImage() error {
-	if e.imageExists(e.frontendImage()) {
+	if e.imageExists(e.frontendImage()) && e.frontendOriginCurrent() {
 		return nil
 	}
 	return e.buildFrontend()
+}
+
+// frontendOriginCurrent reports whether the built image already targets the origin
+// we're about to serve. A missing marker means we can't know what it was built for,
+// so rebuild rather than risk shipping an app that calls the wrong address.
+func (e *Engine) frontendOriginCurrent() bool {
+	b, err := os.ReadFile(filepath.Join(e.Kit, frontendOriginFile))
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(b)) == e.PublicOrigin()
+}
+
+// setEnvValue replaces KEY=... in a dotenv blob, or appends it if absent, leaving
+// comments and ordering untouched. Commented-out lines are left alone.
+func setEnvValue(text, key, value string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), key+"=") {
+			lines[i] = key + "=" + value
+			return strings.Join(lines, "\n")
+		}
+	}
+	return strings.TrimRight(text, "\n") + "\n" + key + "=" + value + "\n"
 }
 
 func (e *Engine) imageExists(tag string) bool {
 	cmd := exec.Command("docker", "image", "inspect", tag)
 	cmd.Env = e.baseEnv()
 	return cmd.Run() == nil
-}
-
-// ensureMDNS makes http://<name>.local resolve on the LAN by renaming the machine.
-// Only runs in "rename" mode now - the default "advertise" mode uses the in-app
-// pure-Go responder (Advertise) instead, which needs no rename. Per-OS, best-effort:
-// failures never abort setup (naming can be fixed by hand / static IP).
-func (e *Engine) ensureMDNS() {
-	if e.MDNSMode() != "rename" {
-		return
-	}
-	name := e.mdnsName()
-	switch runtime.GOOS {
-	case "darwin":
-		if cur, _ := e.capture("scutil", "--get", "LocalHostName"); cur == name {
-			return
-		}
-		e.logln("Naming this Mac '" + name + "' so devices can use http://" + name + ".local ...")
-		if err := e.run(nil, "sudo", "scutil", "--set", "LocalHostName", name); err != nil {
-			e.logln("(skipped renaming - use the server IP)")
-		}
-	case "linux":
-		if _, err := exec.LookPath("avahi-daemon"); err != nil {
-			_ = e.run(nil, "sh", "-c", "sudo apt-get install -y avahi-daemon || sudo dnf install -y avahi || true")
-		}
-		_ = e.run(nil, "sudo", "hostnamectl", "set-hostname", name)
-		_ = e.run(nil, "sudo", "systemctl", "enable", "--now", "avahi-daemon")
-	case "windows":
-		// Windows can't advertise <name>.local itself. One-time at setup: install
-		// Apple Bonjour for a real care.local, or give the box a static IP.
-		e.logln("Windows: set naming once - install Bonjour (for http://" + name + ".local) or use a static IP.")
-	}
 }

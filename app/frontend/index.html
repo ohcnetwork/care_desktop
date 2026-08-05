@@ -25,11 +25,12 @@
         <p>A one-time setup runs the whole CARE system on this one computer, reachable by every phone and laptop on the clinic WiFi.</p>
         <ol class="steps">
           <li><span class="step-n">1</span><div><b>We check your computer</b><span>Done automatically. Nothing for you to do.</span></div></li>
-          <li><span class="step-n">2</span><div><b>Set up backups</b><span>Choose a safe drive and a backup password.</span></div></li>
-          <li><span class="step-n">3</span><div><b>Create the admin login</b><span>You'll add staff from inside CARE later.</span></div></li>
+          <li><span class="step-n">2</span><div><b>Enter your clinic's web address</b><span>Your own domain, so every device gets a padlock.</span></div></li>
+          <li><span class="step-n">3</span><div><b>Set up backups</b><span>Choose a safe drive and a backup password.</span></div></li>
+          <li><span class="step-n">4</span><div><b>Create the admin login</b><span>You'll add staff from inside CARE later.</span></div></li>
         </ol>
         <div class="grow"></div>
-        <div class="rail-note"><i class="ph ph-shield-check"></i><span>Runs fully offline after setup. Patient data never leaves the building.</span></div>
+        <div class="rail-note"><i class="ph ph-shield-check"></i><span>Encrypted end to end. Patient data stays on the clinic WiFi and never leaves the building.</span></div>
       </aside>
 
       <main class="wiz-main">
@@ -47,11 +48,34 @@
             <div class="req-how" id="runtime-how" hidden></div>
             <div class="req-div"></div>
             <div class="req-row">
-              <div class="req-ico wait" id="mdns-ico"><i class="ph ph-circle-notch spin"></i></div>
-              <div class="req-txt"><div class="t">Network name  <code>care.local</code></div><div class="s">The address every device uses to reach the clinic.</div></div>
-              <span class="req-badge wait" id="mdns-badge">Checking...</span>
+              <div class="req-ico wait" id="addr-ico"><i class="ph ph-globe"></i></div>
+              <div class="req-txt"><div class="t">Clinic web address</div><div class="s">Your own domain, and the token that proves you own it.</div></div>
+              <span class="req-badge wait" id="addr-badge">Not set</span>
             </div>
-            <div class="req-how" id="mdns-how" hidden></div>
+            <div class="req-how" id="addr-how" hidden></div>
+          </div>
+
+          <div class="section-label">Clinic web address</div>
+          <div class="card">
+            <div class="card-hint" style="margin-bottom:12px;">CARE is served over HTTPS on a domain you own, so every phone and laptop gets a padlock with nothing to install on it. Follow <code>docs/tls.md</code> to point your domain at Cloudflare and create the token.</div>
+            <label>Domain</label>
+            <div class="input-wrap">
+              <i class="ph ph-globe lead"></i>
+              <input type="text" id="publichost" placeholder="clinic.example.com" autocapitalize="off" autocorrect="off" spellcheck="false" />
+            </div>
+            <div class="hint">Needs an A record pointing at this computer, with Cloudflare's proxy off (grey cloud).</div>
+            <div class="card-div"></div>
+            <label>Cloudflare API token</label>
+            <div class="input-wrap">
+              <i class="ph ph-key lead"></i>
+              <input type="password" id="dnstoken" placeholder="Edit zone DNS token" autocomplete="off" spellcheck="false" />
+              <button class="eye" id="tok-toggle"><i class="ph ph-eye" id="tok-eye"></i></button>
+            </div>
+            <div class="hint">Cloudflare &rarr; My Profile &rarr; API Tokens &rarr; "Edit zone DNS", scoped to your domain.</div>
+            <div class="env-actions" style="margin-top:14px;">
+              <div class="grow"></div>
+              <button class="btn" id="addr-check"><i class="ph ph-check-circle"></i>Check address</button>
+            </div>
           </div>
 
           <div class="section-label">Backup</div>
@@ -106,7 +130,7 @@
       <div class="center-inner">
         <img src="/care_logo_mark.svg" alt="CARE" />
         <h2>Setting up your clinic...</h2>
-        <p>This needs the internet once and takes about 10 to 20 minutes, then it runs offline forever. You can leave this window open.</p>
+        <p>This takes about 10 to 20 minutes and needs the internet. Afterwards CARE only goes online to renew its certificate, every couple of months. You can leave this window open.</p>
         <div class="progress" id="install-progress"><div class="bar" id="install-bar"></div></div>
         <div class="pct" id="install-pct">Working...</div>
         <div class="step-chip"><i class="ph ph-circle-notch spin"></i><span id="install-step-text">Getting started...</span></div>
@@ -175,6 +199,7 @@
               <div class="addr-kicker">Clinic address</div>
               <div class="addr-name" id="addr-name">care.local</div>
               <div class="addr-sub">Open this on any phone or laptop on the clinic WiFi.</div>
+              <div class="addr-sub" id="addr-secure" hidden><i class="ph-fill ph-lock-simple"></i> Encrypted (HTTPS) &middot; care.local still works</div>
               <div class="grow"></div>
               <div class="addr-actions">
                 <button class="btn white" id="open-link2"><i class="ph-bold ph-arrow-square-out"></i>Open</button>
@@ -260,6 +285,7 @@
             <div class="seg">
               <button id="sel-backend" class="on">Backend</button>
               <button id="sel-frontend">Frontend</button>
+              <button id="sel-tls">HTTPS</button>
             </div>
             <div class="cfg-col">
               <div class="settings-card">

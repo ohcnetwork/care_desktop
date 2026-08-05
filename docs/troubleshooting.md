@@ -1,29 +1,58 @@
 # Troubleshooting
 
-Common problems and fixes. Most issues are one of: Docker not running, `care.local`
+Common problems and fixes. Most issues are one of: Docker not running, the clinic address
 not resolving, or the MinIO endpoint not reachable from other devices.
 
 ---
 
-## `care.local` doesn't open on a phone/laptop
+## The clinic address doesn't open on a phone/laptop
 
-**Cause:** the name isn't being advertised, or the device doesn't speak mDNS.
+**Cause:** DNS, the certificate, or the network path — check them in that order.
 
-- **Confirm the server's name:**
-  - macOS: `scutil --get LocalHostName` → must be `care`. Fix: `sudo scutil --set LocalHostName care`.
-  - Linux: `hostname` → must be `care`, and `systemctl status avahi-daemon` active.
-  - Windows: rename the PC to `care` (Settings → System → About → Rename), set the network to **Private**, and allow **UDP 5353** in Windows Firewall. Recent Windows 11 then advertises `care.local` natively; older builds need **Apple Bonjour**.
-- **Test from the server itself:** open `http://care.local/` on the server's own browser. If that works but phones don't, it's the device's mDNS.
-- **Fallback — use the IP:** find the server's IP (`ipconfig` / `ip addr` / `ifconfig`) and open `http://<ip>/`. If you'll use the IP permanently, also set `BUCKET_EXTERNAL_ENDPOINT=http://<ip>` in `backend.env` and rebuild the frontend with `REACT_CARE_API_URL=http://<ip>` (see [configuration.md](configuration.md)).
-- Give the server a **DHCP reservation** in the router so its IP never changes.
+- **Does the name resolve?** On the phone (or any device on the clinic WiFi):
+  `nslookup clinic.yourdomain.com`. It should return the server's address on the WiFi.
+  - Nothing back → the `A` record is missing, or the domain isn't on Cloudflare's
+    nameservers yet (`dig +short NS yourdomain.com`).
+  - **A private IP is returned on the server but not on phones** → the router is doing
+    **DNS rebinding protection**, which discards answers containing private addresses.
+    Common on OpenWRT, Fritz!Box, pfSense and Pi-hole. Disable it, or add an exception
+    for your domain.
+- **Does it resolve to the *right* address?** If the server's IP changed (router
+  reboot, new network), update the `A` record in Cloudflare and run `care restart`.
+  Then add a **DHCP reservation** so it can't drift again.
+- **Test from the server itself:** `curl -sI https://clinic.yourdomain.com/ping/`.
+  `HTTP/2 200` means the server and certificate are fine and the problem is on the
+  device or the network in between.
+- **Firewall:** inbound TCP 443 must be allowed on the server.
 
 ---
 
-## The installer's step 3 (`care.local`) won't go green
+## Browser shows a certificate warning
 
-- You set the name but didn't click **Check** again — click it.
-- On the Mac, the GUI can't run `sudo` — set the name in **Terminal** once (`sudo scutil --set LocalHostName care`), then **Check**.
-- On Windows, install **Bonjour** and rename the PC to `care`, then **Check** (or use a static IP via the CLI).
+- **"Not private" / untrusted issuer** → you're on the Let's Encrypt **staging** CA.
+  Staging certificates are deliberately untrusted. Remove `CARE_ACME_CA` from
+  `tls.env` (or set it to the production URL) and run `care start`.
+- **Name mismatch** → the address you typed isn't the one in `CARE_PUBLIC_HOST`.
+- **Expired** → renewal has been failing. Check `docker compose logs caddy | grep -i acme`;
+  usually the API token was revoked, or the domain left Cloudflare.
+
+---
+
+## Setup fails with a certificate error
+
+```sh
+docker compose logs caddy | grep -i -e acme -e error
+```
+
+- *"API token … appears invalid"* → the token was pasted with quotes or braces around
+  it. Paste just the token.
+- *403 / "invalid zone"* → the token lacks `Zone:DNS:Edit`, or is scoped to a different
+  zone than the domain you entered.
+- *timed out waiting for record* → the domain isn't on Cloudflare's nameservers yet.
+- *too many certificates* → Let's Encrypt's weekly limit (5 identical certs). Wait, and
+  use the staging CA while testing.
+
+See [tls.md](tls.md) for the full setup.
 
 ---
 
@@ -37,14 +66,14 @@ not resolving, or the MinIO endpoint not reachable from other devices.
 
 ## File uploads or image previews fail (but the rest works)
 
-**Cause:** `BUCKET_EXTERNAL_ENDPOINT` points somewhere devices can't reach (often
-`localhost`).
+**Cause:** the presigned file URLs point at an address the device can't reach, or at
+`http://` on an HTTPS page (blocked as mixed content).
 
-- It must be a host **every device** can resolve: `http://care.local` (default)
-  or `http://<server-ip>`. Files are served through Caddy on port 80 — the same
-  address as the app — so no extra port is involved.
+- `BUCKET_EXTERNAL_ENDPOINT` is set automatically from `CARE_PUBLIC_HOST` — don't edit
+  it in `backend.env`. If it's wrong, fix the address in `tls.env` and run `care start`.
+- If the clinic's address changed recently, the frontend may still be built for the old
+  one: `care rebuild-frontend`.
 - Check `care status` shows `minio running` (Caddy proxies to it).
-- After changing it in `backend.env`, run `care start`.
 
 ---
 

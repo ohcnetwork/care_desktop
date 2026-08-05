@@ -1,6 +1,8 @@
 package care
 
 import (
+	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
@@ -49,19 +51,22 @@ func isNotFound(err error) bool {
 		strings.Contains(err.Error(), "cannot find the file")
 }
 
-// Health reports whether the app answers on :80 (through Caddy -> backend /ping/).
+// Health reports whether the app answers through Caddy -> backend /ping/.
 type Health struct {
 	Active bool   `json:"active"`
 	Code   int    `json:"code"`
 	Detail string `json:"detail"`
 }
 
-// Ping hits http://localhost/ping/ with a short timeout.
+// Ping asks the stack for /ping/ through Caddy, with a short timeout.
 func (e *Engine) Ping() Health {
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get("http://localhost/ping/")
+	if !e.Configured() {
+		return Health{Active: false, Detail: "no clinic web address configured yet"}
+	}
+	client := e.pingClient()
+	resp, err := client.Get("https://" + e.publicHost() + "/ping/")
 	if err != nil {
-		return Health{Active: false, Code: 0, Detail: "nothing answering on :80"}
+		return Health{Active: false, Code: 0, Detail: "nothing answering on :443"}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == 200 {
@@ -70,15 +75,40 @@ func (e *Engine) Ping() Health {
 	return Health{Active: false, Code: resp.StatusCode, Detail: "HTTP " + strings.TrimSpace(resp.Status)}
 }
 
-// WaitHealthy blocks until the stack actually answers healthy on :80 (Caddy ->
-// backend /ping/), or the timeout elapses. `docker compose up -d` only means the
-// containers were *created* - the app server, Caddy, and its upstreams still need
-// to come up before anything is really serving. Callers gate their success
-// message (and the installer's "complete") on this so it's only reported once
-// http://<name>.local is genuinely reachable.
+// pingClient builds the health probe's client. The URL keeps the public name (that's
+// what sets TLS SNI and what the certificate is checked against) while this transport
+// dials loopback - so the probe validates the certificate honestly without depending
+// on clinic DNS, which may not answer for the name even when CARE is fine.
+func (e *Engine) pingClient() *http.Client {
+	tr := &http.Transport{
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, network, "127.0.0.1:443")
+		},
+	}
+	// On a staging CA the certificate chains to an untrusted root by design, so a
+	// verifying probe would report the stack as down when it is in fact working -
+	// exactly during the test run where a clear result matters most. Skipping
+	// verification is safe here and only here: we dial loopback, so there is no
+	// network path for anything else to answer.
+	if e.acmeCA() != acmeProduction {
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+	return &http.Client{Timeout: 5 * time.Second, Transport: tr}
+}
+
+// WaitHealthy blocks until the stack actually answers healthy (Caddy -> backend
+// /ping/), or the timeout elapses. `docker compose up -d` only means the containers
+// were *created* - the app server, Caddy, and its upstreams still need to come up
+// before anything is really serving. Callers gate their success message (and the
+// installer's "complete") on this so it's only reported once the clinic's address is
+// genuinely reachable.
+//
+// With HTTPS on, the first start also waits on certificate issuance: Caddy has to
+// complete the ACME DNS-01 exchange before it can serve anything, which adds up to a
+// couple of minutes on top. That's why callers pass a generous timeout.
 func (e *Engine) WaitHealthy(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	last := Health{Detail: "nothing answering on :80"}
+	last := e.Ping()
 	for n := 1; ; n++ {
 		if last = e.Ping(); last.Active {
 			return nil
@@ -92,25 +122,25 @@ func (e *Engine) WaitHealthy(timeout time.Duration) error {
 }
 
 // EnsurePortFree fails fast when something other than our own stack already holds
-// the app's host port (80). Without this, `docker compose up` fails deep inside with
-// a cryptic "Bind for 0.0.0.0:80 failed: port is already allocated"; here we catch it
-// first and return a clear, actionable message the installer shows on its failed
-// screen. Our own running caddy is not a conflict (idempotent restarts must pass).
+// :443. Without this, `docker compose up` fails deep inside with a cryptic "Bind for
+// 0.0.0.0:443 failed: port is already allocated"; here we catch it first and return a
+// clear, actionable message the installer shows on its failed screen. Our own running
+// caddy is not a conflict (idempotent restarts must pass).
 func (e *Engine) EnsurePortFree() error {
 	if e.caddyRunning() {
-		return nil // the listener on :80 is our own caddy
+		return nil // the listener is our own caddy
 	}
-	if !tcpBusy("127.0.0.1:80") {
+	if !tcpBusy(fmt.Sprintf("127.0.0.1:%d", httpsPort)) {
 		return nil
 	}
-	who := portOccupant(80)
-	return fmt.Errorf("port 80 is already in use%s.\n"+
-		"CARE serves the clinic app on port 80 (http://%s.local/). "+
-		"Quit whatever is using port 80, then try again.", who, e.mdnsName())
+	return fmt.Errorf("port %d is already in use%s.\n"+
+		"CARE serves the clinic app on port %d. "+
+		"Quit whatever is using it, then try again.",
+		httpsPort, portOccupant(httpsPort), httpsPort)
 }
 
 // caddyRunning reports whether our compose stack's caddy service is already up, so a
-// listener on :80 is ours (not a foreign conflict).
+// listener on :443 is ours (not a foreign conflict).
 func (e *Engine) caddyRunning() bool {
 	out, err := e.capture("docker", "compose", "ps", "--services", "--filter", "status=running")
 	if err != nil {
@@ -171,64 +201,10 @@ func (e *Engine) GitCheck() DockerStatus {
 	return DockerStatus{OK: false, Message: "Git not found - install Git (Git for Windows / Xcode CLT / apt-get git)."}
 }
 
-// NameStatus reports whether this machine is reachable as <name>.local, with a
-// per-OS "how" the wizard shows when it isn't.
+// NameStatus is a wizard-facing check result: did it pass, what to show, and how to
+// fix it when it didn't. Used for the clinic's web-address check (see tls.go).
 type NameStatus struct {
 	OK      bool   `json:"ok"`
 	Message string `json:"message"`
 	How     string `json:"how"`
-}
-
-// MDNSCheck verifies that <name>.local actually resolves right now - a real
-// functional test (does the LAN answer?), uniform across OSes. It's gated in the
-// installer because the frontend is baked to http://care.local. The "how" text when
-// it fails depends on the mDNS mode. Note: in "advertise" mode the app answers this
-// itself, so the app's MDNSStatus reports green as soon as its responder is up.
-func (e *Engine) MDNSCheck() NameStatus {
-	name := e.mdnsName() // e.g. "care"
-	full := name + ".local"
-	if _, err := net.LookupHost(full); err == nil {
-		return NameStatus{OK: true, Message: full + " resolves"}
-	}
-	switch e.MDNSMode() {
-	case "rename":
-		return renameHow(name, full)
-	case "off":
-		return NameStatus{OK: false,
-			Message: full + " not advertised (mDNS is off)",
-			How:     "You're on static-IP mode. Open http://<server-ip>/ instead of " + full + ", or set CARE_MDNS_MODE=advertise."}
-	default: // advertise
-		how := "Open (and keep open) the CARE Desktop app - it advertises " + full +
-			" on the LAN while running. Then re-check."
-		if runtime.GOOS == "windows" {
-			how += "\nOn Windows, also allow inbound UDP 5353 (PowerShell as Admin):\n" +
-				"  Set-NetConnectionProfile -NetworkCategory Private\n" +
-				"  New-NetFirewallRule -DisplayName \"mDNS\" -Direction Inbound -Protocol UDP -LocalPort 5353 -Action Allow -Profile Private"
-		}
-		how += "\nStill failing? Use a static IP (see the install docs)."
-		return NameStatus{OK: false, Message: full + " isn't resolving yet", How: how}
-	}
-}
-
-// renameHow is the legacy per-OS guidance for the opt-in "rename" mode.
-func renameHow(name, full string) NameStatus {
-	switch runtime.GOOS {
-	case "darwin":
-		return NameStatus{OK: false,
-			Message: full + " not set yet",
-			How:     "In Terminal: sudo scutil --set LocalHostName " + name + "  - or System Settings -> General -> Sharing -> Local hostname -> " + name + ". Then re-check."}
-	case "linux":
-		return NameStatus{OK: false,
-			Message: full + " not set yet",
-			How:     "In Terminal: sudo hostnamectl set-hostname " + name + " && sudo systemctl enable --now avahi-daemon. Then re-check."}
-	case "windows":
-		return NameStatus{OK: false,
-			Message: full + " doesn't resolve yet",
-			How: "Open PowerShell as Administrator and run these (the last one reboots):\n" +
-				"  Set-NetConnectionProfile -NetworkCategory Private\n" +
-				"  New-NetFirewallRule -DisplayName \"mDNS\" -Direction Inbound -Protocol UDP -LocalPort 5353 -Action Allow -Profile Private\n" +
-				"  Rename-Computer -NewName \"" + name + "\" -Force -Restart\n" +
-				"After the reboot, click Check. Still failing? Install Apple Bonjour, or use a static IP. (See docs/install-windows.md.)"}
-	}
-	return NameStatus{OK: false, Message: "unsupported OS"}
 }

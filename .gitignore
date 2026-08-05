@@ -13,3 +13,10 @@
 
 # Default backup dir if BACKUP_DIR is unset and compose runs from here.
 /db-backups/
+
+# Holds the clinic's live Cloudflare API token. tls.env.example is the tracked
+# template; stage-kit falls back to it when this file doesn't exist.
+/tls.env
+
+# Runtime marker: which origin the built frontend image targets.
+/.frontend-origin

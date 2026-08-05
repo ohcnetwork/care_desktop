@@ -1,12 +1,34 @@
-# CARE clinic reverse proxy - ONE origin, plain HTTP, trusted LAN only.
-# Pages and the API share http://care.local, so there is no CORS to configure.
+# CARE clinic reverse proxy - HTTPS only, one origin. See docs/architecture.md.
+#
+# No plain-HTTP door by design: a plaintext entry point can be intercepted and
+# stripped, undoing the encryption it hands off to. Port 80 is not served at all.
 {
-	auto_https off
+	# disable_redirects, not off: keeps certificate management while stopping Caddy
+	# binding :80 for a redirect we don't want.
+	auto_https disable_redirects
 	order coraza_waf first # must run before reverse_proxy
+
+	acme_ca {$CARE_ACME_CA}
 }
 
-:80 {
+https://{$CARE_PUBLIC_HOST} {
+	# DNS-01: the only challenge that works from behind the clinic router's NAT.
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		# Ask public resolvers directly - a router doing DNS-rebinding filtering or
+		# aggressive caching would stall the challenge until it times out.
+		resolvers 1.1.1.1 8.8.8.8
+	}
+
 	encode gzip
+
+	# Set at the edge so they cover the React app and the file buckets, not just
+	# Django's responses. No HSTS `preload`: it is a one-way door. See docs/tls.md.
+	header {
+		Strict-Transport-Security "max-age={$CARE_HSTS_SECONDS}"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
 
 	# WAF on /api only (buckets excluded - uploads false-positive).
 	# SecRuleEngine: Off (inert) -> DetectionOnly (log) -> On (block); restart to apply.

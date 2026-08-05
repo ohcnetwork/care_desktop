@@ -23,7 +23,7 @@ const $ = <T extends HTMLElement>(sel: string): T => {
 type DockerStatus = { ok: boolean; message: string };
 type NameStatus = { ok: boolean; message: string; how: string };
 type Health = { active: boolean; code: number; detail: string };
-type AppState = { setup_done: boolean; mdns_name: string; docker: DockerStatus };
+type AppState = { setup_done: boolean; origin: string; docker: DockerStatus };
 type Backup = { db_dump: string; files_archive: string; label: string; manual: boolean; encrypted: boolean; size_bytes: number };
 type CarePlugin = { name: string; package_name: string; version?: string; configs?: Record<string, unknown> };
 type State = "running" | "partial" | "stopped" | "unknown";
@@ -31,7 +31,10 @@ type State = "running" | "partial" | "stopped" | "unknown";
 let phase: "setup" | "panel" = "setup";
 let busy = false, busyLabel = "";
 let lastState: State = "unknown";
-let mdnsName = "care.local";
+// Where the clinic opens - https://<the clinic's domain>. Read from the engine so
+// the Open button and the copyable address always follow the live tls.env.
+let clinicOrigin = "";
+let clinicHost = "";
 let backups: Backup[] = [];
 
 function showView(v: "wizard" | "panel"): void {
@@ -68,7 +71,7 @@ function append(line: string): void {
 // ===========================================================================
 // Wizard - requirement checks
 // ===========================================================================
-let runtimeOk = false, mdnsOk = false, pwOk = false, bpwOk = false;
+let runtimeOk = false, addrOk = false, pwOk = false, bpwOk = false;
 let backupDir = "";
 const install = $<HTMLButtonElement>("#install");
 
@@ -85,13 +88,13 @@ function setReq(id: string, state: "ok" | "wait" | "bad", label: string, how = "
 }
 
 function gate(): void {
-  const checks = runtimeOk && mdnsOk;
-  install.disabled = !(checks && pwOk && bpwOk);
-  $("#install-note").textContent = !checks
+  install.disabled = !(runtimeOk && addrOk && pwOk && bpwOk);
+  $("#install-note").textContent = !runtimeOk
     ? "Waiting for your computer to be ready..."
-    : !pwOk ? "Set a strong admin password to continue."
-      : !bpwOk ? "Set a backup password to continue."
-        : "Ready. This takes about 10 to 20 minutes.";
+    : !addrOk ? "Enter your clinic's web address and check it to continue."
+      : !pwOk ? "Set a strong admin password to continue."
+        : !bpwOk ? "Set a backup password to continue."
+          : "Ready. This takes about 10 to 20 minutes.";
 }
 
 async function checkRuntime(): Promise<void> {
@@ -103,15 +106,33 @@ async function checkRuntime(): Promise<void> {
   else setReq("runtime", "bad", "Not ready", !d.ok ? d.message : g.message);
   gate();
 }
-async function checkMDNS(): Promise<void> {
-  setReq("mdns", "wait", "Checking...");
-  const d: NameStatus = await App.MDNSStatus();
-  mdnsOk = d.ok;
-  setReq("mdns", d.ok ? "ok" : "bad", d.ok ? "Ready" : "Not ready", d.ok ? "" : (d.how || d.message));
+// checkAddress asks the engine whether the domain is shaped right, whether Cloudflare
+// accepts the token, and whether the name already points at this computer. It talks to
+// Cloudflare and to DNS, so it runs on demand rather than on every keystroke.
+async function checkAddress(): Promise<void> {
+  const host = $<HTMLInputElement>("#publichost").value.trim();
+  const token = $<HTMLInputElement>("#dnstoken").value.trim();
+  if (!host && !token) { addrOk = false; setReq("addr", "wait", "Not set"); gate(); return; }
+  setReq("addr", "wait", "Checking...");
+  const d: NameStatus = await App.CheckAddress(host, token);
+  addrOk = d.ok;
+  setReq("addr", d.ok ? "ok" : "bad", d.ok ? "Ready" : "Not ready", d.ok ? "" : (d.how || d.message));
   gate();
 }
-function recheck(): void { void Promise.all([checkRuntime(), checkMDNS()]); }
+function recheck(): void { void checkRuntime(); void checkAddress(); }
 $("#check-reqs").addEventListener("click", recheck);
+$("#addr-check").addEventListener("click", () => void checkAddress());
+// Editing either field invalidates the last result - the badge must never keep
+// saying Ready for a value that is no longer what would be installed.
+for (const id of ["#publichost", "#dnstoken"]) {
+  $(id).addEventListener("input", () => { addrOk = false; setReq("addr", "wait", "Not checked"); gate(); });
+}
+$("#tok-toggle").addEventListener("click", () => {
+  const t = $<HTMLInputElement>("#dnstoken");
+  const show = t.type === "password";
+  t.type = show ? "text" : "password";
+  $("#tok-eye").className = show ? "ph ph-eye-slash" : "ph ph-eye";
+});
 
 $("#choose-backup").addEventListener("click", () => void (async () => {
   const sel = await App.ChooseFolder("Choose backup folder");
@@ -179,8 +200,9 @@ install.addEventListener("click", () => {
   void (async () => {
     install.disabled = true;
     $("#install-note").textContent = "Re-checking your computer...";
-    await Promise.all([checkRuntime(), checkMDNS()]);
-    if (!(runtimeOk && mdnsOk && pwOk && bpwOk)) {
+    await checkRuntime();
+    await checkAddress();
+    if (!(runtimeOk && addrOk && pwOk && bpwOk)) {
       $("#install-note").textContent = "A step is no longer met - fix it and try again.";
       return;
     }
@@ -190,7 +212,13 @@ install.addEventListener("click", () => {
     installPct.textContent = "Working...";
     installStep.textContent = "Getting started...";
     append("Starting one-time setup...");
-    void App.RunSetup("care.local", $<HTMLInputElement>("#adminpw").value, $<HTMLInputElement>("#backuppw").value, true, "", backupDir).catch((e) => {
+    void App.RunSetup(
+      $<HTMLInputElement>("#publichost").value.trim(),
+      $<HTMLInputElement>("#dnstoken").value.trim(),
+      $<HTMLInputElement>("#adminpw").value,
+      $<HTMLInputElement>("#backuppw").value,
+      true, "", backupDir,
+    ).catch((e) => {
       lastError = String(e); append(`error: ${String(e)}`); showInstallFailed();
     });
   })();
@@ -297,10 +325,22 @@ $("#btn-backup-now").addEventListener("click", () => void run("backup-now"));
 $("#btn-rebuild").addEventListener("click", () => void run("rebuild-frontend"));
 
 // address open + copy
-function openClinic(): void { void App.OpenURL(`http://${mdnsName}/`); }
+function openClinic(): void { void App.OpenURL(`${clinicOrigin}/`); }
 $("#open-link").addEventListener("click", openClinic);
 $("#open-link2").addEventListener("click", openClinic);
-$("#copy-addr").addEventListener("click", () => void navigator.clipboard.writeText(mdnsName).then(() => showToast("Address copied"), () => showToast(mdnsName)));
+$("#copy-addr").addEventListener("click", () => void navigator.clipboard.writeText(clinicHost).then(() => showToast("Address copied"), () => showToast(clinicHost)));
+
+// refreshOrigin re-reads the live origin after HTTPS settings change, so the panel
+// never keeps offering an address that now just redirects.
+async function refreshOrigin(origin?: string): Promise<void> {
+  try {
+    clinicOrigin = origin ?? await App.PublicOrigin();
+    clinicHost = clinicOrigin.replace(/^https?:\/\//, "");
+    $("#addr-name").textContent = clinicHost || "not set up yet";
+    $("#open-name").textContent = clinicHost || "CARE";
+    $("#addr-secure").hidden = !clinicOrigin.startsWith("https://");
+  } catch { /* keep showing the current address */ }
+}
 $("#view-backups").addEventListener("click", () => showTab("backups"));
 
 // autostart
@@ -347,14 +387,16 @@ function serializeEnv(entries: Entry[]): string {
 }
 
 const ADV_PREFIXES = ["POSTGRES_", "MINIO_", "BUCKET_", "CELERY_", "SNS_", "DJANGO_SECURE_", "REACT_PUBLIC", "REACT_SENTRY", "REACT_APP_META"];
-const ADV_KEYS = new Set(["DATABASE_URL", "REDIS_URL", "DJANGO_SECRET_KEY", "DJANGO_SETTINGS_MODULE", "PYTHONPATH", "DJANGO_ALLOWED_HOSTS", "DJANGO_DEBUG", "DJANGO_ADMIN_URL", "CSRF_TRUSTED_ORIGINS", "FILE_UPLOAD_BUCKET", "FACILITY_S3_BUCKET"]);
+const ADV_KEYS = new Set(["DATABASE_URL", "REDIS_URL", "DJANGO_SECRET_KEY", "DJANGO_SETTINGS_MODULE", "PYTHONPATH", "DJANGO_ALLOWED_HOSTS", "DJANGO_DEBUG", "DJANGO_ADMIN_URL", "CSRF_TRUSTED_ORIGINS", "FILE_UPLOAD_BUCKET", "FACILITY_S3_BUCKET", "CARE_ACME_CA"]);
 function isAdvancedKey(key: string): boolean { return ADV_KEYS.has(key) || ADV_PREFIXES.some((p) => key.startsWith(p)); }
+
+type EnvName = "backend" | "frontend" | "tls";
 
 class EnvEditor {
   entries: Entry[] = [];
-  name: "backend" | "frontend" = "backend";
+  name: EnvName = "backend";
   constructor(private everydayEl: HTMLElement, private advEl: HTMLElement) {}
-  async load(name: "backend" | "frontend"): Promise<void> {
+  async load(name: EnvName): Promise<void> {
     this.name = name;
     try { this.entries = parseEnv(await App.ReadEnv(name)); }
     catch (e) { this.entries = [{ kind: "comment", raw: `# could not read ${name}.env: ${String(e)}` }]; }
@@ -408,11 +450,23 @@ $("#adv-env-toggle").addEventListener("click", () => {
 $("#env-save").addEventListener("click", () => {
   if (busy) return;
   void (async () => {
-    const be = envEditor.name === "backend";
+    const name = envEditor.name;
     try {
       await envEditor.save();
-      showToast(be ? "Backend settings applied" : "Rebuilding app with new settings");
-      await run(be ? "start" : "rebuild-frontend");
+      if (name === "tls") {
+        // start re-reads tls.env, swaps in the matching Caddyfile, obtains the
+        // certificate, and rebuilds the frontend when the origin changed (Vite
+        // bakes the API URL in at build time, so a restart alone isn't enough).
+        showToast("Applying HTTPS settings — this can take several minutes");
+        await run("start");
+        await refreshOrigin();
+      } else if (name === "backend") {
+        showToast("Backend settings applied");
+        await run("start");
+      } else {
+        showToast("Rebuilding app with new settings");
+        await run("rebuild-frontend");
+      }
     } catch (e) { append(`error saving env: ${String(e)}`); showToast("Couldn't save settings"); }
   })();
 });
@@ -705,21 +759,30 @@ $("#fe-plugins-save").addEventListener("click", () => {
 // ===========================================================================
 // System configuration - backend / frontend section switch
 // ===========================================================================
-async function selectSection(section: "backend" | "frontend"): Promise<void> {
+const SECTION_FILE: Record<EnvName, string> = { backend: "backend.env", frontend: "frontend.env", tls: "tls.env" };
+const SECTION_HINT: Record<EnvName, string> = {
+  backend: "Everyday settings for the backend, such as email delivery.",
+  frontend: "Everyday settings for the app that staff and patients see.",
+  tls: "Serve the clinic over HTTPS on your own domain. Leave the host blank to stay on plain http://care.local. Needs the domain's DNS on Cloudflare and an API token — see docs/tls.md.",
+};
+const SECTION_SAVE: Record<EnvName, string> = { backend: "Save & apply", frontend: "Save & rebuild app", tls: "Save & apply HTTPS" };
+
+async function selectSection(section: EnvName): Promise<void> {
   $("#sel-backend").classList.toggle("on", section === "backend");
   $("#sel-frontend").classList.toggle("on", section === "frontend");
-  $("#cfg-file").textContent = section === "backend" ? "backend.env" : "frontend.env";
-  $("#cfg-hint").textContent = section === "backend"
-    ? "Everyday settings for the backend, such as email delivery."
-    : "Everyday settings for the app that staff and patients see.";
-  $("#env-save").textContent = section === "backend" ? "Save & apply" : "Save & rebuild app";
+  $("#sel-tls").classList.toggle("on", section === "tls");
+  $("#cfg-file").textContent = SECTION_FILE[section];
+  $("#cfg-hint").textContent = SECTION_HINT[section];
+  $("#env-save").textContent = SECTION_SAVE[section];
   $("#adv-env-body").hidden = true; $("#adv-env-caret").className = "ph ph-caret-right";
   await envEditor.load(section);
   showPluginsFor(section);
 }
-function showPluginsFor(section: "backend" | "frontend"): void {
+function showPluginsFor(section: EnvName): void {
   const be = $("#be-plugins-actions"), fe = $("#fe-plugins-actions");
   const tag = $("#plugins-card .tag");
+  $("#plugins-card").hidden = section === "tls"; // no plugins to configure for HTTPS
+  if (section === "tls") return;
   if (section === "backend") {
     $("#plugins-hint").textContent = "Extra features for the backend. Adding or changing plugins rebuilds it, which needs the internet.";
     if (tag) { tag.textContent = "rebuilds on save"; tag.classList.add("warn"); }
@@ -734,6 +797,7 @@ function showPluginsFor(section: "backend" | "frontend"): void {
 }
 $("#sel-backend").addEventListener("click", () => void selectSection("backend"));
 $("#sel-frontend").addEventListener("click", () => void selectSection("frontend"));
+$("#sel-tls").addEventListener("click", () => void selectSection("tls"));
 
 // ===========================================================================
 // Advanced - password gate + navigation + uninstall
@@ -860,9 +924,7 @@ on("uninstalled", () => { showToast("Uninstalled"); setTimeout(() => window.loca
 // ===========================================================================
 async function bootPanel(): Promise<void> {
   const state = await App.GetState();
-  mdnsName = state.mdns_name || "care.local";
-  $("#addr-name").textContent = mdnsName;
-  $("#open-name").textContent = mdnsName;
+  await refreshOrigin(state.origin);
   showTab("overview");
   await loadBackups();
   await refresh();

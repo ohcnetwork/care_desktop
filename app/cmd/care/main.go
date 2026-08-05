@@ -3,7 +3,7 @@
 //
 //	care setup | start | stop | restart | rebuild-backend | rebuild-frontend |
 //	     status | backup-now | list-backups | restore <dump> [files.tar.gz] |
-//	     uninstall [--images] [--backups] --yes | mdns [name]
+//	     dns-sync | uninstall [--images] [--backups] --yes
 //
 // The kit dir defaults to the current directory (override with CARE_DESKTOP_DIR).
 package main
@@ -11,8 +11,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"care-desktop/app/internal/care"
 )
@@ -46,6 +44,8 @@ func main() {
 		err = e.RebuildBackend()
 	case "rebuild-frontend":
 		err = e.RebuildFrontend()
+	case "dns-sync":
+		err = e.SyncDNS()
 	case "status":
 		var out string
 		if out, err = e.Status(); err == nil {
@@ -59,8 +59,6 @@ func main() {
 		err = restore(e, os.Args[2:])
 	case "uninstall":
 		err = uninstall(e, os.Args[2:])
-	case "mdns":
-		err = mdnsServe(e, os.Args[2:])
 	default:
 		usage()
 		os.Exit(1)
@@ -143,27 +141,6 @@ func uninstall(e *care.Engine, args []string) error {
 	return e.Uninstall(opts)
 }
 
-// mdnsServe advertises <name>.local on the LAN and blocks until interrupted. For
-// headless servers, run it under systemd so care.local resolves without renaming
-// the host. The desktop app does this on its own while it's open.
-func mdnsServe(e *care.Engine, args []string) error {
-	name := e.MDNSName()
-	if len(args) >= 1 && args[0] != "" {
-		name = args[0]
-	}
-	adv, err := care.Advertise(name)
-	if err != nil {
-		return err
-	}
-	defer adv.Stop()
-	fmt.Printf("Advertising %s.local on the LAN - press Ctrl-C to stop.\n", adv.Name())
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	<-sig
-	fmt.Println("\nStopped advertising.")
-	return nil
-}
-
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: care [setup|start|stop|restart|rebuild-backend|rebuild-frontend|status|backup-now|list-backups|restore <dump> [files.tar.gz]|uninstall [--images] [--backups] --yes|mdns [name]]")
+	fmt.Fprintln(os.Stderr, "usage: care [setup|start|stop|restart|rebuild-backend|rebuild-frontend|status|dns-sync|backup-now|list-backups|restore <dump> [files.tar.gz]|uninstall [--images] [--backups] --yes]")
 }

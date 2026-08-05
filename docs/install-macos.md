@@ -1,11 +1,12 @@
 # Install CARE Desktop on macOS
 
 Follow these once on the **server Mac** — the computer that stays on and runs the
-clinic. Other devices (phones, laptops) install nothing; they just open
-`http://care.local`.
+clinic. Other devices (phones, laptops) install nothing; they just open the clinic's
+web address in a browser.
 
 > Budget ~15–20 minutes for the first setup (it downloads + builds CARE). You need
-> internet **for the setup only**; after that it runs offline.
+> internet for setup, and afterwards only to renew the certificate every couple of
+> months.
 
 ---
 
@@ -22,25 +23,26 @@ clinic. Other devices (phones, laptops) install nothing; they just open
 
 ---
 
-## 2. Name the Mac `care` (so devices find it)
+## 2. Set up the clinic's web address
 
-Devices reach the clinic at `http://care.local`. macOS advertises this via Bonjour
-once the Mac's **Local Hostname** is `care`.
+CARE is served over HTTPS at a domain you own — that's what gives every phone and
+laptop a working padlock with **nothing to install on them**. Setup won't run without
+it, because there is no plain-HTTP mode.
 
-Run in **Terminal** (it asks for your password):
-```bash
-sudo scutil --set LocalHostName care
-```
-Or: **System Settings → General → Sharing → Local hostname** → set to `care`.
+You need, once:
 
-Verify:
-```bash
-scutil --get LocalHostName     # should print: care
-```
+1. **A domain** (any registrar, ~₹900/year)
+2. **Its DNS moved to Cloudflare** (free plan — you keep the domain where you bought it)
+3. **An `A` record** — e.g. `clinic.yourdomain.com` → this computer's address on the
+   clinic WiFi, with Cloudflare's proxy **off** (grey cloud)
+4. **A Cloudflare API token** scoped to that domain ("Edit zone DNS" template)
+5. **A DHCP reservation** on the clinic router so this computer keeps the same address
 
-> The desktop installer also **checks** this for you (step 3) and shows these exact
-> instructions if it isn't set — but a GUI can't ask for your password, so set it in
-> Terminal once as above.
+Full walkthrough with screenshots-worth of detail: **[tls.md](tls.md)**.
+
+> The address is public, but it points at a private address that only means something
+> inside the building — so traffic never crosses the internet. The server goes online
+> only to renew the certificate, about every two months.
 
 ---
 
@@ -62,7 +64,7 @@ Open **CARE Desktop**. The installer shows gated steps — each must be green:
 
 1. **Docker** — green when your Docker engine is running. (If red: start Docker, click **Check**.)
 2. **Git** — green when git is installed.
-3. **Network name — care.local** — green when step 2 above is done.
+3. **Clinic web address** — enter your domain and Cloudflare token, then **Check address**. It verifies the token with Cloudflare and that the record points at this Mac.
 4. **Install location** *(optional)* — where the app's files go. Leave default if unsure.
 5. **Backup location** *(optional)* — pick a **USB/external drive** if you have one (recommended).
 6. **Admin password** *(optional)* — the first login's password; blank = `admin`.
@@ -74,13 +76,13 @@ stack up. Watch the log; the first run takes several minutes.
 
 ## 5. Log in
 
-When it finishes, open **http://care.local/** (on the Mac or any device on the same
+When it finishes, open **https://clinic.yourdomain.com/** (on the Mac or any device on the same
 WiFi) and log in:
 
 - **Username:** `admin`
 - **Password:** what you set in step 6 (or `admin`)
 
-**Change the password immediately** at `http://care.local/admin/`.
+**Change the password immediately** at `https://clinic.yourdomain.com/admin/`.
 
 ---
 

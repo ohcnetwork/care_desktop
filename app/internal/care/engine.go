@@ -21,10 +21,10 @@ import (
 // docker-compose.yml, the env files, and the mounted configs).
 type Engine struct {
 	Kit string            // dir with docker-compose.yml, *.env, clinic_settings.py, ...
-	Env map[string]string // overrides: BACKUP_DIR, CARE_MDNS_NAME, CARE_ADMIN_PASSWORD, CARE_NO_MDNS
+	Env map[string]string // overrides: BACKUP_DIR, CARE_ADMIN_PASSWORD, CARE_PUBLIC_HOST, ...
 	Log func(string)      // optional sink for streamed output (one line at a time)
 
-	versions map[string]string // parsed versions.env (lazy)
+	settings map[string]string // parsed versions.env + tls.env (lazy)
 	once     sync.Once
 }
 
@@ -34,7 +34,7 @@ func (e *Engine) logln(s string) {
 	}
 }
 
-// get resolves a setting: explicit Env override > process env > versions.env > default.
+// get resolves a setting: explicit Env override > process env > kit env files > default.
 func (e *Engine) get(key, def string) string {
 	if e.Env != nil {
 		if v, ok := e.Env[key]; ok && v != "" {
@@ -44,26 +44,30 @@ func (e *Engine) get(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
-	e.once.Do(e.loadVersions)
-	if v, ok := e.versions[key]; ok && v != "" {
+	e.once.Do(e.loadSettings)
+	if v, ok := e.settings[key]; ok && v != "" {
 		return v
 	}
 	return def
 }
 
-func (e *Engine) loadVersions() {
-	e.versions = map[string]string{}
-	b, err := os.ReadFile(filepath.Join(e.Kit, "versions.env"))
-	if err != nil {
-		return
-	}
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
+// loadSettings reads the kit's plain key=value files. Both are optional - a missing
+// one just means "no overrides from there".
+func (e *Engine) loadSettings() {
+	e.settings = map[string]string{}
+	for _, name := range []string{"versions.env", "tls.env"} {
+		b, err := os.ReadFile(filepath.Join(e.Kit, name))
+		if err != nil {
 			continue
 		}
-		if k, v, ok := strings.Cut(line, "="); ok {
-			e.versions[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		for _, line := range strings.Split(string(b), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			if k, v, ok := strings.Cut(line, "="); ok {
+				e.settings[strings.TrimSpace(k)] = strings.TrimSpace(v)
+			}
 		}
 	}
 }
@@ -80,9 +84,51 @@ func (e *Engine) minioImage() string {
 func (e *Engine) caddyImage() string  { return e.get("CADDY_IMAGE", "caddy:2.11.4") }
 func (e *Engine) backupImage() string { return e.get("BACKUP_IMAGE", "care-backup:clinic") }
 
-// wafCaddyImage is the custom Caddy image (Coraza WAF compiled in) the caddy service
-// actually runs; caddyImage() above is the pinned base it's built from.
-func (e *Engine) wafCaddyImage() string { return e.get("CADDY_WAF_IMAGE", "care-caddy:clinic") }
+// wafCaddyImage is the custom Caddy image (Coraza WAF + Cloudflare DNS compiled in)
+// the caddy service actually runs; caddyImage() above is the pinned base it's built
+// from. The tag carries "-tls" because ensureCaddyImage only builds when the image is
+// *missing* - without a new tag, an upgraded install would keep running the old
+// binary, which has no DNS module and fails at certificate issuance.
+func (e *Engine) wafCaddyImage() string { return e.get("CADDY_WAF_IMAGE", "care-caddy:clinic-tls") }
+
+// --- HTTPS (see tls.env + docs/tls.md) ---------------------------------------
+//
+// CARE is served over HTTPS on the clinic's own domain, and only that. There is no
+// plain-HTTP mode: on a shared network a plaintext door can be intercepted and
+// stripped, which would undo the encryption it hands off to. So publicHost is
+// required, not optional - ValidateTLS refuses to start without it.
+
+// acmeProduction is Let's Encrypt's live directory. Override with CARE_ACME_CA
+// (staging) while testing - production rate-limits duplicate certs to 5 per week.
+const acmeProduction = "https://acme-v02.api.letsencrypt.org/directory"
+
+// httpsPort is the only port published to the clinic network.
+const httpsPort = 443
+
+// publicHost is the clinic's public DNS name (e.g. clinic.example.com). Everything
+// else derives from it, so there's no second setting to fall out of sync.
+func (e *Engine) publicHost() string { return strings.TrimSpace(e.get("CARE_PUBLIC_HOST", "")) }
+func (e *Engine) dnsToken() string   { return e.get("CLOUDFLARE_API_TOKEN", "") }
+func (e *Engine) acmeCA() string     { return e.get("CARE_ACME_CA", acmeProduction) }
+
+// hstsSeconds is how long browsers remember to use HTTPS only for this clinic.
+// Default 30 days - long enough that daily staff devices stay continuously protected,
+// short enough that a mistake ages out in a month rather than a year.
+func (e *Engine) hstsSeconds() string { return e.get("CARE_HSTS_SECONDS", "2592000") }
+
+// Configured reports whether this install has a public name yet - false on a fresh
+// box before the wizard has run.
+func (e *Engine) Configured() bool { return e.publicHost() != "" }
+
+// PublicOrigin is the scheme+host every device uses - what the frontend is built
+// against, what Django signs file URLs with, and what CSRF trusts. Empty until
+// configured. Exported because the app and CLI both surface it to the user.
+func (e *Engine) PublicOrigin() string {
+	if h := e.publicHost(); h != "" {
+		return "https://" + h
+	}
+	return ""
+}
 
 // backupPassword is the passphrase that protects the backup keypair's private key.
 // Empty means backup encryption is disabled - dumps are written in plaintext, and
@@ -98,32 +144,7 @@ func (e *Engine) beRef() string         { return e.get("CARE_BE_REF", "develop")
 func (e *Engine) feRef() string         { return e.get("CARE_FE_REF", "develop") }
 func (e *Engine) beDir() string         { return e.get("CARE_BE_DIR", filepath.Join(e.Kit, "care")) }
 func (e *Engine) feDir() string         { return e.get("CARE_FE_DIR", filepath.Join(e.Kit, "care_fe")) }
-func (e *Engine) mdnsName() string      { return e.get("CARE_MDNS_NAME", "care") }
 func (e *Engine) adminPassword() string { return e.get("CARE_ADMIN_PASSWORD", "admin") }
-func (e *Engine) noMDNS() bool          { return e.get("CARE_NO_MDNS", "0") == "1" }
-
-// MDNSName is the bare host label to advertise/resolve (e.g. "care"). Exported for
-// the app + CLI, which host the responder.
-func (e *Engine) MDNSName() string { return e.mdnsName() }
-
-// MDNSMode selects how http://<name>.local is made resolvable:
-//   - "advertise" (default): a pure-Go mDNS responder in the app / `care mdns` -
-//     no rename, no sudo, works on all 3 OSes.
-//   - "rename": the old scutil/hostnamectl path (a permanent OS-level hostname).
-//   - "off": do nothing (static-IP users). CARE_NO_MDNS=1 forces this too.
-func (e *Engine) MDNSMode() string {
-	if e.noMDNS() {
-		return "off"
-	}
-	switch strings.ToLower(e.get("CARE_MDNS_MODE", "advertise")) {
-	case "rename":
-		return "rename"
-	case "off":
-		return "off"
-	default:
-		return "advertise"
-	}
-}
 
 func (e *Engine) backupDir() string {
 	if d := e.get("BACKUP_DIR", ""); d != "" {
@@ -221,6 +242,13 @@ func (e *Engine) baseEnv() []string {
 	set("MINIO_ACCESS_KEY", "minioadmin")
 	set("MINIO_SECRET_KEY", "minioadmin")
 	set("BACKUP_DIR", e.backupDir())
+	// HTTPS: the name Caddy serves and gets a certificate for, and the origin the
+	// backend signs file URLs and trusts CSRF against.
+	set("CARE_PUBLIC_HOST", e.publicHost())
+	set("CARE_PUBLIC_ORIGIN", e.PublicOrigin())
+	set("CLOUDFLARE_API_TOKEN", e.dnsToken())
+	set("CARE_ACME_CA", e.acmeCA())
+	set("CARE_HSTS_SECONDS", e.hstsSeconds())
 	for k, v := range e.Env {
 		set(k, v)
 	}

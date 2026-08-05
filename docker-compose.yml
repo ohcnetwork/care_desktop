@@ -11,6 +11,14 @@ volumes:
   caddy-data:
   caddy-config:
 
+# The origin every device uses. Set as `environment:` so it overrides backend.env
+# (compose gives environment: precedence over env_file). The .invalid default can
+# never resolve, so a stack started without the engine fails visibly, not halfway.
+x-public-origin: &public-origin
+  CARE_PUBLIC_ORIGIN: ${CARE_PUBLIC_ORIGIN:-https://not-configured.invalid}
+  BUCKET_EXTERNAL_ENDPOINT: ${CARE_PUBLIC_ORIGIN:-https://not-configured.invalid}
+  CSRF_TRUSTED_ORIGINS: '["${CARE_PUBLIC_ORIGIN:-https://not-configured.invalid}"]'
+
 services:
   db:
     image: ${POSTGRES_IMAGE:-postgres:17.10-alpine}
@@ -44,8 +52,8 @@ services:
       - minio-data:/data
       - ./minio/entrypoint.sh:/entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
-    # No host port: browsers reach files through Caddy on :80 (/patient-bucket,
-    # /facility-bucket). One port to bind, and same-origin with the app.
+    # No host port: browsers reach files through Caddy (/patient-bucket,
+    # /facility-bucket), so they're same-origin with the app.
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
       interval: 10s
@@ -57,6 +65,7 @@ services:
     env_file: ./backend.env
     volumes:
       - ./clinic_settings.py:/settings/clinic_settings.py:ro
+    environment: *public-origin
     entrypoint: ["bash", "start.sh"]
     depends_on:
       db: {condition: service_healthy}
@@ -68,6 +77,7 @@ services:
     env_file: ./backend.env
     volumes:
       - ./clinic_settings.py:/settings/clinic_settings.py:ro
+    environment: *public-origin
     entrypoint: ["bash", "celery_worker.sh"]
     depends_on:
       db: {condition: service_healthy}
@@ -79,6 +89,7 @@ services:
     env_file: ./backend.env
     volumes:
       - ./clinic_settings.py:/settings/clinic_settings.py:ro
+    environment: *public-origin
     entrypoint: ["bash", "celery_beat.sh"]
     depends_on:
       db: {condition: service_healthy}
@@ -91,13 +102,18 @@ services:
       - backend
 
   caddy:
-    image: ${CADDY_WAF_IMAGE:-care-caddy:clinic}   # caddy + Coraza WAF, built by `care setup`
+    image: ${CADDY_WAF_IMAGE:-care-caddy:clinic-tls}   # caddy + Coraza WAF + Cloudflare DNS, built by `care setup`
     restart: unless-stopped
+    environment:
+      CARE_PUBLIC_HOST: ${CARE_PUBLIC_HOST:-}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      CARE_ACME_CA: ${CARE_ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+      CARE_HSTS_SECONDS: ${CARE_HSTS_SECONDS:-2592000}
     ports:
-      - "80:80"               # the clinic app: http://care.local/
+      - "443:443"             # the clinic app. No port 80 by design - see Caddyfile.
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
+      - caddy-data:/data      # ACME account key + issued certs live here; keep it
       - caddy-config:/config
     depends_on:
       - backend

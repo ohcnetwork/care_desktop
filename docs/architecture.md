@@ -22,7 +22,7 @@ What the engine does:
 
 | Action | What happens |
 |---|---|
-| `setup` | generate a Django secret → clone + build the backend and frontend images → set up `care.local` |
+| `setup` | validate the clinic's web address → generate a Django secret → clone + build the backend and frontend images |
 | `start` | ensure images exist → `docker compose up -d` → run DB migrations → create the default admin |
 | `stop` / `restart` | stop / restart containers (data always preserved) |
 | `rebuild-backend` | rebuild the backend image from new code, recreate + migrate |
@@ -46,14 +46,18 @@ The actual CARE stack, defined in `docker-compose.yml`. Project name is
 | `celery-worker` | `care:clinic` | background jobs |
 | `celery-beat` | `care:clinic` | scheduled jobs |
 | `frontend` | `care_fe:clinic` (built) | the React app (served by nginx) |
-| `caddy` | `caddy:2` | reverse proxy — the single front door on port 80 |
+| `caddy` | `caddy:2` + Coraza WAF + Cloudflare DNS (built) | reverse proxy — the single HTTPS front door on port 443 |
 | `backup` | `postgres:17-alpine` | daily DB dump + file archive |
 
 Only **one port** is exposed to the WiFi:
-- **80** — everything, via Caddy: the app, the API, and file upload/download.
+- **443** — everything, via Caddy: the app, the API, and file upload/download.
+
+There is no port 80 at all. A plaintext door can be intercepted and stripped by anyone
+on the same network, which would undo the encryption it hands off to — so it isn't
+served or published. See [tls.md](tls.md).
 
 Everything else (postgres 5432, redis 6379, the backend's 9000, MinIO's 9000) is
-private inside the Docker network. Files reach the browser through Caddy on port 80
+private inside the Docker network. Files reach the browser through Caddy on port 443
 too (see below), so there's a single port to bind — no conflicts with other
 services, and nothing extra to open on the firewall.
 
@@ -61,43 +65,71 @@ services, and nothing extra to open on the firewall.
 
 ## How a request flows
 
-A nurse opens `http://care.local` on her phone:
+A nurse opens `https://clinic.yourdomain.com` on her phone:
 
-1. **Name → address.** The phone asks the LAN "who is `care.local`?" — **mDNS**
-   (Bonjour/Avahi) answers with the server's IP. No internet, no router config.
-2. **Phone → Caddy.** It connects to the server on **port 80**, hitting Caddy (the
-   reverse proxy / single front door).
+1. **Name → address.** The phone looks the name up in public DNS and gets the server's
+   **LAN IP** (e.g. `192.168.1.50`) — an address that only means anything inside the
+   building. The name is public; the destination is not.
+2. **Phone → Caddy.** It connects to the server on **port 443** over TLS, hitting Caddy
+   (the reverse proxy / single front door). Caddy presents a Let's Encrypt certificate
+   it obtained and renews itself, so the padlock works with nothing installed.
 3. **Caddy routes by path** (`Caddyfile`):
    - `/api/*`, `/static/*`, `/ping/*`, `/health/*` → **backend:9000**
    - `/patient-bucket/*`, `/facility-bucket/*` → **minio:9000** (files)
    - everything else → **frontend:80** (the React app)
 4. **The React app runs in the phone** and calls `/api/...` at the **same address**
-   (`http://care.local`) — so it's *same-origin*, and there's **no CORS** to deal with.
+   (`https://clinic.yourdomain.com`) — so it's *same-origin*, and there's **no CORS**.
 5. **Backend talks to** postgres (data) + redis (cache/jobs) and returns JSON.
 6. **Files** (X-rays, documents) use **presigned URLs**: the browser uploads/
-   downloads at `http://care.local/patient-bucket/...`, which Caddy routes to MinIO.
-   Same origin as the app, on the same port 80 — no CORS, no extra port. (This is why
+   downloads at `https://clinic.yourdomain.com/patient-bucket/...`, which Caddy routes
+   to MinIO. Same origin, same port — no CORS, no extra port. (This is why
    `BUCKET_EXTERNAL_ENDPOINT` must be a name every device can reach — never
    `localhost`.) The bucket name stays in the path and isn't rewritten, so MinIO's
    SigV4 signature check on the presigned URL still passes.
 
 ---
 
-## Plain HTTP on the LAN (`clinic_settings.py`)
+## HTTPS everywhere, on the clinic's own domain
 
-CARE's production settings assume HTTPS. On a trusted offline LAN we use plain
-`http://`, so `clinic_settings.py` imports the production settings and relaxes only
-the HTTPS-only guards:
+CARE is served only over HTTPS, at a domain the clinic owns, with a certificate Caddy
+obtains and renews by itself. Clinic devices install nothing — the certificate chains
+to a CA every browser already ships.
+
+The name is public, but it resolves to the server's **LAN IP**, so traffic still never
+leaves the building; only the certificate paperwork touches the internet. Because the
+server sits behind the router's NAT with no port forwarding, the usual "let the CA
+connect in and check" verification can't work — instead Caddy proves domain ownership
+by writing a DNS record through the Cloudflare API (**DNS-01**), which needs only
+outbound internet. Renewal starts 30 days before expiry, so the connection would have
+to be down for a month before anything broke.
+
+There is deliberately no plain-HTTP fallback. See [tls.md](tls.md).
+
+## Django behind the proxy (`clinic_settings.py`)
+
+CARE's production settings assume it is the thing terminating TLS. Here Caddy does,
+and proxies plain HTTP inside the Docker network — so `clinic_settings.py` imports the
+production settings and adjusts only what that changes:
 
 ```python
 from config.settings.deployment import *
 DEBUG = False                   # never debug on a clinic box
-SECURE_SSL_REDIRECT = False     # don't bounce LAN http → https
-SESSION_COOKIE_SECURE = False   # let /admin + CSRF cookies work over http
-CSRF_COOKIE_SECURE = False
-SECURE_HSTS_SECONDS = 0
+SECURE_SSL_REDIRECT = False     # Caddy owns the redirect; doing it here too loops
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 CORS_ALLOW_ALL_ORIGINS = True   # the proxy is same-origin anyway
 ```
+
+`SECURE_PROXY_SSL_HEADER` is the load-bearing one: without it Django treats every
+request as insecure and builds `http://` absolute URLs, which breaks presigned file
+links and `/admin` redirects in ways that don't look like a TLS problem. It's safe to
+trust because Caddy sets that header itself on every proxied request, and the backend
+port is never published outside the compose network.
+
+Session and CSRF cookies are marked `Secure`, so the browser will not send them over
+plain http at all; CORS is shut (everything is one origin); and Caddy adds HSTS and
+`nosniff` at the edge so they cover the React app and the file buckets too, not only
+Django's own responses. The reasoning for each is in
+[tls.md](tls.md#whats-hardened-and-why).
 
 It's mounted into the backend container at `/settings/` and selected with
 `DJANGO_SETTINGS_MODULE=clinic_settings`. **The core CARE app is never modified.**
@@ -109,7 +141,8 @@ It's mounted into the backend container at `/settings/` and selected with
 The frontend (`care_fe`) is a **Vite** app: it **bakes** `REACT_CARE_API_URL` into
 the static files at *build* time, and its build validator rejects an empty value.
 The official prebuilt image points at CARE's cloud API — useless for an offline
-clinic. So setup **builds the frontend once**, pinned to `http://care.local`. The
+clinic. So setup **builds the frontend once**, pinned to the clinic's own address —
+which is why changing that address triggers a rebuild rather than a restart. The
 backend, by contrast, reads its settings at runtime, so it could use any image — but
 for now both are built from source (branch `develop`).
 

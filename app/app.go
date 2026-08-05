@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"care-desktop/app/internal/care"
@@ -19,12 +18,9 @@ import (
 // App is the Wails bridge: every exported method is callable from the web UI as
 // window.go.main.App.<Method>. It owns config persistence and drives the engine.
 type App struct {
-	ctx context.Context
-	kit fs.FS // embedded deployment kit
-
-	advMu   sync.Mutex       // guards adv
-	adv     *care.Advertiser // the running mDNS responder (advertise mode), if any
-	advStop chan struct{}    // closed on shutdown to end the DHCP watcher
+	ctx  context.Context
+	kit  fs.FS         // embedded deployment kit
+	stop chan struct{} // closed on shutdown to end the address watcher
 }
 
 func NewApp(kit fs.FS) *App {
@@ -34,79 +30,48 @@ func NewApp(kit fs.FS) *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	// Advertise care.local right away (host process; no rename, no sudo). Doing it
-	// before setup means the installer's step-3 check goes green immediately, and
-	// leaving it up while the app runs keeps the clinic reachable by name.
-	a.startAdvertise()
-	a.advStop = make(chan struct{})
-	go a.watchAdvertise()
+	a.stop = make(chan struct{})
+	go a.watchAddress()
 }
 
-// shutdown stops the responder when the app quits (wired via Wails OnShutdown).
+// shutdown is wired via Wails OnShutdown. Only the watcher needs stopping: the stack
+// runs in Docker and keeps serving whether this window is open or not.
 func (a *App) shutdown(context.Context) {
-	if a.advStop != nil {
-		close(a.advStop)
+	if a.stop != nil {
+		close(a.stop)
+		a.stop = nil
 	}
-	a.advMu.Lock()
-	a.adv.Stop()
-	a.adv = nil
-	a.advMu.Unlock()
 }
 
-// startAdvertise brings up the mDNS responder for the configured name, unless mDNS
-// is in "rename"/"off" mode. Best-effort: a failure is logged, never fatal.
-func (a *App) startAdvertise() {
-	if a.engine(nil).MDNSMode() != "advertise" {
-		return
-	}
-	a.advMu.Lock()
-	defer a.advMu.Unlock()
-	if a.adv != nil {
-		return
-	}
-	name := a.loadConfig().MDNSName
-	adv, err := care.Advertise(name)
-	if err != nil {
-		if a.ctx != nil {
-			wruntime.EventsEmit(a.ctx, "care-log", "mDNS: couldn't advertise "+name+".local ("+err.Error()+")")
-		}
-		return
-	}
-	a.adv = adv
-}
-
-// restartAdvertise re-advertises with the current config (after the name changes,
-// or the LAN IP changes).
-func (a *App) restartAdvertise() {
-	a.advMu.Lock()
-	a.adv.Stop()
-	a.adv = nil
-	a.advMu.Unlock()
-	a.startAdvertise()
-}
-
-// advRunning reports whether we're actively answering <name>.local.
-func (a *App) advRunning() bool {
-	a.advMu.Lock()
-	defer a.advMu.Unlock()
-	return a.adv != nil
-}
-
-// watchAdvertise re-advertises when the host's LAN IP changes (e.g. DHCP renew), so
-// care.local never points at a stale address. Cheap: a lookup every 30s.
-func (a *App) watchAdvertise() {
-	t := time.NewTicker(30 * time.Second)
+// watchAddress keeps the clinic's DNS record pointing here when the router hands this
+// computer a different address - a reboot, a new lease, or the clinic moving to a
+// different network entirely. Without it a nurse two metres from a healthy server
+// simply can't find it, and nothing about that failure looks DNS-shaped.
+//
+// The local check is cheap and runs often; Cloudflare is only called when the address
+// actually changed, which is rare.
+func (a *App) watchAddress() {
+	t := time.NewTicker(60 * time.Second)
 	defer t.Stop()
+	last, _ := care.OutboundIP()
 	for {
 		select {
-		case <-a.advStop:
+		case <-a.stop:
 			return
 		case <-t.C:
-			a.advMu.Lock()
-			changed := a.adv != nil && a.adv.IPsChanged()
-			a.advMu.Unlock()
-			if changed {
-				a.restartAdvertise()
+			cur, err := care.OutboundIP()
+			if err != nil || cur == "" || cur == last {
+				continue // no network, or nothing moved
+			}
+			last = cur
+			e := a.engine(nil)
+			if !e.Configured() {
+				continue // pre-setup; nothing to point anywhere yet
+			}
+			if err := e.SyncDNS(); err != nil {
+				wruntime.EventsEmit(a.ctx, "care-log",
+					"note: this computer's address changed to "+cur+
+						", but the DNS record couldn't be updated ("+err.Error()+")")
 			}
 		}
 	}
@@ -116,7 +81,7 @@ func (a *App) watchAdvertise() {
 
 type Config struct {
 	SetupDone   bool   `json:"setup_done"`
-	MDNSName    string `json:"mdns_name"`
+	PublicHost  string `json:"public_host"` // the clinic's domain; the API token lives in tls.env, never here
 	InstallDir  string `json:"install_dir"`
 	BackupDir   string `json:"backup_dir"`
 	AdminPwHash string `json:"admin_pw_hash,omitempty"` // bcrypt of the install-time admin password; gates Advanced
@@ -133,13 +98,9 @@ func (a *App) configPath() string {
 }
 
 func (a *App) loadConfig() Config {
-	cfg := Config{MDNSName: "care.local"}
-	b, err := os.ReadFile(a.configPath())
-	if err == nil {
+	var cfg Config
+	if b, err := os.ReadFile(a.configPath()); err == nil {
 		_ = json.Unmarshal(b, &cfg)
-	}
-	if cfg.MDNSName == "" {
-		cfg.MDNSName = "care.local"
 	}
 	return cfg
 }
@@ -166,7 +127,9 @@ func (a *App) kitDir() string {
 }
 
 // kitUserFiles are preserved on a kit refresh; everything else is app-owned.
-var kitUserFiles = map[string]bool{"backend.env": true, "frontend.env": true}
+// tls.env holds the clinic's own domain and API token - an app update must never
+// overwrite those back to blank and silently drop the install to plain HTTP.
+var kitUserFiles = map[string]bool{"backend.env": true, "frontend.env": true, "tls.env": true}
 
 // ensureKit syncs the embedded kit on every setup (not just the first) so an updated
 // app delivers new/changed files to an existing install, keeping edited env files.
@@ -227,18 +190,23 @@ func (a *App) engine(extra map[string]string) *care.Engine {
 
 type AppState struct {
 	SetupDone bool              `json:"setup_done"`
-	MDNSName  string            `json:"mdns_name"`
+	Origin    string            `json:"origin"` // https://<clinic domain>, or "" before setup
 	Docker    care.DockerStatus `json:"docker"`
 }
 
 func (a *App) GetState() AppState {
-	cfg := a.loadConfig()
+	e := a.engine(nil)
 	return AppState{
-		SetupDone: cfg.SetupDone,
-		MDNSName:  cfg.MDNSName,
-		Docker:    a.engine(nil).DockerCheck(),
+		SetupDone: a.loadConfig().SetupDone,
+		Origin:    e.PublicOrigin(),
+		Docker:    e.DockerCheck(),
 	}
 }
+
+// PublicOrigin is the address staff open, reflecting the current tls.env. The panel
+// re-reads it after saving HTTPS settings so the button and the copyable address
+// can't keep pointing at the old origin.
+func (a *App) PublicOrigin() string { return a.engine(nil).PublicOrigin() }
 
 func (a *App) DockerStatus() care.DockerStatus { return a.engine(nil).DockerCheck() }
 func (a *App) GitStatus() care.DockerStatus    { return a.engine(nil).GitCheck() }
@@ -264,16 +232,11 @@ func (a *App) VerifyAdminPassword(pw string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(h), []byte(pw)) == nil
 }
 
-// MDNSStatus is green whenever this app is actively advertising the name (advertise
-// mode), since that's exactly what makes care.local resolve. Otherwise it falls back
-// to the engine's resolution test + mode-specific guidance.
-func (a *App) MDNSStatus() care.NameStatus {
-	if a.advRunning() {
-		full := care.NameStatus{OK: true}
-		full.Message = a.loadConfig().MDNSName + " is being advertised by this app"
-		return full
-	}
-	return a.engine(nil).MDNSCheck()
+// CheckAddress is the wizard's live check on the clinic's web address: is the domain
+// shaped right, does Cloudflare accept the token, and does the name already point at
+// this computer. Called as the user types, and again before Install.
+func (a *App) CheckAddress(host, token string) care.NameStatus {
+	return a.engine(nil).CheckAddress(host, token)
 }
 
 // --- actions (async; stream logs, finish with a care-done event) ------------
@@ -302,7 +265,7 @@ func (a *App) run(e *care.Engine, fn func() error, markSetup bool, label string)
 			cfg.SetupDone = true
 			_ = a.saveConfig(cfg)
 			wruntime.EventsEmit(a.ctx, "setup-done", true)
-			a.notifyInstalled(cfg.MDNSName)
+			a.notifyInstalled()
 		}
 		wruntime.EventsEmit(a.ctx, "care-done", code)
 	}()
@@ -337,11 +300,8 @@ func (a *App) notifyActionFailed(label, detail string) {
 // from the setup-done branch, which only runs after the stack is verified healthy
 // (WaitHealthy), so this dialog is a truthful "it's up and reachable" signal.
 // Offers to open the app straight away.
-func (a *App) notifyInstalled(mdnsName string) {
-	if mdnsName == "" {
-		mdnsName = "care.local"
-	}
-	url := "http://" + mdnsName + "/"
+func (a *App) notifyInstalled() {
+	url := a.engine(nil).PublicOrigin() + "/"
 	sel, _ := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
 		Type:          wruntime.InfoDialog,
 		Title:         "CARE Desktop installed",
@@ -387,7 +347,7 @@ func actionFunc(e *care.Engine, action string) func() error {
 
 // RunSetup persists the wizard's choices, unpacks the kit, then runs setup+start.
 // Empty backupPassword = encryption off; rememberBackup saves it to the keychain.
-func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberBackup bool, installDir, backupDir string) error {
+func (a *App) RunSetup(publicHost, dnsToken, adminPassword, backupPassword string, rememberBackup bool, installDir, backupDir string) error {
 	if err := care.ValidatePassword(adminPassword); err != nil {
 		return err
 	}
@@ -397,14 +357,8 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 		}
 	}
 
-	mdns := strings.TrimSpace(mdnsName)
-	if mdns == "" {
-		mdns = "care.local"
-	}
-	host := strings.TrimSuffix(mdns, ".local")
-
 	cfg := a.loadConfig()
-	cfg.MDNSName = mdns
+	cfg.PublicHost = strings.TrimSpace(publicHost)
 	if h, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost); err == nil {
 		cfg.AdminPwHash = string(h) // so Advanced can be gated behind the admin password, offline
 	}
@@ -417,8 +371,12 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 	if err := a.saveConfig(cfg); err != nil {
 		return err
 	}
-	a.restartAdvertise() // pick up the chosen name (usually still care.local)
+	// Unpack the kit first: SaveTLSSettings writes into it, and it also validates
+	// the address + token so a typo fails here rather than after the long build.
 	if _, err := a.ensureKit(); err != nil {
+		return err
+	}
+	if err := a.engine(nil).SaveTLSSettings(publicHost, dnsToken); err != nil {
 		return err
 	}
 
@@ -429,17 +387,13 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 		}
 	}
 
-	env := map[string]string{
-		"CARE_MDNS_NAME":      host,
-		"CARE_ADMIN_PASSWORD": adminPassword,
-		"CARE_NO_MDNS":        "1", // naming is a verified wizard step; don't retry sudo here
-	}
+	env := map[string]string{"CARE_ADMIN_PASSWORD": adminPassword}
 	if backupPassword != "" {
 		env["CARE_BACKUP_PASSWORD"] = backupPassword
 	}
 	e := a.engine(env)
 	a.run(e, func() error {
-		// Check port 80 before the ~10-min build, so a conflict fails immediately
+		// Check the port before the ~10-min build, so a conflict fails immediately
 		// instead of after the wait (Start re-checks in case it's taken meanwhile).
 		if err := e.EnsurePortFree(); err != nil {
 			return err
@@ -564,6 +518,8 @@ func (a *App) envPath(name string) (string, error) {
 		return filepath.Join(a.kitDir(), "backend.env"), nil
 	case "frontend":
 		return filepath.Join(a.kitDir(), "frontend.env"), nil
+	case "tls":
+		return filepath.Join(a.kitDir(), "tls.env"), nil
 	}
 	return "", errString("unknown env file: " + name)
 }
@@ -610,17 +566,6 @@ func (a *App) SavePlugins(plugins []care.Plugin) error {
 // writes those rows directly, the same ones CARE's own Apps page edits, so the two
 // panels stay in sync.
 
-// appsEngine pins the clinic's chosen mDNS name, which the plugin bundle URLs are
-// built from. engine(nil) would fall back to "care" on a clinic that picked another
-// name.
-func (a *App) appsEngine() *care.Engine {
-	host := strings.TrimSuffix(strings.TrimSpace(a.loadConfig().MDNSName), ".local")
-	if host == "" {
-		host = "care"
-	}
-	return a.engine(map[string]string{"CARE_MDNS_NAME": host})
-}
-
 // ListApps returns the optional frontend plugins for the Frontend plugins panel:
 // the apps.json catalogue merged with CARE's live plug_config rows, which are the
 // only record of what's switched on.
@@ -628,13 +573,13 @@ func (a *App) ListApps() ([]care.ClinicApp, error) {
 	if _, err := os.Stat(filepath.Join(a.kitDir(), "docker-compose.yml")); err != nil {
 		return nil, nil // not set up yet - nothing to offer
 	}
-	return a.appsEngine().ListApps()
+	return a.engine(nil).ListApps()
 }
 
 // SetAppEnabled switches one catalogue app on or off by writing CARE's plug_config
 // table - instant, no rebuild. Staff refresh their browser to see the change.
 func (a *App) SetAppEnabled(slug string, enabled bool) error {
-	return a.appsEngine().SetAppEnabled(slug, enabled)
+	return a.engine(nil).SetAppEnabled(slug, enabled)
 }
 
 // ReadFrontendPlugins returns CARE's live frontend plugins (plug_config rows) for
@@ -643,7 +588,7 @@ func (a *App) ReadFrontendPlugins() ([]care.FrontendPlugin, error) {
 	if _, err := os.Stat(filepath.Join(a.kitDir(), "docker-compose.yml")); err != nil {
 		return []care.FrontendPlugin{}, nil // not set up yet
 	}
-	return a.appsEngine().ReadFrontendPlugins()
+	return a.engine(nil).ReadFrontendPlugins()
 }
 
 // SaveFrontendPlugins writes the whole plugin list to CARE's plug_config table
@@ -652,7 +597,7 @@ func (a *App) SaveFrontendPlugins(plugins []care.FrontendPlugin) error {
 	if _, err := os.Stat(filepath.Join(a.kitDir(), "docker-compose.yml")); err != nil {
 		return errString("not set up yet - run the first-time setup")
 	}
-	return a.appsEngine().WriteFrontendPlugins(plugins)
+	return a.engine(nil).WriteFrontendPlugins(plugins)
 }
 
 // --- misc UI helpers --------------------------------------------------------

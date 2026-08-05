@@ -176,7 +176,7 @@ func (e *Engine) Restore(dbDump, filesArchive, passphrase string) error {
 		return err
 	}
 	e.logln("")
-	e.logln("Restore complete -> http://" + e.mdnsName() + ".local/")
+	e.logln("Restore complete -> " + e.PublicOrigin() + "/")
 	return nil
 }
 
