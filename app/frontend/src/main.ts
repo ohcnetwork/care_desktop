@@ -297,7 +297,7 @@ $("#btn-backup-now").addEventListener("click", () => void run("backup-now"));
 $("#btn-rebuild").addEventListener("click", () => void run("rebuild-frontend"));
 
 // address open + copy
-function openClinic(): void { void App.OpenURL(`http://${mdnsName}/`); }
+function openClinic(): void { void App.OpenURL(`https://${mdnsName}/`); }
 $("#open-link").addEventListener("click", openClinic);
 $("#open-link2").addEventListener("click", openClinic);
 $("#copy-addr").addEventListener("click", () => void navigator.clipboard.writeText(mdnsName).then(() => showToast("Address copied"), () => showToast(mdnsName)));

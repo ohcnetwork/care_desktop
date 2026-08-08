@@ -341,7 +341,7 @@ func (a *App) notifyInstalled(mdnsName string) {
 	if mdnsName == "" {
 		mdnsName = "care.local"
 	}
-	url := "http://" + mdnsName + "/"
+	url := "https://" + mdnsName + "/"
 	sel, _ := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
 		Type:          wruntime.InfoDialog,
 		Title:         "CARE Desktop installed",

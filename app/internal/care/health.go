@@ -1,6 +1,7 @@
 package care
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
@@ -49,19 +50,24 @@ func isNotFound(err error) bool {
 		strings.Contains(err.Error(), "cannot find the file")
 }
 
-// Health reports whether the app answers on :80 (through Caddy -> backend /ping/).
+// Health reports whether the app answers on :443 (through Caddy -> backend /ping/).
 type Health struct {
 	Active bool   `json:"active"`
 	Code   int    `json:"code"`
 	Detail string `json:"detail"`
 }
 
-// Ping hits http://localhost/ping/ with a short timeout.
+// Ping hits https://localhost/ping/ with a short timeout. The cert is Caddy's
+// self-signed internal CA, so verification is skipped - this is a same-host
+// liveness probe, not a trust decision.
 func (e *Engine) Ping() Health {
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get("http://localhost/ping/")
+	client := &http.Client{
+		Timeout:   3 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, // ponytail: local self-signed cert, host probe only
+	}
+	resp, err := client.Get("https://localhost/ping/")
 	if err != nil {
-		return Health{Active: false, Code: 0, Detail: "nothing answering on :80"}
+		return Health{Active: false, Code: 0, Detail: "nothing answering on :443"}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == 200 {
@@ -70,7 +76,7 @@ func (e *Engine) Ping() Health {
 	return Health{Active: false, Code: resp.StatusCode, Detail: "HTTP " + strings.TrimSpace(resp.Status)}
 }
 
-// WaitHealthy blocks until the stack actually answers healthy on :80 (Caddy ->
+// WaitHealthy blocks until the stack actually answers healthy on :443 (Caddy ->
 // backend /ping/), or the timeout elapses. `docker compose up -d` only means the
 // containers were *created* - the app server, Caddy, and its upstreams still need
 // to come up before anything is really serving. Callers gate their success
@@ -92,21 +98,25 @@ func (e *Engine) WaitHealthy(timeout time.Duration) error {
 }
 
 // EnsurePortFree fails fast when something other than our own stack already holds
-// the app's host port (80). Without this, `docker compose up` fails deep inside with
-// a cryptic "Bind for 0.0.0.0:80 failed: port is already allocated"; here we catch it
-// first and return a clear, actionable message the installer shows on its failed
-// screen. Our own running caddy is not a conflict (idempotent restarts must pass).
+// the app's host ports (80 redirect + 443 https). Without this, `docker compose up`
+// fails deep inside with a cryptic "Bind for 0.0.0.0:443 failed: port is already
+// allocated"; here we catch it first and return a clear, actionable message the
+// installer shows on its failed screen. Our own running caddy is not a conflict
+// (idempotent restarts must pass).
 func (e *Engine) EnsurePortFree() error {
 	if e.caddyRunning() {
-		return nil // the listener on :80 is our own caddy
+		return nil // the listeners on :80/:443 are our own caddy
 	}
-	if !tcpBusy("127.0.0.1:80") {
-		return nil
+	for _, port := range []int{80, 443} {
+		if !tcpBusy(fmt.Sprintf("127.0.0.1:%d", port)) {
+			continue
+		}
+		who := portOccupant(port)
+		return fmt.Errorf("port %d is already in use%s.\n"+
+			"CARE serves the clinic app on https://%s.local/ (ports 80 and 443). "+
+			"Quit whatever is using port %d, then try again.", port, who, e.mdnsName(), port)
 	}
-	who := portOccupant(80)
-	return fmt.Errorf("port 80 is already in use%s.\n"+
-		"CARE serves the clinic app on port 80 (http://%s.local/). "+
-		"Quit whatever is using port 80, then try again.", who, e.mdnsName())
+	return nil
 }
 
 // caddyRunning reports whether our compose stack's caddy service is already up, so a
@@ -196,7 +206,7 @@ func (e *Engine) MDNSCheck() NameStatus {
 	case "off":
 		return NameStatus{OK: false,
 			Message: full + " not advertised (mDNS is off)",
-			How:     "You're on static-IP mode. Open http://<server-ip>/ instead of " + full + ", or set CARE_MDNS_MODE=advertise."}
+			How:     "You're on static-IP mode. Open https://<server-ip>/ instead of " + full + ", or set CARE_MDNS_MODE=advertise."}
 	default: // advertise
 		how := "Open (and keep open) the CARE Desktop app - it advertises " + full +
 			" on the LAN while running. Then re-check."

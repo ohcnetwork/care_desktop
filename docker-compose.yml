@@ -94,7 +94,8 @@ services:
     image: ${CADDY_WAF_IMAGE:-care-caddy:clinic}   # caddy + Coraza WAF, built by `care setup`
     restart: unless-stopped
     ports:
-      - "80:80"               # the clinic app: http://care.local/
+      - "80:80"               # redirects to https://care.local/
+      - "443:443"             # the clinic app: https://care.local/ (self-signed internal cert)
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

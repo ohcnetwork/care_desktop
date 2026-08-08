@@ -105,7 +105,7 @@ func (e *Engine) host() string {
 // bundleURL is the remoteEntry.js address for a bundle served out of the public
 // facility bucket — same origin as the app itself, so no CORS.
 func (e *Engine) bundleURL(entry catalogEntry) string {
-	return fmt.Sprintf("http://%s/%s/%s/%s",
+	return fmt.Sprintf("https://%s/%s/%s/%s",
 		e.host(), facilityBucket, strings.Trim(entry.Bundle, "/"), remoteEntryOf(entry))
 }
 

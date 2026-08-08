@@ -1,11 +1,16 @@
-# CARE clinic reverse proxy - ONE origin, plain HTTP, trusted LAN only.
-# Pages and the API share http://care.local, so there is no CORS to configure.
+# CARE clinic reverse proxy - HTTPS only, ONE origin, trusted LAN only.
+# The site is served over https://care.local with a self-signed *internal* cert
+# (no public CA can sign a .local name). Plain http on :80 only bounces to https,
+# so there is no http surface and no CORS to configure.
 {
-	auto_https off
+	# Keep cert automation on (so `tls internal` can issue), but don't let Caddy
+	# auto-add its own :80 redirects - we define an explicit redirect site below.
+	auto_https disable_redirects
 	order coraza_waf first # must run before reverse_proxy
 }
 
-:80 {
+# The site body, shared by every https listener below.
+(site) {
 	encode gzip
 
 	# WAF on /api only (buckets excluded - uploads false-positive).
@@ -42,4 +47,21 @@
 	handle {
 		reverse_proxy frontend:80
 	}
+}
+
+# http is gone: every plain-http request is permanently redirected to https.
+:80 {
+	redir https://{host}{uri} permanent
+}
+
+care.local:443 {
+	tls internal # self-signed cert from Caddy's local CA (LAN name, no public CA)
+	import site
+}
+
+# localhost over https, /ping/ only - lets the app's own health probe hit
+# https://localhost/ping/ without depending on mDNS resolving on the server itself.
+localhost:443 {
+	tls internal
+	reverse_proxy /ping/* backend:9000
 }

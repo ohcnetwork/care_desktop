@@ -55,7 +55,7 @@ func (e *Engine) Start() error {
 		return err
 	}
 	e.logln("")
-	e.logln("CARE is up -> http://" + e.mdnsName() + ".local/   (login: admin / admin)")
+	e.logln("CARE is up -> https://" + e.mdnsName() + ".local/   (login: admin / admin)")
 	return nil
 }
 
