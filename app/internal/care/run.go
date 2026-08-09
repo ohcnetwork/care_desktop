@@ -2,7 +2,6 @@ package care
 
 import (
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -30,6 +29,7 @@ func (e *Engine) Start() error {
 		return err
 	}
 	e.ensureMDNS()
+	e.ensureHostsEntry() // Windows: make care.local resolve for this PC's own browser
 	e.logln("Starting CARE...")
 	// Migrate with a SINGLE migrator: bring up the api backend (its start.sh does
 	// NOT migrate) + its deps, migrate to completion, then start the rest.
@@ -147,7 +147,7 @@ func (e *Engine) migrate() error {
 // normal case - we report it plainly. Output is captured (not streamed) so the
 // raw "CommandError ... exit status 1" never leaks into the log.
 func (e *Engine) createAdmin() {
-	cmd := exec.Command("docker", "compose", "exec", "-T",
+	cmd := newCmd("docker", "compose", "exec", "-T",
 		"-e", "DJANGO_SUPERUSER_PASSWORD="+e.adminPassword(),
 		"backend", "python", "manage.py", "createsuperuser", "--noinput",
 		"--username", "admin", "--email", "admin@care.local")

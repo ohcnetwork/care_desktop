@@ -240,9 +240,18 @@ func (e *Engine) workdir() string {
 	return ""
 }
 
+// newCmd builds an exec.Cmd with the console window hidden on Windows - a GUI
+// app that polls docker must not flash a cmd window on every call. No-op on
+// other platforms. All command spawns in this package go through here.
+func newCmd(name string, args ...string) *exec.Cmd {
+	c := exec.Command(name, args...)
+	hideConsole(c)
+	return c
+}
+
 // run executes a command in the kit dir and streams stdout+stderr to Log.
 func (e *Engine) run(extraEnv []string, name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+	cmd := newCmd(name, args...)
 	cmd.Dir = e.workdir()
 	cmd.Env = append(e.baseEnv(), extraEnv...)
 
@@ -275,7 +284,7 @@ func (e *Engine) run(extraEnv []string, name string, args ...string) error {
 
 // capture runs a command and returns its trimmed stdout (no streaming).
 func (e *Engine) capture(name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
+	cmd := newCmd(name, args...)
 	cmd.Dir = e.workdir()
 	cmd.Env = e.baseEnv()
 	out, err := cmd.Output()

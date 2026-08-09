@@ -3,7 +3,6 @@ package care
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -98,7 +97,7 @@ func (e *Engine) keyUnlocks(passphrase string) bool {
 	if !fileExists(e.encKeyPath()) {
 		return false
 	}
-	cmd := exec.Command("docker", "run", "--rm",
+	cmd := newCmd("docker", "run", "--rm",
 		"-e", "PASS",
 		"-v", e.keysDir()+":/keys:ro",
 		e.backupImage(), "sh", "-c",

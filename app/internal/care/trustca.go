@@ -73,10 +73,10 @@ func (e *Engine) installCA(path string, elevated bool) error {
 			script := fmt.Sprintf(
 				`do shell script "security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain \"%s\"" with administrator privileges`,
 				path)
-			cmd = exec.Command("osascript", "-e", script)
+			cmd = newCmd("osascript", "-e", script)
 		} else {
 			// login keychain = current user, no sudo.
-			cmd = exec.Command("security", "add-trusted-cert", "-r", "trustRoot",
+			cmd = newCmd("security", "add-trusted-cert", "-r", "trustRoot",
 				"-k", os.Getenv("HOME")+"/Library/Keychains/login.keychain-db", path)
 		}
 	case "windows":
@@ -85,18 +85,18 @@ func (e *Engine) installCA(path string, elevated bool) error {
 			ps := fmt.Sprintf(
 				`Start-Process certutil -ArgumentList '-addstore','-f','Root','%s' -Verb RunAs -Wait`,
 				path)
-			cmd = exec.Command("powershell", "-NoProfile", "-Command", ps)
+			cmd = newCmd("powershell", "-NoProfile", "-Command", ps)
 		} else {
-			cmd = exec.Command("certutil", "-addstore", "-f", "Root", path)
+			cmd = newCmd("certutil", "-addstore", "-f", "Root", path)
 		}
 	case "linux":
 		// Copy to the CA anchors then refresh (Debian layout first, then RHEL).
 		sh := "cp " + path + " /usr/local/share/ca-certificates/care-root.crt && update-ca-certificates " +
 			"|| { cp " + path + " /etc/pki/ca-trust/source/anchors/care-root.crt && update-ca-trust; }"
 		if elevated {
-			cmd = exec.Command("pkexec", "sh", "-c", sh) // polkit GUI prompt
+			cmd = newCmd("pkexec", "sh", "-c", sh) // polkit GUI prompt
 		} else {
-			cmd = exec.Command("sh", "-c", sh)
+			cmd = newCmd("sh", "-c", sh)
 		}
 	default:
 		return fmt.Errorf("unsupported OS %s", runtime.GOOS)
@@ -144,7 +144,7 @@ func (e *Engine) untrustLocalCA(pem string) {
 	switch runtime.GOOS {
 	case "darwin":
 		// User keychain first (no prompt). delete-certificate takes the 40-hex SHA-1.
-		_ = exec.Command("security", "delete-certificate", "-Z", fp,
+		_ = newCmd("security", "delete-certificate", "-Z", fp,
 			os.Getenv("HOME")+"/Library/Keychains/login.keychain-db").Run()
 		// System keychain needs admin - only prompt if the cert is actually there.
 		if e.certInSystemKeychain(fp) {
@@ -152,20 +152,20 @@ func (e *Engine) untrustLocalCA(pem string) {
 				"Remove the CARE security certificate from this computer's System keychain?\n\nThis needs administrator approval.") {
 				script := fmt.Sprintf(
 					`do shell script "security delete-certificate -Z %s /Library/Keychains/System.keychain" with administrator privileges`, fp)
-				_ = exec.Command("osascript", "-e", script).Run()
+				_ = newCmd("osascript", "-e", script).Run()
 			}
 		}
 	case "windows":
 		ps := fmt.Sprintf(
 			`Start-Process certutil -ArgumentList '-delstore','Root','%s' -Verb RunAs -Wait`, fp)
-		_ = exec.Command("powershell", "-NoProfile", "-Command", ps).Run()
+		_ = newCmd("powershell", "-NoProfile", "-Command", ps).Run()
 	case "linux":
 		// We wrote these exact files in installCA; remove them and refresh.
 		sh := "rm -f /usr/local/share/ca-certificates/care-root.crt /etc/pki/ca-trust/source/anchors/care-root.crt; " +
 			"update-ca-certificates 2>/dev/null; update-ca-trust 2>/dev/null; true"
-		if exec.Command("sh", "-c", sh).Run() != nil && e.Confirm != nil &&
+		if newCmd("sh", "-c", sh).Run() != nil && e.Confirm != nil &&
 			e.Confirm("Remove CARE certificate?", "Remove the CARE security certificate from this computer? Needs administrator approval.") {
-			_ = exec.Command("pkexec", "sh", "-c", sh).Run()
+			_ = newCmd("pkexec", "sh", "-c", sh).Run()
 		}
 	default:
 		return
@@ -192,7 +192,7 @@ func certSHA1Hex(pemData string) string {
 // System keychain (reading it needs no admin - only deleting does), so we avoid a
 // pointless admin prompt when the cert was only ever added to the login keychain.
 func (e *Engine) certInSystemKeychain(fp string) bool {
-	out, err := exec.Command("security", "find-certificate", "-a", "-Z",
+	out, err := newCmd("security", "find-certificate", "-a", "-Z",
 		"/Library/Keychains/System.keychain").Output()
 	if err != nil {
 		return false

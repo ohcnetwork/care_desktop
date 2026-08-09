@@ -40,6 +40,7 @@ func (e *Engine) Setup() error {
 		return err
 	}
 	e.ensureMDNS()
+	e.ensureHostsEntry() // Windows: make care.local resolve for this PC's own browser
 	e.logln("Setup done.")
 	return nil
 }
@@ -157,7 +158,7 @@ func (e *Engine) ensureFrontendImage() error {
 }
 
 func (e *Engine) imageExists(tag string) bool {
-	cmd := exec.Command("docker", "image", "inspect", tag)
+	cmd := newCmd("docker", "image", "inspect", tag)
 	cmd.Env = e.baseEnv()
 	return cmd.Run() == nil
 }
@@ -187,8 +188,9 @@ func (e *Engine) ensureMDNS() {
 		_ = e.run(nil, "sudo", "hostnamectl", "set-hostname", name)
 		_ = e.run(nil, "sudo", "systemctl", "enable", "--now", "avahi-daemon")
 	case "windows":
-		// Windows can't advertise <name>.local itself. One-time at setup: install
-		// Apple Bonjour for a real care.local, or give the box a static IP.
-		e.logln("Windows: set naming once - install Bonjour (for http://" + name + ".local) or use a static IP.")
+		// This PC resolves <name>.local via the hosts entry (see ensureHostsEntry);
+		// no rename needed. LAN clients use the in-app mDNS responder or their own
+		// hosts entry - or install Bonjour / a static IP for a network-wide name.
+		e.logln("Windows: this PC uses a hosts entry for https://" + name + ".local; other devices use mDNS or a static IP.")
 	}
 }

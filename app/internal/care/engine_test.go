@@ -173,6 +173,14 @@ func TestLooksLikeSourceRepo(t *testing.T) {
 	if looksLikeSourceRepo(t.TempDir()) {
 		t.Fatal("empty (managed-kit-like) dir flagged as source repo")
 	}
+	// Running from a subdir (e.g. app/) - the .git marker is in a parent.
+	sub := filepath.Join(repo, "app")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !looksLikeSourceRepo(sub) {
+		t.Fatal("source repo not detected from a subdir")
+	}
 }
 
 // Uninstall with RemoveKit must delete a managed kit but refuse to delete a dir
