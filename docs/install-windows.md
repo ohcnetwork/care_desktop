@@ -15,7 +15,7 @@ clinic. Other devices install nothing; they open `https://care.local`.
 | **Windows 10/11** (64-bit) | the server OS | — |
 | **Docker**, running (WSL 2 backend, + `docker compose` v2) | runs the whole stack | Docker Desktop is simplest ([docker.com](https://www.docker.com/products/docker-desktop/) → install → enable WSL 2 → open). Rancher Desktop, or Docker Engine inside WSL 2, also work. |
 | **Git for Windows** | downloads + builds CARE once | [git-scm.com/download/win](https://git-scm.com/download/win) → install with defaults |
-| Working **mDNS** for `care.local` | so devices find the server by name (see step 2) | native on recent Windows 11; otherwise [Apple Bonjour](https://support.apple.com/kb/DL999) or a static IP |
+| Working **mDNS** for `care.local` | so *other devices* find the server by name (see step 2) | native on recent Windows 11; otherwise [Apple Bonjour](https://support.apple.com/kb/DL999) or a static IP. *The server's own browser needs nothing — CARE adds a hosts entry automatically.* |
 
 > **Hardware:** 8 GB RAM minimum (16 GB recommended), ~10 GB free disk. Docker
 > Desktop on Windows needs virtualization enabled in the BIOS (usually on by default).
@@ -24,51 +24,55 @@ clinic. Other devices install nothing; they open `https://care.local`.
 
 ## 2. Make `care.local` resolvable
 
-Devices reach the clinic at `https://care.local`. **Windows can *resolve* `.local`
-names natively, and recent Windows 11 builds also *advertise* their own name** — so
-this often works with **no extra software** once the three settings below are right.
-The installer's **step-3 Check** tests whether `care.local` actually resolves, so you
-never have to guess.
+Everything is reached at `https://care.local`. There are two audiences, and they're
+handled differently:
+
+- **The server's own browser — automatic, nothing to do.** During setup CARE adds a
+  single hosts-file line, `127.0.0.1  care.local` (via a one-time UAC prompt), so the
+  server machine resolves `care.local` to itself. **No PC rename, no Bonjour.** The
+  line is tagged `# care-desktop` and is removed again on uninstall. Just open
+  **`https://care.local`** on the server.
+- **Other devices on the WiFi** (phones, staff laptops) find the server through
+  CARE's built-in mDNS responder. Windows can resolve `.local` names natively, and the
+  in-app responder advertises `care.local` regardless of the PC's name — so this
+  usually works once the **two network settings below** are right. The installer's
+  **step-3 Check** tests whether `care.local` resolves, so you never have to guess.
 
 **Why these settings?** Windows blocks device-discovery (mDNS) by default in two
-places: on **Public** networks, and at the **firewall**. You're unblocking both, then
-naming the PC `care` so the name it advertises is `care.local`.
+places: on **Public** networks, and at the **firewall**. You're unblocking both so
+the responder's announcements reach other devices. *(Renaming the PC to `care` is
+**not** required — the responder handles the name itself.)*
 
 > **Fastest path:** open **PowerShell as Administrator** (right-click Start →
-> **Terminal (Admin)**) and run these three — the last one reboots:
+> **Terminal (Admin)**) and run these two:
 > ```powershell
 > Set-NetConnectionProfile -NetworkCategory Private
 > New-NetFirewallRule -DisplayName "mDNS (care.local)" -Direction Inbound -Protocol UDP -LocalPort 5353 -Action Allow -Profile Private
-> Rename-Computer -NewName "care" -Force -Restart
 > ```
-> After the reboot, run `ping care.local` to confirm, then click **Check** in the app.
+> Then run `ping care.local` to confirm, and click **Check** in the app.
 
-If you prefer clicking through the menus, do the same three steps below.
+If you prefer clicking through the menus, do the same two steps below.
 
-### Step 1 — Name the PC `care`
-- **Settings** (Win + I) → **System** → **About** → **Rename this PC** → type `care` → **Next** → **Restart now**.
-- PowerShell: `Rename-Computer -NewName "care" -Force -Restart`
-
-### Step 2 — Set the network to Private
-- **Settings** → **Network & Internet** → click your **Wi-Fi**/**Ethernet** → click the **network name** → under **Network profile type**, choose **Private**.
+### Step 1 — Set the network to Private
+- **Settings** (Win + I) → **Network & Internet** → click your **Wi-Fi**/**Ethernet** → click the **network name** → under **Network profile type**, choose **Private**.
 - PowerShell: `Set-NetConnectionProfile -NetworkCategory Private`
 - *Why:* Windows hides the PC and blocks mDNS on Public networks; Private allows discovery.
 
-### Step 3 — Allow mDNS (UDP 5353) in the firewall
+### Step 2 — Allow mDNS (UDP 5353) in the firewall
 Usually already allowed once the network is Private — add this only if devices still can't find the PC.
 - **Windows Defender Firewall with Advanced Security** → **Inbound Rules** → **New Rule…** → **Port** → **UDP**, port `5353` → **Allow the connection** → tick **Private** → name it `mDNS (care.local)` → **Finish**.
 - PowerShell: `New-NetFirewallRule -DisplayName "mDNS (care.local)" -Direction Inbound -Protocol UDP -LocalPort 5353 -Action Allow -Profile Private`
 - *Why:* mDNS announcements travel on UDP port 5353; the firewall must let them through.
 
-### Step 4 — Verify
-- On the server: `ping care.local` → replies with an IP = ✅.
+### Step 3 — Verify
+- On the server: open `https://care.local/` → the login page loads (works immediately, thanks to the hosts entry). `ping care.local` also replies.
 - In the CARE Desktop app: click **Check** on step 3 → it turns green.
 - From a phone on the same WiFi: open `https://care.local/` → the login page loads.
 
-### If step 4 still fails — pick one:
+### If other devices still can't reach it — pick one:
 
 **Option A — Apple Bonjour** (reliable `care.local` on any Windows version):
-- Install [Bonjour Print Services](https://support.apple.com/kb/DL999), keep the PC named `care`, re-check.
+- Install [Bonjour Print Services](https://support.apple.com/kb/DL999) on the server, re-check. (No PC rename needed.)
 
 **Option B — Static IP** (no extra software, no `.local`):
 - Give the PC a fixed IP (router DHCP reservation), e.g. `192.168.1.50`; staff open `https://192.168.1.50/`.
@@ -76,7 +80,7 @@ Usually already allowed once the network is Private — add this only if devices
   `REACT_CARE_API_URL=https://192.168.1.50` in `frontend.env` (then `care rebuild-frontend`).
 - Since the frontend is built for `care.local` by default, **Option A is smoother** — use the static IP only if mDNS is blocked on your network.
 
-> **Client devices need nothing.** Macs, iPhones, and Linux resolve `care.local` out
+> **Client devices need nothing installed.** Macs, iPhones, and Linux resolve `care.local` out
 > of the box; modern Android usually does too (older Android may need the IP).
 
 ---

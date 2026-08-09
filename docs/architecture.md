@@ -173,6 +173,12 @@ probe via the system resolver — two consecutive misses, ~60s, before it acts, 
 flapping). This keeps the name reachable across network hiccups without a manual
 restart.
 
+On **Windows**, the server's *own* browser can't resolve the responder's `.local` name
+reliably, so setup also writes a single hosts-file line, `127.0.0.1 care.local`
+(`app/internal/care/hosts.go`, tagged `# care-desktop`, removed on uninstall). That's
+for the server machine only — other devices still resolve `care.local` via the mDNS
+responder above. No machine is ever renamed.
+
 ---
 
 ## Why the frontend is built locally

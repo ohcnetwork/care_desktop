@@ -12,8 +12,8 @@ not resolving, or the MinIO endpoint not reachable from other devices.
 - **Confirm the server's name:**
   - macOS: `scutil --get LocalHostName` → must be `care`. Fix: `sudo scutil --set LocalHostName care`.
   - Linux: `hostname` → must be `care`, and `systemctl status avahi-daemon` active.
-  - Windows: rename the PC to `care` (Settings → System → About → Rename), set the network to **Private**, and allow **UDP 5353** in Windows Firewall. Recent Windows 11 then advertises `care.local` natively; older builds need **Apple Bonjour**.
-- **Test from the server itself:** open `https://care.local/` on the server's own browser. If that works but phones don't, it's the device's mDNS.
+  - Windows: **the server's own browser resolves `care.local` automatically** (CARE adds a `127.0.0.1 care.local` hosts entry at setup — no rename needed). For *other devices* to find it, set the network to **Private** and allow **UDP 5353** in Windows Firewall; recent Windows 11 then resolves `care.local` natively, older builds need **Apple Bonjour** or a static IP.
+- **Test from the server itself:** open `https://care.local/` on the server's own browser (works out of the box on every OS — macOS/Linux via mDNS, Windows via the hosts entry). If that works but phones don't, it's the device's mDNS / your network settings.
 - **Fallback — use the IP:** find the server's IP (`ipconfig` / `ip addr` / `ifconfig`) and open `https://<ip>/`. If you'll use the IP permanently, also set `BUCKET_EXTERNAL_ENDPOINT=https://<ip>` in `backend.env` and rebuild the frontend with `REACT_CARE_API_URL=https://<ip>` (see [configuration.md](configuration.md)). (Note: the cert is issued for `care.local`, so an IP URL shows a name-mismatch warning — prefer the name.)
 - Give the server a **DHCP reservation** in the router so its IP never changes.
 
@@ -30,7 +30,7 @@ immediately.
 
 - You set the name but didn't click **Check** again — click it.
 - On the Mac, the GUI can't run `sudo` — set the name in **Terminal** once (`sudo scutil --set LocalHostName care`), then **Check**.
-- On Windows, install **Bonjour** and rename the PC to `care`, then **Check** (or use a static IP via the CLI).
+- On Windows, the server itself resolves `care.local` automatically (hosts entry). If the Check tests reachability from *other* devices and it's red, set the network to **Private** + allow **UDP 5353**, or install **Bonjour** / use a static IP, then **Check**.
 
 ---
 
@@ -39,6 +39,7 @@ immediately.
 - Start your Docker engine and wait until it's running, then click **Check**. (Docker Desktop: open it, wait for "running". Colima: `colima start`.)
 - Linux: `sudo systemctl start docker`; make sure your user is in the `docker` group (`sudo usermod -aG docker $USER`, then re-login).
 - "Compose plugin is missing": install `docker compose` v2 — bundled with Docker Desktop, but a separate package (e.g. `docker-compose-plugin`) on some Docker Engine / Colima setups.
+- **Windows: "Docker not found" even though you installed it in WSL.** The Windows CARE Desktop app is a native Windows process and looks for `docker.exe` on the Windows PATH. Docker installed *inside* a WSL Ubuntu distro (`apt install docker.io`) is a Linux binary the Windows app can't see. Fix: install **Docker Desktop for Windows** and enable **WSL 2 integration** for your distro (Settings → Resources → WSL Integration) — that puts a real `docker.exe` on the Windows PATH. Then quit and reopen CARE Desktop so it re-reads PATH.
 
 ---
 

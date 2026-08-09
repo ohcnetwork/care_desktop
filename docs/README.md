@@ -63,8 +63,11 @@ is required.
 ## Requirements at a glance
 - **Docker**, running — any engine (Docker Engine, Colima, Podman, Rancher Desktop, OrbStack, or Docker Desktop), with the `docker compose` v2 plugin. *Required on every OS.*
 - **git** — used once to download + build CARE.
-- A way to be found as `care.local`: automatic on macOS/Linux (the setup sets the
-  hostname), **Apple Bonjour or a static IP** on Windows. See your OS install guide.
+- A way to be found as `care.local`: automatic on macOS/Linux (the in-app mDNS
+  responder; the setup can also set the hostname) and on the **Windows server itself**
+  (setup adds a hosts entry — no rename). For *other devices* to reach a Windows server,
+  recent Windows 11 resolves `care.local` natively; otherwise **Apple Bonjour or a
+  static IP**. See your OS install guide.
 
 > First-time setup downloads several GB of Docker images and builds the frontend —
 > budget **~10–20 minutes** and a working internet connection **for that step only**.
