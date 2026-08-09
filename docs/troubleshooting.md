@@ -13,9 +13,16 @@ not resolving, or the MinIO endpoint not reachable from other devices.
   - macOS: `scutil --get LocalHostName` → must be `care`. Fix: `sudo scutil --set LocalHostName care`.
   - Linux: `hostname` → must be `care`, and `systemctl status avahi-daemon` active.
   - Windows: rename the PC to `care` (Settings → System → About → Rename), set the network to **Private**, and allow **UDP 5353** in Windows Firewall. Recent Windows 11 then advertises `care.local` natively; older builds need **Apple Bonjour**.
-- **Test from the server itself:** open `http://care.local/` on the server's own browser. If that works but phones don't, it's the device's mDNS.
-- **Fallback — use the IP:** find the server's IP (`ipconfig` / `ip addr` / `ifconfig`) and open `http://<ip>/`. If you'll use the IP permanently, also set `BUCKET_EXTERNAL_ENDPOINT=http://<ip>` in `backend.env` and rebuild the frontend with `REACT_CARE_API_URL=http://<ip>` (see [configuration.md](configuration.md)).
+- **Test from the server itself:** open `https://care.local/` on the server's own browser. If that works but phones don't, it's the device's mDNS.
+- **Fallback — use the IP:** find the server's IP (`ipconfig` / `ip addr` / `ifconfig`) and open `https://<ip>/`. If you'll use the IP permanently, also set `BUCKET_EXTERNAL_ENDPOINT=https://<ip>` in `backend.env` and rebuild the frontend with `REACT_CARE_API_URL=https://<ip>` (see [configuration.md](configuration.md)). (Note: the cert is issued for `care.local`, so an IP URL shows a name-mismatch warning — prefer the name.)
 - Give the server a **DHCP reservation** in the router so its IP never changes.
+
+### …and it was working, then suddenly `DNS_PROBE_FINISHED_NXDOMAIN`
+
+The in-app mDNS responder stopped answering (sleep/wake or a WiFi flap). The app has a
+self-heal watchdog that re-advertises within ~60s of the name failing to resolve; if
+it doesn't recover, **restart CARE Desktop** (or `care restart`) to re-advertise
+immediately.
 
 ---
 
@@ -35,16 +42,50 @@ not resolving, or the MinIO endpoint not reachable from other devices.
 
 ---
 
+## Security warning / red padlock instead of a green one
+
+**Cause:** the device hasn't trusted the clinic's local CA (or trusted an old one).
+
+- **Trust the cert:** open **`https://care.local/setup`**, pick the device, and follow
+  the steps (download `root.crt` → add it to the system trust store). The server
+  machine does this automatically on start; only *other* devices need it.
+- **iOS is two steps:** installing the profile is **not** enough — after installing,
+  go to **Settings → General → About → Certificate Trust Settings** and toggle
+  **"CARE Desktop Local CA"** on. The profile install must be done in **Safari**
+  (Chrome/other browsers on iOS can't install profiles).
+- **Still red on Chrome after trusting?** Chrome caches the cert-error state. **Fully
+  quit** Chrome (not just the tab) and reopen; if it persists, clear the domain at
+  `chrome://net-internals/#hsts` (Delete `care.local`).
+- **Re-installed / re-set-up the stack?** A fresh setup mints a **new** CA, so devices
+  that trusted the old one must re-trust from `/setup` (and remove the stale cert).
+- **`/setup` opens Google search on Safari?** Type the full `https://care.local/setup`
+  (a bare `care.local/setup` is treated as a search term).
+
+---
+
+## The download button on `/setup` gives a redirect page, not the cert
+
+The `/root.crt` file is gated so people go through the instructions. Use the page's
+**Download** button (it carries the `?ok=1` marker) — don't hit `/root.crt` directly,
+and don't `curl` it without `?ok=1` (you'll save the redirect HTML and get
+`Error reading file` when you try to trust it). With curl:
+`curl -o root.crt 'https://care.local/root.crt?ok=1'`.
+
+---
+
 ## File uploads or image previews fail (but the rest works)
 
 **Cause:** `BUCKET_EXTERNAL_ENDPOINT` points somewhere devices can't reach (often
 `localhost`).
 
-- It must be a host **every device** can resolve: `http://care.local` (default)
-  or `http://<server-ip>`. Files are served through Caddy on port 80 — the same
-  address as the app — so no extra port is involved.
+- It must be a host **every device** can resolve: `https://care.local` (default)
+  or `https://<server-ip>`. Files are served through Caddy on the same origin as the
+  app — so no extra port is involved.
 - Check `care status` shows `minio running` (Caddy proxies to it).
 - After changing it in `backend.env`, run `care start`.
+
+> If previews fail with a *camera/scanner* error rather than a network error, the page
+> isn't a secure context — confirm you're on `https://` and the cert is trusted (above).
 
 ---
 

@@ -98,6 +98,7 @@ services:
       - "443:443"             # the clinic app: https://care.local/ (self-signed internal cert)
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./setup:/setup:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:

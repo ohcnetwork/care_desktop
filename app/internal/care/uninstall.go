@@ -18,6 +18,10 @@ type UninstallOptions struct {
 // volumes (all patient data). Best-effort throughout - a failure in one step is
 // logged and the rest still runs, so even a half-finished install can be cleaned up.
 func (e *Engine) Uninstall(opts UninstallOptions) error {
+	// 0. Grab the root CA before teardown - it lives in the caddy-data volume that
+	//    `compose down -v` destroys, so capture it now to untrust it at the end.
+	rootPEM := e.caddyRootPEM()
+
 	// 1. containers + private network + data volumes. Needs the compose file, so
 	//    do this first, while the kit still exists.
 	if _, err := os.Stat(filepath.Join(e.Kit, "docker-compose.yml")); err == nil {
@@ -64,6 +68,10 @@ func (e *Engine) Uninstall(opts UninstallOptions) error {
 			_ = os.RemoveAll(dir)
 		}
 	}
+
+	// 6. the trusted root on THIS machine (best-effort; matched by fingerprint so
+	//    it only ever removes the cert we installed).
+	e.untrustLocalCA(rootPEM)
 
 	e.logln("Uninstall complete.")
 	return nil

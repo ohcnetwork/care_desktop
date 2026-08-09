@@ -1,7 +1,7 @@
 # Install CARE Desktop on Windows
 
 Follow these once on the **server PC** — the computer that stays on and runs the
-clinic. Other devices install nothing; they open `http://care.local`.
+clinic. Other devices install nothing; they open `https://care.local`.
 
 > Budget ~15–25 minutes for the first setup. Internet is needed **for setup only**.
 > The app is pure Go — **no WSL, no Git Bash, no bash** is required to run it.
@@ -24,7 +24,7 @@ clinic. Other devices install nothing; they open `http://care.local`.
 
 ## 2. Make `care.local` resolvable
 
-Devices reach the clinic at `http://care.local`. **Windows can *resolve* `.local`
+Devices reach the clinic at `https://care.local`. **Windows can *resolve* `.local`
 names natively, and recent Windows 11 builds also *advertise* their own name** — so
 this often works with **no extra software** once the three settings below are right.
 The installer's **step-3 Check** tests whether `care.local` actually resolves, so you
@@ -63,7 +63,7 @@ Usually already allowed once the network is Private — add this only if devices
 ### Step 4 — Verify
 - On the server: `ping care.local` → replies with an IP = ✅.
 - In the CARE Desktop app: click **Check** on step 3 → it turns green.
-- From a phone on the same WiFi: open `http://care.local/` → the login page loads.
+- From a phone on the same WiFi: open `https://care.local/` → the login page loads.
 
 ### If step 4 still fails — pick one:
 
@@ -71,9 +71,9 @@ Usually already allowed once the network is Private — add this only if devices
 - Install [Bonjour Print Services](https://support.apple.com/kb/DL999), keep the PC named `care`, re-check.
 
 **Option B — Static IP** (no extra software, no `.local`):
-- Give the PC a fixed IP (router DHCP reservation), e.g. `192.168.1.50`; staff open `http://192.168.1.50/`.
-- Also set `BUCKET_EXTERNAL_ENDPOINT=http://192.168.1.50` in `backend.env`, and
-  `REACT_CARE_API_URL=http://192.168.1.50` in `frontend.env` (then `care rebuild-frontend`).
+- Give the PC a fixed IP (router DHCP reservation), e.g. `192.168.1.50`; staff open `https://192.168.1.50/`.
+- Also set `BUCKET_EXTERNAL_ENDPOINT=https://192.168.1.50` in `backend.env`, and
+  `REACT_CARE_API_URL=https://192.168.1.50` in `frontend.env` (then `care rebuild-frontend`).
 - Since the frontend is built for `care.local` by default, **Option A is smoother** — use the static IP only if mDNS is blocked on your network.
 
 > **Client devices need nothing.** Macs, iPhones, and Linux resolve `care.local` out
@@ -106,12 +106,24 @@ Click **Install & Start**. It clones + builds CARE and starts the stack (several
 
 ## 5. Log in
 
-Open **http://care.local/** (or `http://<your-static-ip>/`) on any device on the WiFi:
+Open **https://care.local/** (or `https://<your-static-ip>/`) on any device on the WiFi:
 
 - **Username:** `admin`
 - **Password:** what you set (or `admin`)
 
-**Change it immediately** at `/admin/`.
+**Change it immediately** at `https://care.local/admin/`.
+
+## Trust the certificate on client devices
+
+The clinic runs over HTTPS with a self-signed cert. **This PC (the server) trusts it
+automatically** on first start — approve the one-time UAC prompt to add it to the
+Windows certificate store. **Every other device** trusts it once by opening
+**`https://care.local/setup`**, picking the device, and following the two steps
+(download `root.crt` → add to the trust store). It appears as **"CARE Desktop Local
+CA"**. On **iOS**, install the profile in **Safari**, then enable it under **Settings →
+General → About → Certificate Trust Settings**. See
+[troubleshooting.md](troubleshooting.md#security-warning--red-padlock-instead-of-a-green-one)
+if a warning persists.
 
 ---
 

@@ -92,20 +92,41 @@ func (a *App) advRunning() bool {
 	return a.adv != nil
 }
 
-// watchAdvertise re-advertises when the host's LAN IP changes (e.g. DHCP renew), so
-// care.local never points at a stale address. Cheap: a lookup every 30s.
+// watchAdvertise re-advertises when the host's LAN IP changes (e.g. DHCP renew)
+// or when care.local stops resolving (responder silently died - sleep/wake,
+// network flap, mDNSResponder dropped our record). Cheap: a lookup every 30s.
 func (a *App) watchAdvertise() {
 	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
+	misses := 0
 	for {
 		select {
 		case <-a.advStop:
 			return
 		case <-t.C:
 			a.advMu.Lock()
-			changed := a.adv != nil && a.adv.IPsChanged()
+			adv := a.adv
 			a.advMu.Unlock()
-			if changed {
+			if adv == nil {
+				continue
+			}
+			if adv.IPsChanged() {
+				misses = 0
+				a.restartAdvertise()
+				continue
+			}
+			// ponytail: debounce two misses so one flaky lookup doesn't churn
+			// the responder; a genuinely dead responder never recovers on its own.
+			if adv.Resolves() {
+				misses = 0
+				continue
+			}
+			misses++
+			if misses >= 2 {
+				misses = 0
+				if a.ctx != nil {
+					wruntime.EventsEmit(a.ctx, "care-log", "mDNS: care.local stopped resolving - re-advertising.")
+				}
 				a.restartAdvertise()
 			}
 		}
@@ -220,6 +241,17 @@ func (a *App) engine(extra map[string]string) *care.Engine {
 		Kit: a.kitDir(),
 		Env: env,
 		Log: func(s string) { wruntime.EventsEmit(a.ctx, "care-log", s) },
+		Confirm: func(title, message string) bool {
+			sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
+				Type:          wruntime.QuestionDialog,
+				Title:         title,
+				Message:       message,
+				Buttons:       []string{"Yes", "No"},
+				DefaultButton: "Yes",
+				CancelButton:  "No",
+			})
+			return err == nil && sel == "Yes"
+		},
 	}
 }
 

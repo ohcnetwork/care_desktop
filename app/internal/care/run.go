@@ -56,6 +56,7 @@ func (e *Engine) Start() error {
 	}
 	e.logln("")
 	e.logln("CARE is up -> https://" + e.mdnsName() + ".local/   (login: admin / admin)")
+	e.trustLocalCA() // best-effort: trust the cert on this machine too
 	return nil
 }
 

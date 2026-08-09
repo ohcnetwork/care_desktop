@@ -23,6 +23,9 @@ type Engine struct {
 	Kit string            // dir with docker-compose.yml, *.env, clinic_settings.py, ...
 	Env map[string]string // overrides: BACKUP_DIR, CARE_MDNS_NAME, CARE_ADMIN_PASSWORD, CARE_NO_MDNS
 	Log func(string)      // optional sink for streamed output (one line at a time)
+	// Confirm asks the user a yes/no question (native dialog in the app). When
+	// nil, callers treat it as "no" - never block a headless/CLI run.
+	Confirm func(title, message string) bool
 
 	versions map[string]string // parsed versions.env (lazy)
 	once     sync.Once

@@ -54,11 +54,11 @@ value, then `care start`.
 | `DJANGO_DEBUG` | `False` | Never enable on a box holding patient data. |
 | `DJANGO_ALLOWED_HOSTS` | `["*"]` | Which hostnames the backend answers to. `*` is fine on a private LAN. |
 | `DJANGO_ADMIN_URL` | `admin` | Path of the Django admin (`/admin`). |
-| `DJANGO_SECURE_SSL_REDIRECT` | `False` | Must stay `False` — otherwise every `http://` request bounces to `https://` and the whole LAN breaks. |
-| `DJANGO_SECURE_HSTS_PRELOAD` | `False` | HTTPS-only; off for LAN. |
-| `DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS` | `False` | HTTPS-only; off for LAN. |
+| `DJANGO_SECURE_SSL_REDIRECT` | `False` | Keep `False` — **Caddy** already redirects `http://` → `https://`, so Django must not redirect again (it would loop, since Caddy forwards to the backend over http internally). The `X-Forwarded-Proto: https` header still tells Django the original request was secure. |
+| `DJANGO_SECURE_HSTS_PRELOAD` | `False` | Off — a self-signed LAN cert must not HSTS-pin clients. |
+| `DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS` | `False` | Off — self-signed LAN cert; no HSTS. |
 | `DJANGO_SECURE_CONTENT_TYPE_NOSNIFF` | `False` | Off for LAN. |
-| `CSRF_TRUSTED_ORIGINS` | `["http://care.local"]` | Origins allowed to POST to `/admin`. **Add your server IP origin** here if you access the admin by IP, e.g. `["http://care.local","http://192.168.1.50"]`. |
+| `CSRF_TRUSTED_ORIGINS` | `["https://care.local"]` | Origins allowed to POST to `/admin`. **Add your server IP origin** here if you access the admin by IP, e.g. `["https://care.local","https://192.168.1.50"]`. |
 
 ### Object storage (MinIO)
 File uploads/downloads use **presigned URLs** — the browser talks to MinIO
@@ -66,8 +66,8 @@ File uploads/downloads use **presigned URLs** — the browser talks to MinIO
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `BUCKET_EXTERNAL_ENDPOINT` | `http://care.local` | The URL devices use to reach files (served through Caddy on port 80, same as the app). **Never `localhost`** (that means *their* device). Use the server IP if devices can't resolve `care.local`. |
-| `BUCKET_ENDPOINT` | `http://minio:9000` | Internal endpoint the backend uses. Leave as-is. |
+| `BUCKET_EXTERNAL_ENDPOINT` | `https://care.local` | The URL devices use to reach files (served through Caddy on the same origin as the app). **Never `localhost`** (that means *their* device). Use `https://<server-ip>` if devices can't resolve `care.local`. |
+| `BUCKET_ENDPOINT` | `http://minio:9000` | Internal endpoint the backend uses (inside the Docker network, plain http). Leave as-is. |
 | `BUCKET_REGION` | `ap-south-1` | S3 region label (any valid value). |
 | `BUCKET_KEY` | `minioadmin` | Access key. Change for a non-trivial deployment (keep equal to `MINIO_ACCESS_KEY`). |
 | `BUCKET_SECRET` | `minioadmin` | Secret key (keep equal to `MINIO_SECRET_KEY`). |
@@ -105,7 +105,7 @@ Baked into the frontend image at **build** time. Edit, then `care rebuild-fronte
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `REACT_CARE_API_URL` | `http://care.local` | Backend base URL **without** `/api`. Must be a valid URL (empty is rejected by the build). Keeping it the same host as the app makes it same-origin (no CORS). |
+| `REACT_CARE_API_URL` | `https://care.local` | Backend base URL **without** `/api`. Must be a valid URL (empty is rejected by the build). Keeping it the same host as the app makes it same-origin (no CORS). Changing it needs `care rebuild-frontend` (Vite bakes it in at build time). |
 | `REACT_ALLOWED_LOCALES` | *(commented)* | Optional. Comma-separated languages, e.g. `"en,hi,ta,ml,mr,kn"`. |
 | `REACT_DEFAULT_COUNTRY` | *(commented)* | Optional default country. |
 

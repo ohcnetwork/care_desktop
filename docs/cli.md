@@ -34,7 +34,7 @@ care status
 | `care backup-now` | Write an immediate database dump into the backup folder. |
 | `care list-backups` | List the restorable points in the backup folder, newest first. |
 | `care restore <dump> [files.tar.gz]` | Restore a backup: drop + re-create the DB from `<dump>`, and (if a `files-*.tar.gz` is given, or auto-paired by timestamp) restore the uploaded files. **Replaces current data.** |
-| `care uninstall [--images] [--backups] --yes` | Remove everything: containers, network, **all data volumes**, the installed files, and the downloaded source. `--images` also removes the Docker images; `--backups` also deletes the backup folder. Requires `--yes`. |
+| `care uninstall [--images] [--backups] --yes` | Remove everything: containers, network, **all data volumes**, the installed files, the downloaded source, and the **trusted CA cert from this server's keychain**. `--images` also removes the Docker images; `--backups` also deletes the backup folder. Requires `--yes`. |
 
 ## Useful environment variables
 
@@ -69,7 +69,9 @@ care restore care-20260701-020000.dump # DB + same-timestamp files, if present
 - `care uninstall` deletes the data volumes, so it **won't run without `--yes`** —
   without it, it just prints what it would remove. Backups are kept unless you add
   `--backups`. Run from the repo root, it cleans Docker + the clones but leaves the
-  source checkout itself in place. It does not rename the computer back.
+  source checkout itself in place. It does not rename the computer back. It **removes
+  the clinic's CA cert from *this* machine's trust store** (matched by fingerprint, so
+  only that cert is touched); other devices keep their copy and must remove it manually.
 - `care` never passes `-v` to `docker compose`, so **data volumes always survive**
   stop/start/rebuild. The only way to delete data is to remove the volumes yourself.
 - The CLI and the desktop app are interchangeable — you can set up with one and

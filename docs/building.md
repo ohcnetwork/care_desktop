@@ -88,6 +88,34 @@ go vet ./...        # static checks
 
 ---
 
+## Loading sample data (dev)
+
+To exercise the app with realistic content, seed CARE's fixtures into the **running**
+stack with the repo-root script:
+
+```bash
+./load_test_fixtures.sh
+```
+
+What it does:
+
+1. Installs `faker` into the **backend** container — CARE's fixture loader needs it,
+   but the clinic image ships without dev deps. This install is **ephemeral** (gone
+   when the container is recreated).
+2. Runs `manage.py load_fixtures` under `config.settings.deployment` with
+   `DJANGO_DEBUG=True` (the loader requires debug on). It uses the **same** database
+   (`DATABASE_URL` is unchanged), so the seeded rows land in the postgres volume and
+   **persist** across restarts.
+
+Prerequisites: the stack must be **up** first (`care start` or the desktop app). Run
+the script from the repo root.
+
+> **Dev/demo only.** Don't run it against a real clinic's data. If you reseed often,
+> bake `faker` into the backend image instead of installing it each time (the script
+> flags this with a `ponytail:` comment).
+
+---
+
 ## Releases (CI)
 
 `.github/workflows/release.yml` builds all three OSes on a `v*` tag:

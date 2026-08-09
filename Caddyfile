@@ -7,6 +7,44 @@
 	# auto-add its own :80 redirects - we define an explicit redirect site below.
 	auto_https disable_redirects
 	order coraza_waf first # must run before reverse_proxy
+
+	# Rename the internal CA so trust prompts (e.g. the iOS profile screen) show
+	# "CARE Desktop Local CA" instead of Caddy's default "Caddy Local Authority".
+	# Only affects a freshly-minted root; delete the caddy-data volume to re-mint.
+	pki {
+		ca local {
+			name "CARE Desktop"
+			root_cn "CARE Desktop Local CA"
+			intermediate_cn "CARE Desktop Local CA - Intermediate"
+		}
+	}
+}
+
+# The cert-trust bootstrap (install page + root CA), served on BOTH http and
+# https. iOS Safari auto-upgrades http->https, so the page must exist on https
+# too or Safari lands on the frontend 404 before the device trusts us.
+(bootstrap) {
+	handle_path /setup* {
+		root * /setup
+		file_server {
+			index index.html
+		}
+	}
+	# The root CA, served only via the setup page (its button carries ?ok=1).
+	# A direct visit with neither the marker nor a same-site referer is bounced
+	# back to the instructions.
+	handle /root.crt {
+		@direct {
+			not query ok=1
+			not header Referer *care.local*
+		}
+		route {
+			redir @direct /setup 302
+			header Content-Type application/x-x509-ca-cert
+			root * /data/caddy/pki/authorities/local
+			file_server
+		}
+	}
 }
 
 # The site body, shared by every https listener below.
@@ -49,13 +87,22 @@
 	}
 }
 
-# http is gone: every plain-http request is permanently redirected to https.
+# http is gone EXCEPT the trust bootstrap: a device can't open https until it
+# trusts our root, so the install page and the cert file are served over plain
+# http. Everything else is permanently redirected to https.
 :80 {
-	redir https://{host}{uri} permanent
+	import bootstrap
+	handle {
+		redir https://{host}{uri} permanent
+	}
 }
 
 care.local:443 {
 	tls internal # self-signed cert from Caddy's local CA (LAN name, no public CA)
+	# Bootstrap first so /setup + /root.crt win over site's catch-all. Needed on
+	# https too: iOS Safari auto-upgrades http->https and would otherwise land on
+	# the frontend 404 before the device trusts our root.
+	import bootstrap
 	import site
 }
 
