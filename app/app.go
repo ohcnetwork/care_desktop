@@ -392,7 +392,7 @@ func (a *App) notifyInstalled(mdnsName string) {
 	sel, _ := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
 		Type:          wruntime.InfoDialog,
 		Title:         "CARE Desktop installed",
-		Message:       "CARE is installed and running.\n\nOpen it at " + url + "\nLogin: admin / admin (change the password in the app).",
+		Message:       "",
 		Buttons:       []string{"Open CARE", "Close"},
 		DefaultButton: "Open CARE",
 	})

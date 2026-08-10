@@ -404,8 +404,10 @@ label { font-size: 13px; font-weight: 600; color: var(--ink2); }
 .c-name { width: 190px; flex: none; font-weight: 600; font-size: 13px !important; color: var(--ink); }
 .c-url { flex: 1; }
 .c-version { width: 90px; flex: none; }
-.c-configs { width: 70px; flex: none; font: inherit; font-size: 12px; font-weight: 600; color: var(--gray); background: none; border: none; cursor: pointer; text-align: left; padding: 0; }
-.c-configs:hover { color: var(--green-ink); }
+.cfg-toggle { display: flex; align-items: center; gap: 7px; width: 100%; padding: 0 12px 10px 12px; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--gray); background: none; border: none; cursor: pointer; text-align: left; }
+.cfg-toggle:hover { color: var(--green-ink); }
+.cfg-toggle svg { transition: transform .18s ease; }
+.cfg-toggle.open svg { transform: rotate(180deg); }
 .plugin-cfg { padding: 0 12px 12px 12px; display: flex; flex-direction: column; gap: 7px; }
 .check { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink2); cursor: pointer; font-weight: 400; }
 .check input { width: 16px; height: 16px; accent-color: var(--red); cursor: pointer; }

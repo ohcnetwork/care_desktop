@@ -632,6 +632,8 @@ $("#env-save").addEventListener("click", () => {
 // Backend plugins are pip packages baked into the backend image (ADDITIONAL_PLUGS,
 // rebuild on save). Frontend plugins are CARE plug_config rows loaded by the
 // browser at runtime (a database write, no rebuild). Same table, two adapters.
+const CARET_SM = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+
 type ConfigRow = { key: string; value: string };
 type Row = { name: string; url: string; version: string; configs: ConfigRow[]; meta?: Record<string, unknown> };
 type CatalogEntry = { value: string; label: string; row: Row };
@@ -720,7 +722,7 @@ class PluginTable {
     this.el.textContent = "";
     const head = document.createElement("div");
     head.className = "plugins-head";
-    head.innerHTML = `<span class="c-name">Name</span><span class="c-url">Source</span><span class="c-version">Version</span><span class="c-configs">Configs</span><span style="width:26px; flex:none;"></span>`;
+    head.innerHTML = `<span class="c-name">Name</span><span class="c-url">Source</span><span class="c-version">Version</span><span style="width:26px; flex:none;"></span>`;
     this.el.appendChild(head);
 
     const table = document.createElement("div");
@@ -743,22 +745,23 @@ class PluginTable {
         dash.className = "c-version faint mono"; dash.textContent = "latest";
         row.appendChild(dash);
       }
-      const cfgBtn = document.createElement("button");
-      cfgBtn.className = "c-configs";
-      cfgBtn.textContent = `${p.configs.length} ${this.expanded.has(i) ? "▾" : "▸"}`;
-      cfgBtn.title = "Show configuration";
-      cfgBtn.addEventListener("click", () => {
-        this.expanded.has(i) ? this.expanded.delete(i) : this.expanded.add(i);
-        this.render();
-      });
-      row.appendChild(cfgBtn);
       const rm = document.createElement("button");
       rm.className = "x-btn"; rm.innerHTML = "&#215;"; rm.title = "remove plugin";
       rm.addEventListener("click", () => { this.rows.splice(i, 1); this.expanded.clear(); this.render(); });
       row.appendChild(rm);
       table.appendChild(row);
 
-      if (!this.expanded.has(i)) return;
+      const open = this.expanded.has(i);
+      const cfgBtn = document.createElement("button");
+      cfgBtn.className = "cfg-toggle" + (open ? " open" : "");
+      cfgBtn.innerHTML = `${CARET_SM}<span>Configuration${p.configs.length ? ` (${p.configs.length})` : ""}</span>`;
+      cfgBtn.addEventListener("click", () => {
+        open ? this.expanded.delete(i) : this.expanded.add(i);
+        this.render();
+      });
+      table.appendChild(cfgBtn);
+
+      if (!open) return;
       const cfg = document.createElement("div");
       cfg.className = "plugin-cfg";
       p.configs.forEach((c, ci) => {
@@ -869,9 +872,6 @@ async function selectSection(section: Section): Promise<void> {
   $("#cfg-file").textContent = be ? "backend.env" : "frontend.env";
   $("#env-save").textContent = be ? "Save and apply" : "Save and rebuild app";
   $("#plugins-save").textContent = be ? "Save and rebuild backend" : "Save frontend plugins";
-  const tag = $("#plugins-tag");
-  tag.className = "pill " + (be ? "warn" : "ok");
-  tag.textContent = be ? "rebuilds on save" : "instant";
   $("#adv-env-body").hidden = true;
   $("#adv-env-toggle").classList.remove("open");
   fillPicker(section);
