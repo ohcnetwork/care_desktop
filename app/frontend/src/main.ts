@@ -1,5 +1,6 @@
 // CARE Desktop control app - installer + control panel, driven by the Go bridge
-// (window.go.main.App) and Wails events. Fonts + icons are bundled locally (offline).
+// (window.go.main.App) and Wails events. Fonts are bundled locally (offline);
+// icons are inline SVG in index.html, so there is no icon font to ship.
 import "@fontsource/ibm-plex-sans/400.css";
 import "@fontsource/ibm-plex-sans/500.css";
 import "@fontsource/ibm-plex-sans/600.css";
@@ -7,9 +8,6 @@ import "@fontsource/ibm-plex-sans/700.css";
 import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "@fontsource/ibm-plex-mono/600.css";
-import "@phosphor-icons/web/regular";
-import "@phosphor-icons/web/bold";
-import "@phosphor-icons/web/fill";
 import "./style.css";
 
 const App = window.go.main.App;
@@ -19,6 +17,8 @@ const $ = <T extends HTMLElement>(sel: string): T => {
   if (!el) throw new Error(`missing element: ${sel}`);
   return el;
 };
+const DB_ICON = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"></ellipse><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"></path></svg>`;
+const esc = (s: string): string => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
 type DockerStatus = { ok: boolean; message: string };
 type NameStatus = { ok: boolean; message: string; how: string };
@@ -28,6 +28,7 @@ type AppState = { setup_done: boolean; mdns_name: string; docker: DockerStatus }
 type Backup = { db_dump: string; files_archive: string; label: string; manual: boolean; encrypted: boolean; size_bytes: number };
 type CarePlugin = { name: string; package_name: string; version?: string; configs?: Record<string, unknown> };
 type State = "running" | "partial" | "stopped" | "unknown";
+type Section = "backend" | "frontend";
 
 let phase: "setup" | "panel" = "setup";
 let busy = false, busyLabel = "";
@@ -35,14 +36,20 @@ let lastState: State = "unknown";
 let mdnsName = "care.local";
 let backups: Backup[] = [];
 
-function showView(v: "wizard" | "panel"): void {
-  $("#wizard").hidden = v !== "wizard";
-  $("#panel").hidden = v !== "panel";
+// ===========================================================================
+// Shell - views, rail, toast, log buffer
+// ===========================================================================
+type View = "setup" | "installing" | "failed" | "panel";
+function showView(v: View): void {
+  for (const name of ["setup", "installing", "failed", "panel"] as View[]) $(`#view-${name}`).hidden = name !== v;
+  const inPanel = v === "panel";
+  $("#brand-kicker").textContent = inPanel ? "Control panel" : "First-time setup";
+  $("#rail-steps").hidden = inPanel;
+  $("#rail-nav").hidden = !inPanel;
+  $("#rail-status").hidden = !inPanel;
+  railStep(v === "installing" || v === "failed" ? "install" : openSection);
 }
 
-// ===========================================================================
-// Toast + setup log buffer
-// ===========================================================================
 const toast = $("#toast"), toastMsg = $("#toast-msg");
 let toastTimer = 0;
 function firstLine(s: string): string { return s.split("\n")[0].trim(); }
@@ -67,165 +74,320 @@ function append(line: string): void {
 }
 
 // ===========================================================================
-// Wizard - requirement checks
+// Accordions
 // ===========================================================================
-let runtimeOk = false, mdnsOk = false, pwOk = false, bpwOk = false;
-let networkOk = true; // Windows-only gate; stays true elsewhere
+// Setup sections open one at a time (the design's guided flow); the advanced
+// sections in the panel are independent.
+type SetupSection = "checks" | "backup" | "admin" | "install";
+let openSection: SetupSection = "checks";
+
+function setAcc(id: string, open: boolean): void {
+  const body = document.getElementById(`${id}-body`);
+  const head = document.querySelector<HTMLElement>(`[data-acc="${id}"]`);
+  if (!body || !head) return;
+  body.hidden = !open;
+  head.parentElement!.classList.toggle("open", open);
+}
+function railStep(active: SetupSection): void {
+  document.querySelectorAll<HTMLElement>(".rail-step").forEach((el) =>
+    el.classList.toggle("active", el.dataset.step === active));
+}
+function railDone(step: SetupSection, done: boolean): void {
+  const el = document.querySelector<HTMLElement>(`.rail-step[data-step="${step}"]`);
+  if (!el) return;
+  el.classList.toggle("done", done);
+  el.querySelector(".rail-dot")!.innerHTML = done ? "&#10003;" : { checks: "1", backup: "2", admin: "3", install: "4" }[step];
+}
+function openSetupSection(id: SetupSection): void {
+  openSection = id;
+  for (const s of ["checks", "backup", "admin"] as SetupSection[]) setAcc(s, s === id);
+  railStep(id);
+}
+document.querySelectorAll<HTMLElement>("[data-acc]").forEach((head) => {
+  const id = head.dataset.acc!;
+  head.addEventListener("click", () => {
+    const closed = !!document.getElementById(`${id}-body`)?.hidden;
+    const setup = id === "checks" || id === "backup" || id === "admin";
+    if (setup && closed) openSetupSection(id as SetupSection);
+    else setAcc(id, closed);
+  });
+});
+document.querySelectorAll<HTMLElement>("[data-info]").forEach((btn) => {
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const box = $(`#${btn.dataset.info}`);
+    box.hidden = !box.hidden;
+  });
+});
+
+// ===========================================================================
+// Setup - requirement checks
+// ===========================================================================
+type Check = { id: string; title: string; detail: string; state: "wait" | "ok" | "bad"; how: string; fixable: boolean };
+const CHECKS: Check[] = [
+  { id: "runtime", title: "Runtime engine", detail: "Docker, Compose and Git", state: "wait", how: "", fixable: false },
+  { id: "mdns", title: "Network name", detail: "care.local on the clinic WiFi", state: "wait", how: "", fixable: false },
+];
+let networkCheck: Check | null = null; // Windows-only gate
+let pwOk = false, pwcOk = false, bpwOk = false, bpwcOk = false;
 let backupDir = "";
 const install = $<HTMLButtonElement>("#install");
 
-function setReq(id: string, state: "ok" | "wait" | "bad", label: string, how = ""): void {
-  const ico = $(`#${id}-ico`);
-  ico.className = "req-ico " + state;
-  ico.innerHTML = `<i class="${state === "ok" ? "ph-fill ph-check-circle" : state === "wait" ? "ph ph-circle-notch spin" : "ph-fill ph-x-circle"}"></i>`;
-  const badge = $(`#${id}-badge`);
-  badge.className = "req-badge " + state;
-  badge.textContent = label;
-  const howEl = $(`#${id}-how`);
-  howEl.hidden = !how;
-  howEl.textContent = how;
+function visibleChecks(): Check[] { return networkCheck ? [...CHECKS, networkCheck] : CHECKS; }
+function checksState(): "wait" | "ok" | "bad" {
+  const all = visibleChecks();
+  if (all.some((c) => c.state === "bad")) return "bad";
+  return all.some((c) => c.state === "wait") ? "wait" : "ok";
+}
+
+function renderChecks(): void {
+  const host = $("#check-rows");
+  host.textContent = "";
+  for (const c of visibleChecks()) {
+    const row = document.createElement("div");
+    row.className = "row " + (c.state === "bad" ? "bad" : "");
+    row.innerHTML = `
+      <span class="row-dot ${c.state}">${c.state === "ok" ? "&#10003;" : c.state === "bad" ? "&#10007;" : "&middot;"}</span>
+      <div class="row-txt"><div class="t">${esc(c.title)}</div><div class="s">${esc(c.detail)}</div></div>
+      <span class="pill ${c.state === "wait" ? "" : c.state}">${c.state === "wait" ? "Checking" : c.state === "ok" ? "Ready" : "Not ready"}</span>`;
+    host.appendChild(row);
+    if (c.state === "bad" && c.how) {
+      const fix = document.createElement("div");
+      fix.className = "row-fix";
+      fix.innerHTML = `<span>${esc(c.how)}</span>`;
+      if (c.fixable) {
+        const btn = document.createElement("button");
+        btn.className = "btn danger";
+        btn.textContent = "Fix automatically";
+        btn.addEventListener("click", () => void fixNetwork(btn));
+        fix.appendChild(btn);
+      }
+      host.appendChild(fix);
+    }
+  }
+  const state = checksState();
+  const dot = $("#checks-dot");
+  dot.className = "acc-dot" + (state === "ok" ? " done" : "");
+  dot.innerHTML = state === "ok" ? "&#10003;" : "1";
+  $("#checks-summary").textContent = state === "wait"
+    ? "Checking this computer"
+    : state === "ok" ? "Everything this clinic needs is ready" : "Open to see what failed";
+  const badge = $("#checks-badge");
+  badge.className = "pill " + (state === "wait" ? "" : state);
+  const issues = visibleChecks().filter((c) => c.state === "bad").length;
+  badge.textContent = state === "wait" ? "Checking" : state === "ok" ? "All good" : `${issues} issue${issues > 1 ? "s" : ""}`;
+  $("#sec-checks").classList.toggle("bad", state === "bad");
+  railDone("checks", state === "ok");
+  gate();
 }
 
 function gate(): void {
-  const checks = runtimeOk && mdnsOk && networkOk;
-  install.disabled = !(checks && pwOk && bpwOk);
-  $("#install-note").textContent = !checks
-    ? "Waiting for your computer to be ready..."
-    : !pwOk ? "Set a strong admin password to continue."
-      : !bpwOk ? "Set a backup password to continue."
+  const ready = checksState() === "ok" && pwOk && pwcOk && bpwOk && bpwcOk;
+  install.disabled = !ready;
+  $("#install-note").textContent = checksState() !== "ok"
+    ? "Waiting for your computer to be ready…"
+    : !(bpwOk && bpwcOk) ? "Set and confirm the backup password to continue."
+      : !(pwOk && pwcOk) ? "Set and confirm the admin password to continue."
         : "Ready. This takes about 10 to 20 minutes.";
 }
 
 async function checkRuntime(): Promise<void> {
-  setReq("runtime", "wait", "Checking...");
+  CHECKS[0].state = "wait"; renderChecks();
   const d: DockerStatus = await App.DockerStatus();
   const g: DockerStatus = await App.GitStatus();
-  runtimeOk = d.ok && g.ok;
-  if (runtimeOk) setReq("runtime", "ok", "Ready");
-  else setReq("runtime", "bad", "Not ready", !d.ok ? d.message : g.message);
-  gate();
+  CHECKS[0].state = d.ok && g.ok ? "ok" : "bad";
+  CHECKS[0].how = d.ok && g.ok ? "" : (!d.ok ? d.message : g.message);
+  renderChecks();
 }
 async function checkMDNS(): Promise<void> {
-  setReq("mdns", "wait", "Checking...");
+  CHECKS[1].state = "wait"; renderChecks();
   const d: NameStatus = await App.MDNSStatus();
-  mdnsOk = d.ok;
-  setReq("mdns", d.ok ? "ok" : "bad", d.ok ? "Ready" : "Not ready", d.ok ? "" : (d.how || d.message));
-  gate();
+  CHECKS[1].state = d.ok ? "ok" : "bad";
+  CHECKS[1].how = d.ok ? "" : (d.how || d.message);
+  renderChecks();
 }
 // Windows-only Private-network gate; hidden (and non-blocking) when not applicable.
 async function checkNetwork(): Promise<void> {
   const s: NetworkStatus = await App.NetworkStatus();
-  const row = $("#network-row"), div = $("#network-div"), fixRow = $("#network-fix-row");
-  if (!s.applicable) {
-    networkOk = true;
-    row.hidden = div.hidden = fixRow.hidden = true;
-    $("#network-how").hidden = true;
-    gate();
-    return;
-  }
-  row.hidden = div.hidden = false;
-  networkOk = s.ok;
-  setReq("network", s.ok ? "ok" : "bad", s.ok ? "Ready" : "Not ready", s.ok ? "" : (s.how || s.message));
-  fixRow.hidden = !(!s.ok && s.fixable);
-  gate();
+  networkCheck = s.applicable
+    ? {
+      id: "network", title: "Network profile", detail: "WiFi set to Private",
+      state: s.ok ? "ok" : "bad", how: s.ok ? "" : (s.how || s.message), fixable: s.fixable,
+    }
+    : null;
+  renderChecks();
 }
-
-function recheck(): void { void Promise.all([checkRuntime(), checkMDNS(), checkNetwork()]); }
-$("#check-reqs").addEventListener("click", recheck);
-
-$("#network-fix").addEventListener("click", () => void (async () => {
-  const btn = $<HTMLButtonElement>("#network-fix");
-  const orig = btn.innerHTML;
+async function fixNetwork(btn: HTMLButtonElement): Promise<void> {
   btn.disabled = true;
-  btn.innerHTML = `<i class="ph ph-circle-notch spin"></i>Fixing...`;
-  try {
-    await App.FixNetwork();
-    showToast("Network set to Private.");
-  } catch (e) {
-    showToast("Couldn't change the network: " + firstLine(String(e)));
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = orig;
-  }
+  btn.textContent = "Fixing…";
+  try { await App.FixNetwork(); showToast("Network set to Private."); }
+  catch (e) { showToast("Couldn't change the network: " + firstLine(String(e))); }
   await checkNetwork();
-})());
+}
+function recheck(): void { void Promise.all([checkRuntime(), checkMDNS(), checkNetwork()]); }
+$("#check-reqs").addEventListener("click", (e) => { e.stopPropagation(); recheck(); });
 
 $("#choose-backup").addEventListener("click", () => void (async () => {
   const sel = await App.ChooseFolder("Choose backup folder");
-  if (sel) { backupDir = sel; $("#backup-path").textContent = sel; }
+  if (sel) { backupDir = sel; $("#backup-path").textContent = sel; syncBackupSection(); }
 })());
 
-// password fields (admin + backup), sharing one validator
-function wirePw(input: HTMLInputElement, toggle: string, eye: string, hint: HTMLDivElement, okMsg: string, set: (ok: boolean) => void): void {
-  const def = hint.textContent ?? "";
-  $(`#${toggle}`).addEventListener("click", () => {
-    const show = input.type === "password";
-    input.type = show ? "text" : "password";
-    $(`#${eye}`).className = show ? "ph ph-eye-slash" : "ph ph-eye";
-  });
-  let t = 0;
-  const validate = async () => {
-    if (input.value === "") { set(false); hint.className = "hint"; hint.textContent = def; gate(); return; }
-    const reason = await App.ValidatePassword(input.value);
-    const ok = reason === "";
-    set(ok); hint.className = "hint " + (ok ? "ok" : "bad"); hint.textContent = ok ? okMsg : reason; gate();
-  };
-  input.addEventListener("input", () => { clearTimeout(t); t = window.setTimeout(() => void validate(), 180); });
+// ---------------------------------------------------------------------------
+// Passwords: strength comes from the Go validator (single source of truth),
+// the confirm field is a plain local comparison.
+// ---------------------------------------------------------------------------
+const DEFAULT_PW_MSG = "Use 8 to 20 characters with an uppercase letter, a lowercase letter and a number.";
+function setMsg(el: HTMLElement, text: string, tone: "" | "ok" | "bad"): void {
+  el.className = tone;
+  el.textContent = text;
+  el.hidden = text === "";
 }
-wirePw($("#adminpw"), "pw-toggle", "pw-eye", $("#pw-hint"), "Looks good - strong enough.", (v) => (pwOk = v));
-wirePw($("#backuppw"), "bpw-toggle", "bpw-eye", $("#bpw-hint"), "Looks good. Store it somewhere safe - it can't be recovered.", (v) => (bpwOk = v));
+function wirePw(
+  ids: { pw: string; confirm: string; wrap: string; cwrap: string; toggle: string; msg: string; cmsg: string; note: string },
+  set: (ok: boolean, confirmOk: boolean) => void,
+  after: () => void,
+): void {
+  const pw = $<HTMLInputElement>(`#${ids.pw}`), cf = $<HTMLInputElement>(`#${ids.confirm}`);
+  $(`#${ids.toggle}`).addEventListener("click", () => {
+    const show = pw.type === "password";
+    pw.type = cf.type = show ? "text" : "password";
+    $(`#${ids.toggle}`).textContent = show ? "Hide" : "Show";
+  });
+  let t = 0, strong = false;
+  const paint = () => {
+    const confirmOk = cf.value !== "" && cf.value === pw.value;
+    $(`#${ids.wrap}`).className = "pw " + (pw.value === "" ? "" : strong ? "ok" : "bad");
+    $(`#${ids.cwrap}`).className = "pw " + (cf.value === "" ? "" : confirmOk ? "ok" : "bad");
+    const note = $(`#${ids.note}`);
+    note.className = "pw-note " + (cf.value === "" ? "" : confirmOk ? "ok" : "bad");
+    note.textContent = cf.value === "" ? "" : confirmOk ? "Match" : "No match";
+    setMsg($(`#${ids.cmsg}`), cf.value === "" ? "" : confirmOk
+      ? "Both passwords match."
+      : "The two passwords are different. Retype the confirmation to match exactly, including capital letters.",
+      confirmOk ? "ok" : "bad");
+    set(strong, confirmOk);
+    after();
+    gate();
+  };
+  const validate = async () => {
+    if (pw.value === "") {
+      strong = false;
+      setMsg($(`#${ids.msg}`), DEFAULT_PW_MSG, "");
+    } else {
+      const reason = await App.ValidatePassword(pw.value);
+      strong = reason === "";
+      setMsg($(`#${ids.msg}`), strong ? "Strong password." : reason, strong ? "ok" : "bad");
+    }
+    paint();
+  };
+  pw.addEventListener("input", () => { clearTimeout(t); t = window.setTimeout(() => void validate(), 180); });
+  cf.addEventListener("input", paint);
+}
+
+function sectionDone(id: "backup" | "admin", done: boolean, n: string, summary: string): void {
+  const dot = $(`#${id}-dot`);
+  dot.className = "acc-dot" + (done ? " done" : "");
+  dot.innerHTML = done ? "&#10003;" : n;
+  const badge = $(`#${id}-badge`);
+  badge.className = "pill" + (done ? " ok" : "");
+  badge.textContent = done ? "Done" : "To do";
+  $(`#${id}-summary`).textContent = summary;
+  railDone(id, done);
+}
+function syncBackupSection(): void {
+  const done = bpwOk && bpwcOk;
+  sectionDone("backup", done, "2", done
+    ? `${backupDir || "Desktop (default)"}, password set`
+    : "Drive and password for daily backups");
+}
+function syncAdminSection(): void {
+  const done = pwOk && pwcOk;
+  sectionDone("admin", done, "3", done ? "admin, password set" : "The first login for this clinic");
+}
+wirePw(
+  { pw: "backuppw", confirm: "backuppwc", wrap: "bpw-wrap", cwrap: "bpwc-wrap", toggle: "bpw-toggle", msg: "bpw-msg", cmsg: "bpwc-msg", note: "bpwc-note" },
+  (ok, cok) => { bpwOk = ok; bpwcOk = cok; },
+  () => { syncBackupSection(); },
+);
+wirePw(
+  { pw: "adminpw", confirm: "adminpwc", wrap: "apw-wrap", cwrap: "apwc-wrap", toggle: "pw-toggle", msg: "apw-msg", cmsg: "apwc-msg", note: "apwc-note" },
+  (ok, cok) => { pwOk = ok; pwcOk = cok; },
+  syncAdminSection,
+);
 
 // ===========================================================================
-// Wizard - install flow
+// Setup - install flow
 // ===========================================================================
-const wizForm = $("#wiz-form"), wizInstalling = $("#wiz-installing"), wizFailed = $("#wiz-failed");
-const installBar = $<HTMLDivElement>("#install-bar"), installPct = $("#install-pct"), installStep = $("#install-step-text");
+type RunStep = { re: RegExp; pct: number; label: string };
+const RUN_STEPS: RunStep[] = [
+  { re: /secret key/i, pct: 8, label: "Preparing the configuration" },
+  { re: /backup image|backup encryption key/i, pct: 15, label: "Securing the backups" },
+  { re: /Building the Caddy/i, pct: 22, label: "Building the secure gateway" },
+  { re: /Cloning care|care_fe|frontend \(/i, pct: 36, label: "Downloading CARE" },
+  { re: /Building the backend image/i, pct: 62, label: "Building the backend" },
+  { re: /Building the frontend image/i, pct: 80, label: "Building the app" },
+  { re: /Starting CARE/i, pct: 90, label: "Starting the services" },
+  { re: /database migrations/i, pct: 97, label: "Setting up the database" },
+  { re: /become healthy|CARE is up/i, pct: 100, label: "Waiting for CARE to answer" },
+];
+let stepIdx = 0, pct = 0, elapsedTimer = 0, startedAt = 0;
 let lastError = "";
 
-const MILESTONES: [RegExp, number, string][] = [
-  [/secret key/i, 6, "Preparing the configuration..."],
-  [/Building the backup image/i, 9, "Preparing encrypted backups..."],
-  [/Generating the backup encryption key/i, 11, "Securing your backups..."],
-  [/Building the Caddy/i, 13, "Building the secure gateway..."],
-  [/Cloning care backend/i, 16, "Downloading CARE..."],
-  [/Cloning care frontend|Cloning care_fe|frontend \(/i, 25, "Downloading the app..."],
-  [/Building the backend image/i, 42, "Building the backend - this is the long one..."],
-  [/Building the frontend image/i, 64, "Building the app..."],
-  [/Starting CARE/i, 82, "Starting the services..."],
-  [/database migrations/i, 90, "Setting up the database..."],
-  [/become healthy/i, 95, "Waiting for CARE to answer..."],
-  [/CARE is up/i, 100, "Ready."],
-];
+function renderSteps(): void {
+  const done = pct >= 100;
+  $("#steps-list").innerHTML = RUN_STEPS.map((s, i) => {
+    const state = done || i < stepIdx ? "done" : i === stepIdx ? "now" : "todo";
+    const dot = state === "now"
+      ? `<span class="step-dot now"><span class="ring"></span></span>`
+      : `<span class="step-dot ${state}">${state === "done" ? "&#10003;" : "&middot;"}</span>`;
+    return `<div class="step-row ${state}">${dot}<span class="label">${esc(s.label)}</span><span class="n">${state === "done" ? "done" : state === "now" ? "working" : ""}</span></div>`;
+  }).join("");
+  $("#details-summary").textContent = done ? `All ${RUN_STEPS.length} steps finished` : `Step ${stepIdx + 1} of ${RUN_STEPS.length}`;
+  $("#step-label").textContent = done ? "Done" : RUN_STEPS[stepIdx].label;
+  $("#install-pct").textContent = `${Math.floor(pct)}%`;
+  $<HTMLDivElement>("#install-bar").style.width = `${pct}%`;
+}
 function bumpInstallProgress(line: string): void {
-  for (const [re, pct, label] of MILESTONES) {
-    if (re.test(line)) {
-      const cur = parseInt(installBar.style.width) || 0;
-      if (pct > cur) {
-        $("#install-progress").classList.remove("indet");
-        installBar.style.width = pct + "%";
-        installPct.textContent = pct + "%";
-        installStep.textContent = label;
-      }
-      return;
-    }
+  for (let i = 0; i < RUN_STEPS.length; i++) {
+    if (!RUN_STEPS[i].re.test(line)) continue;
+    if (RUN_STEPS[i].pct <= pct) return;
+    stepIdx = i;
+    pct = RUN_STEPS[i].pct;
+    renderSteps();
+    return;
   }
+}
+function tickElapsed(): void {
+  const s = Math.floor((Date.now() - startedAt) / 1000);
+  $("#elapsed").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+function startInstalling(): void {
+  stepIdx = 0; pct = 0;
+  renderSteps();
+  $("#run-ico").className = "run-ico";
+  $("#run-ico").innerHTML = `<span class="ring"></span>`;
+  $("#run-title").textContent = "Setting up your clinic";
+  $("#run-sub").textContent = "This takes about 10 to 20 minutes.";
+  $("#run-foot").hidden = true;
+  startedAt = Date.now();
+  tickElapsed();
+  clearInterval(elapsedTimer);
+  elapsedTimer = window.setInterval(tickElapsed, 1000);
+  showView("installing");
 }
 
 install.addEventListener("click", () => {
   if (install.disabled) return;
   void (async () => {
     install.disabled = true;
-    $("#install-note").textContent = "Re-checking your computer...";
+    $("#install-note").textContent = "Re-checking your computer…";
     await Promise.all([checkRuntime(), checkMDNS(), checkNetwork()]);
-    if (!(runtimeOk && mdnsOk && networkOk && pwOk && bpwOk)) {
+    if (checksState() !== "ok" || !(pwOk && pwcOk && bpwOk && bpwcOk)) {
       $("#install-note").textContent = "A step is no longer met - fix it and try again.";
       return;
     }
     phase = "setup";
-    wizForm.hidden = true; wizInstalling.hidden = false;
-    $("#install-progress").classList.add("indet");
-    installPct.textContent = "Working...";
-    installStep.textContent = "Getting started...";
+    startInstalling();
     append("Starting one-time setup...");
     void App.RunSetup("care.local", $<HTMLInputElement>("#adminpw").value, $<HTMLInputElement>("#backuppw").value, true, "", backupDir).catch((e) => {
       lastError = String(e); append(`error: ${String(e)}`); showInstallFailed();
@@ -234,11 +396,20 @@ install.addEventListener("click", () => {
 });
 
 function showInstallFailed(): void {
-  wizInstalling.hidden = true; wizForm.hidden = true;
+  clearInterval(elapsedTimer);
   const tail = setupLog.slice(-40).join("\n").trim();
   const headline = (lastError || "Setup did not complete.").trim();
   $("#fail-msg").textContent = tail ? `${headline}\n\n---- last output ----\n${tail}` : headline;
-  wizFailed.hidden = false;
+  setAcc("fail", false);
+  showView("failed");
+}
+function backToSetup(): void {
+  lastError = ""; setupLog.length = 0;
+  pct = 0; stepIdx = 0;
+  renderSteps();
+  showView("setup");
+  openSetupSection("checks");
+  recheck();
 }
 $("#fail-retry").addEventListener("click", () => void (async () => {
   const btn = $<HTMLButtonElement>("#fail-retry");
@@ -246,12 +417,10 @@ $("#fail-retry").addEventListener("click", () => void (async () => {
   // Windows: wipe the half-staged kit so the retry re-stages clean. No-op elsewhere.
   try { await App.CleanupFailedInstall(); } catch (e) { console.log("cleanup: " + String(e)); }
   btn.disabled = false;
-  lastError = ""; setupLog.length = 0;
-  installBar.style.width = "0%"; installPct.textContent = "Working..."; installStep.textContent = "Getting started...";
-  $("#install-progress").classList.remove("indet");
-  wizFailed.hidden = true; wizInstalling.hidden = true; wizForm.hidden = false;
-  recheck();
+  backToSetup();
 })());
+$("#fail-back").addEventListener("click", backToSetup);
+$("#open-panel").addEventListener("click", () => { phase = "panel"; showView("panel"); void bootPanel(); });
 
 // ===========================================================================
 // Panel - tabs + status
@@ -271,48 +440,48 @@ function showTab(id: string): void {
 }
 document.querySelectorAll<HTMLElement>(".nav-item").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab!)));
 
-const SYS: Record<Exclude<State, "unknown">, { label: string; sub: string; icon: string; cls: string }> = {
-  running: { label: "Running", sub: "The clinic system is live and reachable.", icon: "ph-fill ph-pulse", cls: "" },
-  stopped: { label: "Stopped", sub: "The clinic system is not running.", icon: "ph-fill ph-stop-circle", cls: "stopped" },
-  partial: { label: "Starting...", sub: "Some services are still coming up.", icon: "ph ph-circle-notch", cls: "partial" },
+const SYS: Record<Exclude<State, "unknown">, { label: string; sub: string; glyph: string; cls: string }> = {
+  running: { label: "Running", sub: "Live and reachable on the clinic WiFi.", glyph: "\u25cf", cls: "running" },
+  stopped: { label: "Stopped", sub: "The clinic system is not running.", glyph: "\u25a0", cls: "" },
+  partial: { label: "Starting…", sub: "Some services are still coming up.", glyph: "\u25a0", cls: "busy" },
 };
 function applyState(state: State): void {
-  const hero = $(".status-hero");
+  const ico = $("#sys-ico");
   if (busy) {
-    hero.className = "status-hero partial";
-    $("#sys-icon").className = "ph ph-circle-notch spin";
-    $("#sys-label").textContent = busyLabel + "...";
+    ico.className = "status-ico busy";
+    ico.innerHTML = `<span class="ring"></span>`;
+    $("#sys-label").textContent = busyLabel + "…";
     $("#sys-sub").textContent = "Please wait a moment.";
-    $("#hero-actions").hidden = true; $("#busy-banner").hidden = false;
-    $("#busy-text").textContent = `${busyLabel} the clinic system. This usually takes a few seconds, please wait.`;
-    $("#mini-dot").className = "mini-dot busy"; $("#mini-label").textContent = busyLabel + "...";
+    for (const id of ["#btn-start", "#btn-stop", "#btn-restart"]) $<HTMLButtonElement>(id).disabled = true;
+    $("#rail-status-dot").className = "rail-status-dot busy";
+    $("#rail-status-label").textContent = busyLabel + "…";
     lockPanel(true);
     return;
   }
-  $("#hero-actions").hidden = false; $("#busy-banner").hidden = true;
   const s = state === "unknown" ? SYS.stopped : SYS[state];
-  hero.className = "status-hero " + s.cls;
-  $("#sys-icon").className = s.icon + (state === "partial" ? " spin" : "");
-  $("#sys-label").textContent = state === "unknown" ? "checking..." : s.label;
+  ico.className = "status-ico " + s.cls;
+  ico.textContent = s.glyph;
+  $("#sys-label").textContent = state === "unknown" ? "checking…" : s.label;
   $("#sys-sub").textContent = state === "unknown" ? "" : s.sub;
   const running = state === "running", partial = state === "partial", stopped = !running && !partial;
-  ($("#btn-start") as HTMLButtonElement).disabled = running || partial;
-  $("#btn-start").classList.toggle("primary", stopped);
-  ($("#btn-stop") as HTMLButtonElement).disabled = stopped;
-  ($("#btn-restart") as HTMLButtonElement).disabled = stopped;
-  $("#mini-dot").className = "mini-dot " + (running ? "running" : partial ? "busy" : "stopped");
-  $("#mini-label").textContent = running ? "Running" : partial ? "Starting..." : "Stopped";
+  const start = $<HTMLButtonElement>("#btn-start");
+  start.disabled = running || partial;
+  start.classList.toggle("primary", stopped);
+  $<HTMLButtonElement>("#btn-stop").disabled = stopped;
+  $<HTMLButtonElement>("#btn-restart").disabled = stopped;
+  $("#rail-status-dot").className = "rail-status-dot " + (running ? "running" : partial ? "busy" : "stopped");
+  $("#rail-status-label").textContent = running ? "Running" : partial ? "Starting…" : "Stopped";
   lockPanel(false);
 }
 function lockPanel(b: boolean): void {
-  for (const id of ["#btn-backup-now", "#backups-refresh", "#env-save", "#env-add", "#plugins-save", "#plugin-picker", "#btn-rebuild", "#uninstall-run"]) {
+  for (const id of ["#btn-backup-now", "#btn-backup-now2", "#backups-refresh", "#env-save", "#env-add", "#plugins-save", "#plugin-picker", "#btn-rebuild", "#uninstall-run"]) {
     const el = document.querySelector<HTMLButtonElement>(id);
     if (el) el.disabled = b;
   }
 }
 
 async function refresh(): Promise<void> {
-  if (busy || $("#panel").hidden) return;
+  if (busy || $("#view-panel").hidden) return;
   let state: State;
   try {
     const h: Health = await App.CareHealth();
@@ -336,31 +505,29 @@ $("#btn-start").addEventListener("click", () => void run("start"));
 $("#btn-stop").addEventListener("click", () => void run("stop"));
 $("#btn-restart").addEventListener("click", () => void run("restart"));
 $("#btn-backup-now").addEventListener("click", () => void run("backup-now"));
+$("#btn-backup-now2").addEventListener("click", () => void run("backup-now"));
 $("#btn-rebuild").addEventListener("click", () => void run("rebuild-frontend"));
 
 // address open + copy
 function openClinic(): void { void App.OpenURL(`https://${mdnsName}/`); }
 $("#open-link").addEventListener("click", openClinic);
 $("#open-link2").addEventListener("click", openClinic);
+$("#open-device-setup").addEventListener("click", () => void App.OpenURL(`https://${mdnsName}/setup`));
 $("#copy-addr").addEventListener("click", () => void navigator.clipboard.writeText(mdnsName).then(() => showToast("Address copied"), () => showToast(mdnsName)));
 $("#view-backups").addEventListener("click", () => showTab("backups"));
 
 // autostart
-const autostartCb = $<HTMLInputElement>("#autostart");
-$("#autostart-label").addEventListener("click", (e) => {
-  e.preventDefault();
-  void (async () => {
-    const want = !autostartCb.checked;
-    try { await App.SetAutostart(want); showToast(want ? "Start at login: on" : "Start at login: off"); }
-    catch (err) { append(`autostart error: ${String(err)}`); }
-    await syncAutostart();
-  })();
-});
+let autostartOn = false;
+$("#autostart-label").addEventListener("click", () => void (async () => {
+  const want = !autostartOn;
+  try { await App.SetAutostart(want); showToast(want ? "Start at login on" : "Start at login off"); }
+  catch (err) { append(`autostart error: ${String(err)}`); }
+  await syncAutostart();
+})());
 async function syncAutostart(): Promise<void> {
   try {
-    const enabled = await App.AutostartEnabled();
-    autostartCb.checked = enabled;
-    $("#autostart-label").classList.toggle("on", enabled);
+    autostartOn = await App.AutostartEnabled();
+    $("#autostart-label").classList.toggle("on", autostartOn);
   } catch { /* ignore */ }
 }
 
@@ -394,9 +561,9 @@ function isAdvancedKey(key: string): boolean { return ADV_KEYS.has(key) || ADV_P
 
 class EnvEditor {
   entries: Entry[] = [];
-  name: "backend" | "frontend" = "backend";
+  name: Section = "backend";
   constructor(private everydayEl: HTMLElement, private advEl: HTMLElement) {}
-  async load(name: "backend" | "frontend"): Promise<void> {
+  async load(name: Section): Promise<void> {
     this.name = name;
     try { this.entries = parseEnv(await App.ReadEnv(name)); }
     catch (e) { this.entries = [{ kind: "comment", raw: `# could not read ${name}.env: ${String(e)}` }]; }
@@ -419,7 +586,7 @@ class EnvEditor {
     row.appendChild(v);
     if (e.isNew) {
       const rm = document.createElement("button");
-      rm.className = "btn ghost env-remove"; rm.textContent = "x"; rm.title = "remove";
+      rm.className = "x-btn"; rm.innerHTML = "&#215;"; rm.title = "remove";
       rm.addEventListener("click", () => { this.entries.splice(idx, 1); this.render(); });
       row.appendChild(rm);
     }
@@ -445,7 +612,7 @@ $("#env-add").addEventListener("click", () => envEditor.add());
 $("#adv-env-toggle").addEventListener("click", () => {
   const body = $("#adv-env-body");
   body.hidden = !body.hidden;
-  $("#adv-env-caret").className = body.hidden ? "ph ph-caret-right" : "ph ph-caret-down";
+  $("#adv-env-toggle").classList.toggle("open", !body.hidden);
 });
 $("#env-save").addEventListener("click", () => {
   if (busy) return;
@@ -453,27 +620,39 @@ $("#env-save").addEventListener("click", () => {
     const be = envEditor.name === "backend";
     try {
       await envEditor.save();
-      showToast(be ? "Backend settings applied" : "Rebuilding app with new settings");
+      showToast(be ? "Settings applied" : "Rebuilding the app with new settings");
       await run(be ? "start" : "rebuild-frontend");
     } catch (e) { append(`error saving env: ${String(e)}`); showToast("Couldn't save settings"); }
   })();
 });
 
 // ===========================================================================
-// Plugins (backend only - ADDITIONAL_PLUGS)
+// Plugins - one table for both kinds
 // ===========================================================================
-type PluginConfigRow = { key: string; value: string };
-type PluginRow = { name: string; package_name: string; version: string; configs: PluginConfigRow[] };
-type CatalogEntry = { label: string; name: string; package_name: string; version: string; configs: PluginConfigRow[] };
-const PLUGIN_CATALOG: CatalogEntry[] = [
-  {
-    label: "Notifications (care_notifications)",
+// Backend plugins are pip packages baked into the backend image (ADDITIONAL_PLUGS,
+// rebuild on save). Frontend plugins are CARE plug_config rows loaded by the
+// browser at runtime (a database write, no rebuild). Same table, two adapters.
+type ConfigRow = { key: string; value: string };
+type Row = { name: string; url: string; version: string; configs: ConfigRow[]; meta?: Record<string, unknown> };
+type CatalogEntry = { value: string; label: string; row: Row };
+type FrontendPlugin = { slug: string; meta: Record<string, unknown> };
+
+const BE_CATALOG: CatalogEntry[] = [{
+  value: "care_notifications",
+  label: "Notifications (care_notifications)",
+  row: {
     name: "care_notifications",
-    package_name: "git+https://github.com/ohcnetwork/care_notifications_be.git",
+    url: "git+https://github.com/ohcnetwork/care_notifications_be.git",
     version: "@main",
     configs: [{ key: "WEBPUSH_NOTIFICATIONS_ENABLED", value: "false" }],
   },
-];
+}];
+const FE_CATALOG: CatalogEntry[] = [{
+  value: "care_hello_fe",
+  label: "Hello World (sample)",
+  row: { name: "care_hello_fe", url: "https://ohcnetwork.github.io/care_hello_fe/assets/remoteEntry.js", version: "", configs: [], meta: {} },
+}];
+
 function parseConfigValue(v: string): unknown {
   const t = v.trim();
   if (t === "true") return true;
@@ -482,76 +661,142 @@ function parseConfigValue(v: string): unknown {
   if (/^-?\d*\.\d+$/.test(t)) return parseFloat(t);
   return v;
 }
-class PluginEditor {
-  plugins: PluginRow[] = [];
-  constructor(private container: HTMLElement) {}
-  async load(): Promise<void> {
-    try {
-      const raw = await App.ReadPlugins();
-      this.plugins = raw.map((p) => ({
-        name: p.name ?? "", package_name: p.package_name ?? "", version: p.version ?? "",
-        configs: Object.entries(p.configs ?? {}).map(([key, value]) => ({ key, value: String(value) })),
-      }));
-    } catch { this.plugins = []; }
-    this.render();
-  }
-  private field(label: string, ph: string, value: string, onInput: (v: string) => void): HTMLElement {
-    const wrap = document.createElement("div"); wrap.className = "plugin-field";
-    const lab = document.createElement("label"); lab.textContent = label;
-    const inp = document.createElement("input");
-    inp.type = "text"; inp.placeholder = ph; inp.value = value; inp.spellcheck = false;
-    inp.addEventListener("input", () => onInput(inp.value));
-    wrap.append(lab, inp);
-    return wrap;
-  }
-  render(): void {
-    this.container.innerHTML = "";
-    if (this.plugins.length === 0) {
-      const empty = document.createElement("div"); empty.className = "plugins-empty";
-      empty.textContent = "No plugins yet.";
-      this.container.appendChild(empty); return;
+
+class PluginTable {
+  rows: Row[] = [];
+  kind: Section = "backend";
+  private expanded = new Set<number>();
+  // Frontend saves overwrite the whole plug_config set, so a save without a clean
+  // baseline read could silently delete rows. Track whether we ever got one.
+  private feLoaded = false;
+  private feError = "";
+  constructor(private el: HTMLElement) {}
+
+  async load(kind: Section): Promise<void> {
+    this.kind = kind;
+    this.expanded.clear();
+    if (kind === "backend") {
+      try {
+        const raw = await App.ReadPlugins();
+        this.rows = raw.map((p) => ({
+          name: p.name ?? "", url: p.package_name ?? "", version: p.version ?? "",
+          configs: Object.entries(p.configs ?? {}).map(([key, value]) => ({ key, value: String(value) })),
+        }));
+      } catch { this.rows = []; }
+      this.render();
+      return;
     }
-    this.plugins.forEach((p, pi) => {
-      const card = document.createElement("div"); card.className = "plugin-card";
-      const head = document.createElement("div"); head.className = "plugin-head";
-      const pz = document.createElement("i"); pz.className = "ph ph-puzzle-piece pz"; head.appendChild(pz);
-      const name = document.createElement("input");
-      name.className = "plugin-name"; name.placeholder = "plugin name (e.g. hcx)"; name.value = p.name; name.spellcheck = false;
-      name.addEventListener("input", () => (this.plugins[pi].name = name.value));
-      const rm = document.createElement("button");
-      rm.className = "btn ghost env-remove"; rm.textContent = "x"; rm.title = "remove plugin"; rm.style.color = "var(--red)";
-      rm.addEventListener("click", () => { this.plugins.splice(pi, 1); this.render(); });
-      head.append(name, rm); card.appendChild(head);
-      card.appendChild(this.field("Package URL", "git+https://github.com/ohcnetwork/care_hcx.git", p.package_name, (v) => (this.plugins[pi].package_name = v)));
-      card.appendChild(this.field("Version (optional)", "@master or ==1.2.3", p.version, (v) => (this.plugins[pi].version = v)));
-      const cl = document.createElement("div"); cl.className = "plugin-cfg-label"; cl.textContent = "Configuration"; card.appendChild(cl);
-      const cf = document.createElement("div"); cf.className = "env-form";
-      p.configs.forEach((c, ci) => {
-        const row = document.createElement("div"); row.className = "env-row";
-        const k = document.createElement("input"); k.type = "text"; k.placeholder = "CONFIG_KEY"; k.value = c.key; k.className = "env-key-input";
-        k.addEventListener("input", () => (this.plugins[pi].configs[ci].key = k.value));
-        const v = document.createElement("input"); v.type = "text"; v.placeholder = "value"; v.value = c.value; v.spellcheck = false;
-        v.addEventListener("input", () => (this.plugins[pi].configs[ci].value = v.value));
-        const crm = document.createElement("button"); crm.className = "btn ghost env-remove"; crm.textContent = "x";
-        crm.addEventListener("click", () => { this.plugins[pi].configs.splice(ci, 1); this.render(); });
-        row.append(k, v, crm); cf.appendChild(row);
-      });
-      card.appendChild(cf);
-      const addCfg = document.createElement("button");
-      addCfg.className = "btn ghost tiny"; addCfg.style.marginTop = "8px"; addCfg.innerHTML = `<i class="ph ph-plus"></i>Add config`;
-      addCfg.addEventListener("click", () => { this.plugins[pi].configs.push({ key: "", value: "" }); this.render(); });
-      card.appendChild(addCfg);
-      this.container.appendChild(card);
+    this.feLoaded = false; this.feError = "";
+    this.el.innerHTML = `<div class="plugins-table"><div class="list-empty">Checking…</div></div>`;
+    let raw: FrontendPlugin[];
+    try { raw = (await App.ReadFrontendPlugins()) ?? []; }
+    catch (e) {
+      this.feError = firstLine(String(e));
+      this.rows = [];
+      this.el.innerHTML = `<div class="plugins-table"><div class="list-empty">${esc(this.feError)}</div></div>`;
+      return;
+    }
+    this.rows = raw.map((p) => {
+      const meta = (p.meta ?? {}) as Record<string, unknown>;
+      const cfg = (meta.config ?? {}) as Record<string, unknown>;
+      return {
+        name: p.slug, url: typeof meta.url === "string" ? meta.url : "", version: "",
+        configs: Object.entries(cfg).map(([key, value]) => ({ key, value: String(value) })),
+        meta,
+      };
     });
-  }
-  add(): void { this.plugins.push({ name: "", package_name: "", version: "", configs: [] }); this.render(); }
-  addFromCatalog(c: CatalogEntry): void {
-    this.plugins.push({ name: c.name, package_name: c.package_name, version: c.version, configs: c.configs.map((cf) => ({ ...cf })) });
+    this.feLoaded = true;
     this.render();
   }
-  serialize(): CarePlugin[] {
-    return this.plugins.filter((p) => p.name.trim() !== "" && p.package_name.trim() !== "").map((p) => {
-      const out: CarePlugin = { name: p.name.trim(), package_name: p.package_name.trim() };
+
+  private cell(cls: string, value: string, ph: string, onInput: (v: string) => void): HTMLInputElement {
+    const inp = document.createElement("input");
+    inp.className = cls; inp.type = "text"; inp.value = value; inp.placeholder = ph; inp.spellcheck = false;
+    inp.addEventListener("input", () => onInput(inp.value));
+    return inp;
+  }
+
+  render(): void {
+    this.el.textContent = "";
+    const head = document.createElement("div");
+    head.className = "plugins-head";
+    head.innerHTML = `<span class="c-name">Name</span><span class="c-url">Source</span><span class="c-version">Version</span><span class="c-configs">Configs</span><span style="width:26px; flex:none;"></span>`;
+    this.el.appendChild(head);
+
+    const table = document.createElement("div");
+    table.className = "plugins-table";
+    if (this.rows.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "list-empty";
+      empty.textContent = "No plugins yet";
+      table.appendChild(empty);
+    }
+    this.rows.forEach((p, i) => {
+      const row = document.createElement("div");
+      row.className = "plugin-row";
+      row.appendChild(this.cell("c-name", p.name, this.kind === "backend" ? "care_hcx" : "care_hello_fe", (v) => (this.rows[i].name = v)));
+      row.appendChild(this.cell("c-url", p.url, this.kind === "backend" ? "git+https://github.com/org/repo.git" : "https://host/assets/remoteEntry.js", (v) => (this.rows[i].url = v)));
+      if (this.kind === "backend") {
+        row.appendChild(this.cell("c-version", p.version, "@main", (v) => (this.rows[i].version = v)));
+      } else {
+        const dash = document.createElement("span");
+        dash.className = "c-version faint mono"; dash.textContent = "latest";
+        row.appendChild(dash);
+      }
+      const cfgBtn = document.createElement("button");
+      cfgBtn.className = "c-configs";
+      cfgBtn.textContent = `${p.configs.length} ${this.expanded.has(i) ? "▾" : "▸"}`;
+      cfgBtn.title = "Show configuration";
+      cfgBtn.addEventListener("click", () => {
+        this.expanded.has(i) ? this.expanded.delete(i) : this.expanded.add(i);
+        this.render();
+      });
+      row.appendChild(cfgBtn);
+      const rm = document.createElement("button");
+      rm.className = "x-btn"; rm.innerHTML = "&#215;"; rm.title = "remove plugin";
+      rm.addEventListener("click", () => { this.rows.splice(i, 1); this.expanded.clear(); this.render(); });
+      row.appendChild(rm);
+      table.appendChild(row);
+
+      if (!this.expanded.has(i)) return;
+      const cfg = document.createElement("div");
+      cfg.className = "plugin-cfg";
+      p.configs.forEach((c, ci) => {
+        const r = document.createElement("div"); r.className = "env-row";
+        const k = document.createElement("input");
+        k.type = "text"; k.className = "env-key-input"; k.placeholder = "CONFIG_KEY"; k.value = c.key; k.spellcheck = false;
+        k.addEventListener("input", () => (this.rows[i].configs[ci].key = k.value));
+        const v = document.createElement("input");
+        v.type = "text"; v.placeholder = "value"; v.value = c.value; v.spellcheck = false;
+        v.addEventListener("input", () => (this.rows[i].configs[ci].value = v.value));
+        const crm = document.createElement("button");
+        crm.className = "x-btn"; crm.innerHTML = "&#215;";
+        crm.addEventListener("click", () => { this.rows[i].configs.splice(ci, 1); this.render(); });
+        r.append(k, v, crm);
+        cfg.appendChild(r);
+      });
+      const add = document.createElement("button");
+      add.className = "btn"; add.textContent = "Add config"; add.style.alignSelf = "flex-start";
+      add.addEventListener("click", () => { this.rows[i].configs.push({ key: "", value: "" }); this.render(); });
+      cfg.appendChild(add);
+      table.appendChild(cfg);
+    });
+    this.el.appendChild(table);
+    $("#plugins-summary").textContent = `${this.rows.length} ${this.kind} plugin${this.rows.length === 1 ? "" : "s"}`;
+  }
+
+  addFromCatalog(entry: CatalogEntry): void {
+    this.rows.push({ ...entry.row, configs: entry.row.configs.map((c) => ({ ...c })) });
+    this.render();
+  }
+  addCustom(): void {
+    this.rows.push({ name: "", url: "", version: "", configs: [], meta: this.kind === "frontend" ? {} : undefined });
+    this.render();
+  }
+
+  private serializeBackend(): CarePlugin[] {
+    return this.rows.filter((p) => p.name.trim() !== "" && p.url.trim() !== "").map((p) => {
+      const out: CarePlugin = { name: p.name.trim(), package_name: p.url.trim() };
       if (p.version.trim() !== "") out.version = p.version.trim();
       const configs: Record<string, unknown> = {};
       for (const c of p.configs) if (c.key.trim() !== "") configs[c.key.trim()] = parseConfigValue(c.value);
@@ -559,258 +804,125 @@ class PluginEditor {
       return out;
     });
   }
-  async save(): Promise<void> { await App.SavePlugins(this.serialize()); }
-}
-const pluginEditor = new PluginEditor($("#plugins-list"));
-const pluginPicker = $<HTMLSelectElement>("#plugin-picker");
-pluginPicker.innerHTML = `<option value="">+ Add a plugin...</option>` +
-  PLUGIN_CATALOG.map((c, i) => `<option value="cat:${i}">${c.label}</option>`).join("") +
-  `<option value="custom">Custom - add by URL</option>`;
-pluginPicker.addEventListener("change", () => {
-  const v = pluginPicker.value;
-  if (v === "custom") pluginEditor.add();
-  else if (v.startsWith("cat:")) pluginEditor.addFromCatalog(PLUGIN_CATALOG[Number(v.slice(4))]);
-  pluginPicker.value = "";
-});
-$("#plugins-save").addEventListener("click", () => {
-  if (busy) return;
-  void (async () => {
-    try { await pluginEditor.save(); showToast("Rebuilding backend with new plugins"); await run("rebuild-backend"); }
-    catch (e) { append(`error saving plugins: ${String(e)}`); showToast("Couldn't save plugins"); }
-  })();
-});
-
-// ===========================================================================
-// Frontend plugins (CARE plug_config — edited here, loaded by CARE at runtime)
-// ===========================================================================
-// A frontend plugin is one plug_config row: a slug + a meta blob whose meta.url is
-// the remoteEntry.js the browser loads. Adding, editing, or removing one is a
-// database write — no rebuild, nothing to download. This editor loads the live rows
-// (the same set CARE's own Apps page shows) and saves the whole set back, so the two
-// never drift apart. Structured fields stand in for CARE admin's raw meta JSON.
-type FeConfigRow = { key: string; value: string };
-type FrontendPlugin = { slug: string; meta: Record<string, unknown> };
-type FePluginRow = { slug: string; url: string; configs: FeConfigRow[]; meta: Record<string, unknown> };
-type FeCatalogEntry = { label: string; slug: string; url: string };
-const FE_PLUGIN_CATALOG: FeCatalogEntry[] = [
-  {
-    label: "Hello World (sample)",
-    slug: "care_hello_fe",
-    url: "https://ohcnetwork.github.io/care_hello_fe/assets/remoteEntry.js",
-  },
-];
-
-class FrontendPluginEditor {
-  plugins: FePluginRow[] = [];
-  private loaded = false;
-  private loadError = "";
-  constructor(private container: HTMLElement) {}
-
-  private empty(text: string): void {
-    this.container.textContent = "";
-    const box = document.createElement("div");
-    box.className = "plugins-empty";
-    box.textContent = text;
-    this.container.appendChild(box);
-  }
-
-  async load(): Promise<void> {
-    this.loaded = false;
-    this.loadError = "";
-    this.empty("Checking…");
-    let raw: FrontendPlugin[];
-    try {
-      raw = (await App.ReadFrontendPlugins()) ?? [];
-    } catch (e) {
-      this.loadError = firstLine(String(e));
-      this.empty(this.loadError);
-      return;
-    }
-    this.plugins = raw.map((p) => {
-      const meta = (p.meta ?? {}) as Record<string, unknown>;
-      const cfg = (meta.config ?? {}) as Record<string, unknown>;
-      return {
-        slug: p.slug,
-        url: typeof meta.url === "string" ? meta.url : "",
-        configs: Object.entries(cfg).map(([key, value]) => ({ key, value: String(value) })),
-        meta,
-      };
-    });
-    this.loaded = true;
-    this.render();
-  }
-
-  private field(label: string, ph: string, value: string, onInput: (v: string) => void): HTMLElement {
-    const wrap = document.createElement("div"); wrap.className = "plugin-field";
-    const lab = document.createElement("label"); lab.textContent = label;
-    const inp = document.createElement("input");
-    inp.type = "text"; inp.placeholder = ph; inp.value = value; inp.spellcheck = false;
-    inp.addEventListener("input", () => onInput(inp.value));
-    wrap.append(lab, inp);
-    return wrap;
-  }
-
-  render(): void {
-    this.container.textContent = "";
-    if (this.plugins.length === 0) {
-      this.empty("No frontend plugins yet. Add one with the picker below.");
-      return;
-    }
-    this.plugins.forEach((p, pi) => {
-      const card = document.createElement("div"); card.className = "plugin-card";
-      const head = document.createElement("div"); head.className = "plugin-head";
-      const pz = document.createElement("i"); pz.className = "ph ph-puzzle-piece pz"; head.appendChild(pz);
-      const slug = document.createElement("input");
-      slug.className = "plugin-name"; slug.placeholder = "plugin name (e.g. care_hello_fe)"; slug.value = p.slug; slug.spellcheck = false;
-      slug.addEventListener("input", () => (this.plugins[pi].slug = slug.value));
-      const rm = document.createElement("button");
-      rm.className = "btn ghost env-remove"; rm.textContent = "x"; rm.title = "remove plugin"; rm.style.color = "var(--red)";
-      rm.addEventListener("click", () => { this.plugins.splice(pi, 1); this.render(); });
-      head.append(slug, rm); card.appendChild(head);
-
-      card.appendChild(this.field("Remote entry URL", "https://…/assets/remoteEntry.js", p.url, (v) => (this.plugins[pi].url = v)));
-
-      const cl = document.createElement("div"); cl.className = "plugin-cfg-label"; cl.textContent = "Configuration (optional)"; card.appendChild(cl);
-      const cf = document.createElement("div"); cf.className = "env-form";
-      p.configs.forEach((c, ci) => {
-        const row = document.createElement("div"); row.className = "env-row";
-        const k = document.createElement("input"); k.type = "text"; k.placeholder = "CONFIG_KEY"; k.value = c.key; k.className = "env-key-input";
-        k.addEventListener("input", () => (this.plugins[pi].configs[ci].key = k.value));
-        const v = document.createElement("input"); v.type = "text"; v.placeholder = "value"; v.value = c.value; v.spellcheck = false;
-        v.addEventListener("input", () => (this.plugins[pi].configs[ci].value = v.value));
-        const crm = document.createElement("button"); crm.className = "btn ghost env-remove"; crm.textContent = "x";
-        crm.addEventListener("click", () => { this.plugins[pi].configs.splice(ci, 1); this.render(); });
-        row.append(k, v, crm); cf.appendChild(row);
-      });
-      card.appendChild(cf);
-      const addCfg = document.createElement("button");
-      addCfg.className = "btn ghost tiny"; addCfg.style.marginTop = "8px"; addCfg.innerHTML = `<i class="ph ph-plus"></i>Add config`;
-      addCfg.addEventListener("click", () => { this.plugins[pi].configs.push({ key: "", value: "" }); this.render(); });
-      card.appendChild(addCfg);
-      this.container.appendChild(card);
-    });
-  }
-
-  add(): void { this.plugins.push({ slug: "", url: "", configs: [], meta: {} }); this.render(); }
-  addFromCatalog(c: FeCatalogEntry): void {
-    this.plugins.push({ slug: c.slug, url: c.url, configs: [], meta: {} }); this.render();
-  }
-
-  serialize(): FrontendPlugin[] {
-    return this.plugins.filter((p) => p.slug.trim() !== "" && p.url.trim() !== "").map((p) => {
-      const meta: Record<string, unknown> = { ...p.meta, name: p.slug.trim(), url: p.url.trim() };
+  private serializeFrontend(): FrontendPlugin[] {
+    return this.rows.filter((p) => p.name.trim() !== "" && p.url.trim() !== "").map((p) => {
+      const meta: Record<string, unknown> = { ...(p.meta ?? {}), name: p.name.trim(), url: p.url.trim() };
       const config: Record<string, unknown> = {};
       for (const c of p.configs) if (c.key.trim() !== "") config[c.key.trim()] = parseConfigValue(c.value);
       if (Object.keys(config).length) meta.config = config; else delete meta.config;
-      return { slug: p.slug.trim(), meta };
+      return { slug: p.name.trim(), meta };
     });
   }
 
   async save(): Promise<void> {
-    if (!this.loaded) {
+    if (this.kind === "backend") { await App.SavePlugins(this.serializeBackend()); return; }
+    if (!this.feLoaded) {
       // The panel opened before CARE was ready, so we never got a clean snapshot.
-      // Read one now — this is also the data-loss guard: without a baseline a save
-      // could delete rows we simply failed to read. Then keep the user's edits on top.
-      const pending = this.plugins;
-      await this.load();
-      if (!this.loaded) {
-        throw new Error(this.loadError || "Couldn't read the current plugins from CARE — is it running?");
-      }
-      const bySlug = new Map(this.plugins.map((p) => [p.slug, p]));
-      for (const p of pending) if (p.slug.trim() || p.url.trim()) bySlug.set(p.slug, p);
-      this.plugins = [...bySlug.values()];
+      // Read one now - without a baseline a save could delete rows we failed to
+      // read. Then keep the user's edits on top.
+      const pending = this.rows;
+      await this.load("frontend");
+      if (!this.feLoaded) throw new Error(this.feError || "Couldn't read the current plugins from CARE - is it running?");
+      const bySlug = new Map(this.rows.map((p) => [p.name, p]));
+      for (const p of pending) if (p.name.trim() || p.url.trim()) bySlug.set(p.name, p);
+      this.rows = [...bySlug.values()];
       this.render();
     }
-    await App.SaveFrontendPlugins(this.serialize());
+    await App.SaveFrontendPlugins(this.serializeFrontend());
   }
 }
-
-const feEditor = new FrontendPluginEditor($("#plugins-list"));
-const fePicker = $<HTMLSelectElement>("#fe-plugin-picker");
-fePicker.innerHTML = `<option value="">+ Add a plugin...</option>` +
-  FE_PLUGIN_CATALOG.map((c, i) => `<option value="cat:${i}">${c.label}</option>`).join("") +
-  `<option value="custom">Custom - add by URL</option>`;
-fePicker.addEventListener("change", () => {
-  const v = fePicker.value;
-  if (v === "custom") feEditor.add();
-  else if (v.startsWith("cat:")) feEditor.addFromCatalog(FE_PLUGIN_CATALOG[Number(v.slice(4))]);
-  fePicker.value = "";
+const plugins = new PluginTable($("#plugins-list"));
+const pluginPicker = $<HTMLSelectElement>("#plugin-picker");
+function fillPicker(section: Section): void {
+  const catalog = section === "backend" ? BE_CATALOG : FE_CATALOG;
+  pluginPicker.innerHTML = `<option value="">Add a plugin</option>` +
+    catalog.map((c) => `<option value="${c.value}">${esc(c.label)}</option>`).join("") +
+    `<option value="custom">Custom, add by URL</option>`;
+}
+pluginPicker.addEventListener("change", () => {
+  const v = pluginPicker.value;
+  pluginPicker.value = "";
+  if (!v) return;
+  if (v === "custom") { plugins.addCustom(); return; }
+  const entry = (plugins.kind === "backend" ? BE_CATALOG : FE_CATALOG).find((c) => c.value === v);
+  if (entry) plugins.addFromCatalog(entry);
 });
-$("#fe-plugins-save").addEventListener("click", () => {
+$("#plugins-save").addEventListener("click", () => {
   if (busy) return;
   void (async () => {
-    try { await feEditor.save(); showToast("Frontend plugins saved — staff refresh their browser"); await feEditor.load(); }
-    catch (e) { append(`error saving frontend plugins: ${String(e)}`); showToast(firstLine(String(e))); }
+    const be = plugins.kind === "backend";
+    try {
+      await plugins.save();
+      if (be) { showToast("Rebuilding the backend"); await run("rebuild-backend"); }
+      else { showToast("Frontend plugins saved - staff refresh their browser"); await plugins.load("frontend"); }
+    } catch (e) { append(`error saving plugins: ${String(e)}`); showToast(firstLine(String(e))); }
   })();
 });
 
 // ===========================================================================
-// System configuration - backend / frontend section switch
+// Advanced - section switch, password gate, uninstall
 // ===========================================================================
-async function selectSection(section: "backend" | "frontend"): Promise<void> {
-  $("#sel-backend").classList.toggle("on", section === "backend");
-  $("#sel-frontend").classList.toggle("on", section === "frontend");
-  $("#cfg-file").textContent = section === "backend" ? "backend.env" : "frontend.env";
-  $("#cfg-hint").textContent = section === "backend"
-    ? "Everyday settings for the backend, such as email delivery."
-    : "Everyday settings for the app that staff and patients see.";
-  $("#env-save").textContent = section === "backend" ? "Save & apply" : "Save & rebuild app";
-  $("#adv-env-body").hidden = true; $("#adv-env-caret").className = "ph ph-caret-right";
+async function selectSection(section: Section): Promise<void> {
+  const be = section === "backend";
+  for (const id of ["#sel-backend", "#psel-backend"]) $(id).classList.toggle("on", be);
+  for (const id of ["#sel-frontend", "#psel-frontend"]) $(id).classList.toggle("on", !be);
+  $("#cfg-file").textContent = be ? "backend.env" : "frontend.env";
+  $("#env-save").textContent = be ? "Save and apply" : "Save and rebuild app";
+  $("#plugins-save").textContent = be ? "Save and rebuild backend" : "Save frontend plugins";
+  const tag = $("#plugins-tag");
+  tag.className = "pill " + (be ? "warn" : "ok");
+  tag.textContent = be ? "rebuilds on save" : "instant";
+  $("#adv-env-body").hidden = true;
+  $("#adv-env-toggle").classList.remove("open");
+  fillPicker(section);
   await envEditor.load(section);
-  showPluginsFor(section);
+  await plugins.load(section);
 }
-function showPluginsFor(section: "backend" | "frontend"): void {
-  const be = $("#be-plugins-actions"), fe = $("#fe-plugins-actions");
-  const tag = $("#plugins-card .tag");
-  if (section === "backend") {
-    $("#plugins-hint").textContent = "Extra features for the backend. Adding or changing plugins rebuilds it, which needs the internet.";
-    if (tag) { tag.textContent = "rebuilds on save"; tag.classList.add("warn"); }
-    be.hidden = false; fe.hidden = true;
-    void pluginEditor.load();
-  } else {
-    $("#plugins-hint").textContent = "Optional apps for staff. Add one by its published URL — changes are instant, no rebuild.";
-    if (tag) { tag.textContent = "instant · no rebuild"; tag.classList.remove("warn"); }
-    be.hidden = true; fe.hidden = false;
-    void feEditor.load();
-  }
-}
-$("#sel-backend").addEventListener("click", () => void selectSection("backend"));
-$("#sel-frontend").addEventListener("click", () => void selectSection("frontend"));
+for (const id of ["#sel-backend", "#psel-backend"]) $(id).addEventListener("click", () => void selectSection("backend"));
+for (const id of ["#sel-frontend", "#psel-frontend"]) $(id).addEventListener("click", () => void selectSection("frontend"));
 
-// ===========================================================================
-// Advanced - password gate + navigation + uninstall
-// ===========================================================================
 let advUnlocked = false;
-let advScreen: "home" | "sysconfig" = "home";
 function showAdvanced(): void {
   $("#adv-gate").hidden = advUnlocked;
-  $("#adv-home").hidden = !(advUnlocked && advScreen === "home");
-  $("#adv-sys").hidden = !(advUnlocked && advScreen === "sysconfig");
-  $("#adv-lock-icon").className = "ph " + (advUnlocked ? "ph-lock-key-open" : "ph-lock-simple") + " lock";
+  $("#adv-home").hidden = !advUnlocked;
 }
 const advPw = $<HTMLInputElement>("#advpw");
 $("#advpw-toggle").addEventListener("click", () => {
   const show = advPw.type === "password";
   advPw.type = show ? "text" : "password";
-  $("#advpw-eye").className = show ? "ph ph-eye-slash" : "ph ph-eye";
+  $("#advpw-toggle").textContent = show ? "Hide" : "Show";
 });
 async function tryUnlock(): Promise<void> {
+  if (advPw.value === "") {
+    $("#adv-gate-err").hidden = false;
+    $("#adv-gate-err").textContent = "Enter the admin password.";
+    return;
+  }
   const ok = await App.VerifyAdminPassword(advPw.value);
-  if (ok) { advUnlocked = true; advScreen = "home"; advPw.value = ""; $("#adv-gate-err").hidden = true; showAdvanced(); }
-  else { $("#adv-gate-err").hidden = false; $("#adv-gate-err").textContent = "That password doesn't match. Try again."; }
+  if (!ok) {
+    $("#advpw-wrap").className = "pw bad";
+    $("#adv-gate-err").hidden = false;
+    $("#adv-gate-err").textContent = "That password does not match the admin password.";
+    return;
+  }
+  advUnlocked = true;
+  advPw.value = "";
+  $("#advpw-wrap").className = "pw";
+  $("#adv-gate-err").hidden = true;
+  showAdvanced();
+  await selectSection("backend");
 }
 $("#adv-unlock").addEventListener("click", () => void tryUnlock());
 advPw.addEventListener("keydown", (e) => { if (e.key === "Enter") void tryUnlock(); });
-$("#open-sysconfig").addEventListener("click", () => { advScreen = "sysconfig"; showAdvanced(); void selectSection("backend"); });
-$("#close-sysconfig").addEventListener("click", () => { advScreen = "home"; showAdvanced(); });
 
 $("#uninstall-run").addEventListener("click", () => { $("#uninstall-idle").hidden = true; $("#uninstall-confirm").hidden = false; });
 $("#uninstall-cancel").addEventListener("click", () => { $("#uninstall-idle").hidden = false; $("#uninstall-confirm").hidden = true; });
 $("#uninstall-yes").addEventListener("click", () => {
   if (busy) return;
   void (async () => {
-    const rmBackups = ($("#uninstall-backups") as HTMLInputElement).checked;
-    const rmImages = ($("#uninstall-images") as HTMLInputElement).checked;
+    const rmBackups = $<HTMLInputElement>("#uninstall-backups").checked;
+    const rmImages = $<HTMLInputElement>("#uninstall-images").checked;
+    $("#uninstall-idle").hidden = false; $("#uninstall-confirm").hidden = true;
     setBusy(true, "Uninstalling");
     append(`\n$ care uninstall${rmImages ? " --images" : ""}${rmBackups ? " --backups" : ""} --yes`);
     try { await App.RunUninstall(rmImages, rmBackups); }
@@ -822,40 +934,40 @@ $("#uninstall-yes").addEventListener("click", () => {
 // Backups + inline restore
 // ===========================================================================
 let confirmingRestore = -1;
+function shortDate(label: string): string {
+  const m = label.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}:\d{2})/);
+  return m ? `${m[3]}/${m[2]} ${m[4]}` : label.split(" - ")[0] || label;
+}
 async function loadBackups(): Promise<void> {
   try { backups = await App.ListBackups(); } catch { backups = []; }
-  $("#backups-summary").textContent = backups.length ? `${backups.length} kept - last ${shortDate(backups[0].label)}` : "";
-  // overview strip
+  $("#backups-summary").textContent = backups.length ? `${backups.length} kept` : "";
   if (backups.length) {
-    $("#backup-strip-title").textContent = "Backups are up to date";
-    $("#backup-strip-sub").textContent = `Last backup ${shortDate(backups[0].label)}${backups[0].encrypted ? " - encrypted" : ""}.`;
+    $("#backup-strip-title").textContent = "Up to date";
+    $("#backup-strip-sub").textContent = `Last ${shortDate(backups[0].label)}${backups[0].encrypted ? ", encrypted" : ""}`;
   } else {
     $("#backup-strip-title").textContent = "No backups yet";
-    $("#backup-strip-sub").textContent = 'Click "Back up now", or wait for the daily backup.';
+    $("#backup-strip-sub").textContent = "Run one now or wait for the daily backup";
   }
   const list = $("#backups-list");
   if (backups.length === 0) {
-    list.innerHTML = `<div class="backups-empty">No backups yet. Click <b>Back up now</b> or wait for the daily backup.</div>`;
+    list.innerHTML = `<div class="list-empty">No backups yet. Click <b>Back up now</b> or wait for the daily backup.</div>`;
     return;
   }
   list.innerHTML = backups.map((b, i) => {
     const size = b.size_bytes ? (b.size_bytes / 1e6).toFixed(1) + " MB" : "";
-    const files = b.files_archive ? "DB + files" : "DB only";
-    const meta = [size, files, b.encrypted ? "encrypted" : ""].filter(Boolean).join(" - ");
-    const badge = b.manual ? `<span class="badge manual">Manual</span>` : `<span class="badge">Automatic</span>`;
+    const meta = [size, b.files_archive ? "database and files" : "database only", b.encrypted ? "encrypted" : ""].filter(Boolean).join("  ·  ");
     const confirm = i === confirmingRestore ? `
-      <div class="confirm-strip">
-        <i class="ph-fill ph-warning"></i>
-        <div class="msg">Replace all current data with the backup from <b>${b.label}</b>? This can't be undone.</div>
+      <div class="confirm">
+        <span class="grow">Replace current data with this copy? This cannot be undone.</span>
         <button class="btn" data-cancel>Cancel</button>
         <button class="btn danger" data-confirm="${i}">Yes, restore</button>
       </div>` : "";
     return `<div class="backup-item">
       <div class="backup-row">
-        <div class="backup-ico"><i class="ph ph-database"></i></div>
-        <div class="backup-info"><div class="backup-label">${b.label}</div><div class="backup-meta">${meta}</div></div>
-        ${badge}
-        <button class="btn" data-restore="${i}"><i class="ph ph-arrow-counter-clockwise"></i>Restore</button>
+        <span class="backup-ico">${DB_ICON}</span>
+        <div class="grow"><div class="backup-label">${esc(b.label)}</div><div class="backup-meta">${esc(meta)}</div></div>
+        <span class="badge${b.manual ? " manual" : ""}">${b.manual ? "Manual" : "Automatic"}</span>
+        <button class="btn" data-restore="${i}">Restore</button>
       </div>${confirm}
     </div>`;
   }).join("");
@@ -865,10 +977,6 @@ async function loadBackups(): Promise<void> {
     btn.addEventListener("click", () => { confirmingRestore = -1; void loadBackups(); }));
   list.querySelectorAll<HTMLButtonElement>("[data-confirm]").forEach((btn) =>
     btn.addEventListener("click", () => void doRestore(Number(btn.dataset.confirm))));
-}
-function shortDate(label: string): string {
-  const m = label.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}:\d{2})/);
-  return m ? `${m[3]}/${m[2]} ${m[4]}` : label.split(" - ")[0] || label;
 }
 async function doRestore(idx: number): Promise<void> {
   const b = backups[idx]; if (!b || busy) return;
@@ -892,8 +1000,17 @@ on("care-done", (code: number) => {
   setBusy(false); void refresh(); void loadBackups();
 });
 on("setup-done", () => {
-  installBar.style.width = "100%"; installPct.textContent = "100%"; installStep.textContent = "Done - opening the control panel...";
-  phase = "panel"; showView("panel"); void bootPanel();
+  clearInterval(elapsedTimer);
+  pct = 100; stepIdx = RUN_STEPS.length - 1;
+  renderSteps();
+  $("#run-ico").className = "run-ico done";
+  $("#run-ico").innerHTML = "&#10003;";
+  $("#run-title").textContent = "Your clinic is ready";
+  $("#run-sub").textContent = "CARE is running on this computer and reachable on the clinic WiFi.";
+  $("#run-addr").textContent = mdnsName;
+  $("#run-foot").hidden = false;
+  railStep("install");
+  railDone("install", true);
 });
 on("uninstalled", () => { showToast("Uninstalled"); setTimeout(() => window.location.reload(), 1800); });
 
@@ -917,9 +1034,15 @@ async function bootPanel(): Promise<void> {
   } catch { /* ignore */ }
 }
 async function boot(): Promise<void> {
+  renderSteps();
   const state: AppState = await App.GetState();
   if (state.setup_done) { phase = "panel"; showView("panel"); await bootPanel(); }
-  else { phase = "setup"; showView("wizard"); recheck(); }
+  else {
+    phase = "setup";
+    showView("setup");
+    openSetupSection("checks");
+    recheck();
+  }
 }
 void boot();
 setInterval(() => void refresh(), 5_000);
