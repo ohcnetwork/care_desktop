@@ -21,6 +21,7 @@ const items = [
   "apps.json",
   "minio",
   "scripts",
+  "setup",
 ];
 
 // Re-stage each item (preserve kit/.gitkeep, which is the only tracked file here).

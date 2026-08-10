@@ -43,6 +43,12 @@ places: on **Public** networks, and at the **firewall**. You're unblocking both 
 the responder's announcements reach other devices. *(Renaming the PC to `care` is
 **not** required — the responder handles the name itself.)*
 
+> **The app does this for you.** The wizard has a **Network profile** check (Windows
+> only); if the network is Public it shows **Fix automatically**, which — after one
+> Windows permission prompt — sets the network to Private and opens the clinic's ports
+> (mDNS 5353, HTTPS 443, HTTP 80). Uninstall reverts these. The manual steps below are
+> only needed if you'd rather not use the button.
+
 > **Fastest path:** open **PowerShell as Administrator** (right-click Start →
 > **Terminal (Admin)**) and run these two:
 > ```powershell
@@ -137,4 +143,10 @@ if a warning persists.
   Docker engine to start at login (Docker Desktop: **Settings → General → Start
   Docker Desktop when you log in**), so the containers come back automatically.
 - Closing the window leaves CARE running.
+- **Where files live:** the kit is staged under your home dir
+  (`%USERPROFILE%\care-desktop\kit`), not `%AppData%` — Docker Desktop can't read
+  `%AppData%` bind mounts reliably (see [architecture.md](architecture.md#where-things-live-on-the-server)).
+  Only `config.json` stays in `%AppData%\care-desktop\`.
+- **If setup fails,** the wizard's **Try again** first tears down any leftover
+  containers and wipes the half-staged kit, so the retry starts clean.
 - See [troubleshooting.md](troubleshooting.md) for `care.local` and Docker issues.

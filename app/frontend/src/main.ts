@@ -22,6 +22,7 @@ const $ = <T extends HTMLElement>(sel: string): T => {
 
 type DockerStatus = { ok: boolean; message: string };
 type NameStatus = { ok: boolean; message: string; how: string };
+type NetworkStatus = { applicable: boolean; ok: boolean; message: string; how: string; fixable: boolean };
 type Health = { active: boolean; code: number; detail: string };
 type AppState = { setup_done: boolean; mdns_name: string; docker: DockerStatus };
 type Backup = { db_dump: string; files_archive: string; label: string; manual: boolean; encrypted: boolean; size_bytes: number };
@@ -69,6 +70,7 @@ function append(line: string): void {
 // Wizard - requirement checks
 // ===========================================================================
 let runtimeOk = false, mdnsOk = false, pwOk = false, bpwOk = false;
+let networkOk = true; // Windows-only gate; stays true elsewhere
 let backupDir = "";
 const install = $<HTMLButtonElement>("#install");
 
@@ -85,7 +87,7 @@ function setReq(id: string, state: "ok" | "wait" | "bad", label: string, how = "
 }
 
 function gate(): void {
-  const checks = runtimeOk && mdnsOk;
+  const checks = runtimeOk && mdnsOk && networkOk;
   install.disabled = !(checks && pwOk && bpwOk);
   $("#install-note").textContent = !checks
     ? "Waiting for your computer to be ready..."
@@ -110,8 +112,43 @@ async function checkMDNS(): Promise<void> {
   setReq("mdns", d.ok ? "ok" : "bad", d.ok ? "Ready" : "Not ready", d.ok ? "" : (d.how || d.message));
   gate();
 }
-function recheck(): void { void Promise.all([checkRuntime(), checkMDNS()]); }
+// Windows-only Private-network gate; hidden (and non-blocking) when not applicable.
+async function checkNetwork(): Promise<void> {
+  const s: NetworkStatus = await App.NetworkStatus();
+  const row = $("#network-row"), div = $("#network-div"), fixRow = $("#network-fix-row");
+  if (!s.applicable) {
+    networkOk = true;
+    row.hidden = div.hidden = fixRow.hidden = true;
+    $("#network-how").hidden = true;
+    gate();
+    return;
+  }
+  row.hidden = div.hidden = false;
+  networkOk = s.ok;
+  setReq("network", s.ok ? "ok" : "bad", s.ok ? "Ready" : "Not ready", s.ok ? "" : (s.how || s.message));
+  fixRow.hidden = !(!s.ok && s.fixable);
+  gate();
+}
+
+function recheck(): void { void Promise.all([checkRuntime(), checkMDNS(), checkNetwork()]); }
 $("#check-reqs").addEventListener("click", recheck);
+
+$("#network-fix").addEventListener("click", () => void (async () => {
+  const btn = $<HTMLButtonElement>("#network-fix");
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<i class="ph ph-circle-notch spin"></i>Fixing...`;
+  try {
+    await App.FixNetwork();
+    showToast("Network set to Private.");
+  } catch (e) {
+    showToast("Couldn't change the network: " + firstLine(String(e)));
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+  await checkNetwork();
+})());
 
 $("#choose-backup").addEventListener("click", () => void (async () => {
   const sel = await App.ChooseFolder("Choose backup folder");
@@ -179,8 +216,8 @@ install.addEventListener("click", () => {
   void (async () => {
     install.disabled = true;
     $("#install-note").textContent = "Re-checking your computer...";
-    await Promise.all([checkRuntime(), checkMDNS()]);
-    if (!(runtimeOk && mdnsOk && pwOk && bpwOk)) {
+    await Promise.all([checkRuntime(), checkMDNS(), checkNetwork()]);
+    if (!(runtimeOk && mdnsOk && networkOk && pwOk && bpwOk)) {
       $("#install-note").textContent = "A step is no longer met - fix it and try again.";
       return;
     }
@@ -203,13 +240,18 @@ function showInstallFailed(): void {
   $("#fail-msg").textContent = tail ? `${headline}\n\n---- last output ----\n${tail}` : headline;
   wizFailed.hidden = false;
 }
-$("#fail-retry").addEventListener("click", () => {
+$("#fail-retry").addEventListener("click", () => void (async () => {
+  const btn = $<HTMLButtonElement>("#fail-retry");
+  btn.disabled = true;
+  // Windows: wipe the half-staged kit so the retry re-stages clean. No-op elsewhere.
+  try { await App.CleanupFailedInstall(); } catch (e) { console.log("cleanup: " + String(e)); }
+  btn.disabled = false;
   lastError = ""; setupLog.length = 0;
   installBar.style.width = "0%"; installPct.textContent = "Working..."; installStep.textContent = "Getting started...";
   $("#install-progress").classList.remove("indet");
   wizFailed.hidden = true; wizInstalling.hidden = true; wizForm.hidden = false;
   recheck();
-});
+})());
 
 // ===========================================================================
 // Panel - tabs + status

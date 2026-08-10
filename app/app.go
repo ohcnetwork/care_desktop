@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -183,6 +184,14 @@ func (a *App) kitDir() string {
 	if err != nil {
 		base, _ = os.UserHomeDir()
 	}
+	if runtime.GOOS == "windows" {
+		// Docker Desktop can't read files under %AppData% live on Windows, so kit bind
+		// mounts arrive as empty dirs; stage under the home dir, which it reads live.
+		// (config.json stays in %AppData% - Docker never reads it.)
+		if home, herr := os.UserHomeDir(); herr == nil {
+			base = home
+		}
+	}
 	return filepath.Join(base, "care-desktop", "kit")
 }
 
@@ -275,6 +284,12 @@ func (a *App) GetState() AppState {
 func (a *App) DockerStatus() care.DockerStatus { return a.engine(nil).DockerCheck() }
 func (a *App) GitStatus() care.DockerStatus    { return a.engine(nil).GitCheck() }
 func (a *App) CareHealth() care.Health         { return a.engine(nil).Ping() }
+
+// NetworkStatus flags a Public Windows profile (blocks LAN discovery of care.local).
+func (a *App) NetworkStatus() care.NetworkStatus { return a.engine(nil).NetworkCheck() }
+
+// FixNetwork sets the network Private and opens the clinic's ports (elevated).
+func (a *App) FixNetwork() error { return a.engine(nil).FixNetwork() }
 
 // ValidatePassword lets the wizard check the admin password live as the user types.
 // Returns "" when acceptable, otherwise a human-readable reason to show under the field.
@@ -482,6 +497,49 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 		return e.Start()
 	}, true, "setup")
 	return nil
+}
+
+// CleanupFailedInstall lets Retry start clean: tear down the leftover Docker project
+// (a crash-looping container keeps re-creating the deleted kit files), then wipe the
+// staged kit and this app's %AppData% folders. Windows-only; no-op elsewhere. Safe on a
+// failed first-run - patient data lives in Docker volumes, not here.
+func (a *App) CleanupFailedInstall() error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	a.engine(nil).TeardownProject()
+
+	var firstErr error
+	remove := func(target string) {
+		if target == "" {
+			return
+		}
+		if a.ctx != nil {
+			wruntime.EventsEmit(a.ctx, "care-log", "cleanup: removing "+target)
+		}
+		if err := os.RemoveAll(target); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	remove(a.kitDir()) // before the config wipe below, since kitDir reads config
+	if base, err := os.UserConfigDir(); err == nil {
+		if entries, err := os.ReadDir(base); err == nil {
+			for _, ent := range entries {
+				if careAppDataName(ent.Name()) {
+					remove(filepath.Join(base, ent.Name()))
+				}
+			}
+		}
+	}
+	return firstErr
+}
+
+// careAppDataName matches this app's %AppData% folders (care-desktop, "CARE Desktop",
+// ...), case- and separator-insensitively, so cleanup only deletes our own.
+func careAppDataName(name string) bool {
+	n := strings.NewReplacer(" ", "", "-", "", "_", "").Replace(strings.ToLower(name))
+	return strings.HasPrefix(n, "care")
 }
 
 func (a *App) CareStatus() (string, error) { return a.engine(nil).Status() }

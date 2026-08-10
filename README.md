@@ -109,6 +109,6 @@ first (`care start` or the app), then run the script. See
 - **Offline-first** — everything stays in the building; no internet needed to use it.
 - **HTTPS on the LAN** — a self-signed cert from a built-in CA; new devices trust it in two taps from `care.local/setup`, and the server trusts itself automatically.
 - **No-terminal option** — the desktop app installs + runs CARE with a few clicks.
-- **Cross-platform** — one Go binary per OS; Windows needs no WSL or bash.
+- **Cross-platform** — one Go binary per OS; Windows needs no WSL or bash. On Windows the wizard also checks the network profile and offers a one-click **Fix** (Public→Private + open ports) so other devices can reach the clinic, and stages the kit under the home dir (Docker can't read `%AppData%` bind mounts). See [install-windows.md](docs/install-windows.md#2-make-carelocal-resolvable).
 - **Data-safe** — daily DB + file backups with **one-click restore**; the app never deletes your volumes.
 - **No core changes** — runs CARE's own images/source, configured from the outside.

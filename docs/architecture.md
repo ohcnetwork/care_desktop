@@ -31,7 +31,7 @@ What the engine does:
 | `backup-now` | write an immediate database dump |
 | `list-backups` | list the restorable points in the backup folder |
 | `restore` | stop app services → drop + re-create the DB from a chosen dump → (optionally) overwrite the MinIO volume from the matching files archive → bring the stack back up + migrate |
-| `uninstall` | `compose down -v` (containers + network + **data volumes**) → optionally remove images → delete the clones + kit dir → **remove the trusted CA cert from the server's keychain** → optionally delete backups. The app also clears its config + login-item so the next launch is a fresh first-run |
+| `uninstall` | `compose down -v` (containers + network + **data volumes**) → optionally remove images → delete the clones + kit dir → **remove the trusted CA cert from the server's keychain** → optionally delete backups. On Windows it also drops the `care.local` hosts line, removes the `CARE Desktop *` firewall rules, and reverts the network profile to Public. The app also clears its config + login-item so the next launch is a fresh first-run |
 
 ### 2. The runtime layer (Docker containers)
 The actual CARE stack, defined in `docker-compose.yml`. Project name is
@@ -203,8 +203,16 @@ See [configuration.md](configuration.md#versionsenv) for pinning versions.
 | `~/Desktop/care-db-backups/` (default) | daily backups (override in the installer) |
 | Docker named volumes | `postgres-data`, `redis-data`, `minio-data`, `caddy-*` — the actual data |
 
-On Linux the config dir is `~/.config/care-desktop/`; on Windows it's
+On Linux the config dir is `~/.config/care-desktop/`; on Windows `config.json` is in
 `%AppData%\care-desktop\`.
+
+> **Windows kit location.** On Windows the **kit** is staged under the home dir
+> (`%USERPROFILE%\care-desktop\kit`), *not* `%AppData%`. Docker Desktop's WSL2 file
+> share can't reliably read files created under `%AppData%` (both Roaming and Local) —
+> the bind-mounted `clinic_settings.py`/`Caddyfile` then arrive in the container as
+> empty directories and the backend fails with `ModuleNotFoundError`. The home dir is
+> read live, so the kit lives there; only `config.json` (which Docker never reads)
+> stays in `%AppData%`.
 
 > **Patient data lives in the Docker volumes**, not in the install folder. The
 > install folder only holds the kit + source clones. This is why moving/clearing the

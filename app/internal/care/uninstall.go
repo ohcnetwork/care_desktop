@@ -77,7 +77,8 @@ func (e *Engine) Uninstall(opts UninstallOptions) error {
 	// 6. the trusted root on THIS machine (best-effort; matched by fingerprint so
 	//    it only ever removes the cert we installed).
 	e.untrustLocalCA(rootPEM)
-	e.removeHostsEntry() // Windows: drop the care.local hosts line we added
+	e.removeHostsEntry()   // Windows: drop the care.local hosts line we added
+	e.undoNetworkChanges() // Windows: revert profile to Public + drop the rules the Fix added
 
 	e.logln("Uninstall complete.")
 	return nil
@@ -94,6 +95,11 @@ func (e *Engine) removeImage(tag string) {
 	}
 	e.logln("  removed " + tag)
 }
+
+// TeardownProject force-removes this app's containers, volumes, and network by label
+// (no compose file/kit needed). Used by the retry cleanup to release a leftover
+// container's bind mounts before wiping the kit.
+func (e *Engine) TeardownProject() { e.forceRemoveProject() }
 
 // forceRemoveProject removes any containers, then volumes, then the network still
 // carrying our compose project label - the backstop for when `compose down` didn't

@@ -125,6 +125,7 @@ label { font-size: 11.5px; color: var(--ink2); margin-bottom: 6px; display: bloc
 .req-badge.bad { color: var(--red); background: var(--redbg); }
 .req-div { height: 1px; background: var(--hair); margin: 0 15px; }
 .req-how { margin: 2px 15px 8px 62px; font-size: 12px; color: var(--amber2); background: var(--amberbg); border: 1px solid rgba(217,119,6,0.25); border-radius: 8px; padding: 8px 11px; line-height: 1.5; }
+.req-fix-row { margin: 0 15px 8px 62px; }
 
 .card { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }
 .card-sub-h { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 12px; }

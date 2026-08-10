@@ -6,6 +6,7 @@ export {};
 
 type DockerStatus = { ok: boolean; message: string };
 type NameStatus = { ok: boolean; message: string; how: string };
+type NetworkStatus = { applicable: boolean; ok: boolean; message: string; how: string; fixable: boolean };
 type Health = { active: boolean; code: number; detail: string };
 type AppState = { setup_done: boolean; mdns_name: string; docker: DockerStatus };
 type Backup = {
@@ -47,6 +48,8 @@ declare global {
           DockerStatus(): Promise<DockerStatus>;
           GitStatus(): Promise<DockerStatus>;
           MDNSStatus(): Promise<NameStatus>;
+          NetworkStatus(): Promise<NetworkStatus>;
+          FixNetwork(): Promise<void>;
           CareHealth(): Promise<Health>;
           ValidatePassword(pw: string): Promise<string>;
           VerifyAdminPassword(pw: string): Promise<boolean>;
@@ -60,6 +63,7 @@ declare global {
             installDir: string,
             backupDir: string,
           ): Promise<void>;
+          CleanupFailedInstall(): Promise<void>;
           ReadEnv(name: string): Promise<string>;
           WriteEnv(name: string, content: string): Promise<void>;
           ReadPlugins(): Promise<CarePlugin[]>;
