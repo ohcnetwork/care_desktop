@@ -12,10 +12,21 @@ not resolving, or the MinIO endpoint not reachable from other devices.
 - **Confirm the server's name:**
   - macOS: `scutil --get LocalHostName` → must be `care`. Fix: `sudo scutil --set LocalHostName care`.
   - Linux: `hostname` → must be `care`, and `systemctl status avahi-daemon` active.
-  - Windows: rename the PC to `care` (Settings → System → About → Rename), set the network to **Private**, and allow **UDP 5353** in Windows Firewall. Recent Windows 11 then advertises `care.local` natively; older builds need **Apple Bonjour**.
-- **Test from the server itself:** open `http://care.local/` on the server's own browser. If that works but phones don't, it's the device's mDNS.
-- **Fallback — use the IP:** find the server's IP (`ipconfig` / `ip addr` / `ifconfig`) and open `http://<ip>/`. If you'll use the IP permanently, also set `BUCKET_EXTERNAL_ENDPOINT=http://<ip>` in `backend.env` and rebuild the frontend with `REACT_CARE_API_URL=http://<ip>` (see [configuration.md](configuration.md)).
+  - Windows: **the server's own browser resolves `care.local` automatically** (CARE adds a `127.0.0.1 care.local` hosts entry at setup — no rename needed). For *other devices* to find it, set the network to **Private** and allow **UDP 5353** in Windows Firewall; recent Windows 11 then resolves `care.local` natively, older builds need **Apple Bonjour** or a static IP.
+- **Test from the server itself:** open `https://care.local/` on the server's own browser. On **every** OS this works via the hosts entry setup adds (`127.0.0.1 care.local`), *not* via mDNS. A machine's own resolver won't answer with the name its own in-app responder advertises. If the entry was skipped (you declined the admin prompt), add it by hand:
+  - macOS/Linux: `echo "127.0.0.1 care.local" | sudo tee -a /etc/hosts`
+  - Windows: add `127.0.0.1 care.local` to `C:\Windows\System32\drivers\etc\hosts` as Administrator
+
+  If the server works but phones don't, it's the device's mDNS / your network settings.
+- **Fallback — use the IP:** find the server's IP (`ipconfig` / `ip addr` / `ifconfig`) and open `https://<ip>/`. If you'll use the IP permanently, also set `BUCKET_EXTERNAL_ENDPOINT=https://<ip>` in `backend.env` and rebuild the frontend with `REACT_CARE_API_URL=https://<ip>` (see [configuration.md](configuration.md)). (Note: the cert is issued for `care.local`, so an IP URL shows a name-mismatch warning — prefer the name.)
 - Give the server a **DHCP reservation** in the router so its IP never changes.
+
+### …and it was working, then suddenly `DNS_PROBE_FINISHED_NXDOMAIN`
+
+The in-app mDNS responder stopped answering (sleep/wake or a WiFi flap). The app has a
+self-heal watchdog that re-advertises within ~60s of the name failing to resolve; if
+it doesn't recover, **restart CARE Desktop** (or `care restart`) to re-advertise
+immediately.
 
 ---
 
@@ -23,7 +34,7 @@ not resolving, or the MinIO endpoint not reachable from other devices.
 
 - You set the name but didn't click **Check** again — click it.
 - On the Mac, the GUI can't run `sudo` — set the name in **Terminal** once (`sudo scutil --set LocalHostName care`), then **Check**.
-- On Windows, install **Bonjour** and rename the PC to `care`, then **Check** (or use a static IP via the CLI).
+- On Windows, the server itself resolves `care.local` automatically (hosts entry). If the Check tests reachability from *other* devices and it's red, set the network to **Private** + allow **UDP 5353**, or install **Bonjour** / use a static IP, then **Check**.
 
 ---
 
@@ -32,6 +43,43 @@ not resolving, or the MinIO endpoint not reachable from other devices.
 - Start your Docker engine and wait until it's running, then click **Check**. (Docker Desktop: open it, wait for "running". Colima: `colima start`.)
 - Linux: `sudo systemctl start docker`; make sure your user is in the `docker` group (`sudo usermod -aG docker $USER`, then re-login).
 - "Compose plugin is missing": install `docker compose` v2 — bundled with Docker Desktop, but a separate package (e.g. `docker-compose-plugin`) on some Docker Engine / Colima setups.
+- **Windows: "Docker not found" even though you installed it in WSL.** The Windows CARE Desktop app is a native Windows process and looks for `docker.exe` on the Windows PATH. Docker installed *inside* a WSL Ubuntu distro (`apt install docker.io`) is a Linux binary the Windows app can't see. Fix: install **Docker Desktop for Windows** and enable **WSL 2 integration** for your distro (Settings → Resources → WSL Integration) — that puts a real `docker.exe` on the Windows PATH. Then quit and reopen CARE Desktop so it re-reads PATH.
+
+---
+
+## Security warning / red padlock instead of a green one
+
+**Cause:** the device hasn't trusted the clinic's local CA (or trusted an old one).
+
+- **Trust the cert:** open **`https://care.local/setup`** and pick the device. On
+  **Windows/macOS/Linux** download the **installer** and run it once. It embeds the
+  certificate and puts it in the right store (Windows: right-click → *Run with
+  PowerShell*; macOS/Linux: `sh ~/Downloads/install-cert.sh`). On phones, follow the
+  manual steps. The server machine does this automatically on start; only *other*
+  devices need it.
+- **The installer says "command not found" or won't run?** Use the manual steps on the
+  same page, and the download button for `root.crt` is still there below them.
+- **iOS is two steps:** installing the profile is **not** enough — after installing,
+  go to **Settings → General → About → Certificate Trust Settings** and toggle
+  **"CARE Desktop Local CA"** on. The profile install must be done in **Safari**
+  (Chrome/other browsers on iOS can't install profiles).
+- **Still red on Chrome after trusting?** Chrome caches the cert-error state. **Fully
+  quit** Chrome (not just the tab) and reopen; if it persists, clear the domain at
+  `chrome://net-internals/#hsts` (Delete `care.local`).
+- **Re-installed / re-set-up the stack?** A fresh setup mints a **new** CA, so devices
+  that trusted the old one must re-trust from `/setup` (and remove the stale cert).
+- **`/setup` opens Google search on Safari?** Type the full `https://care.local/setup`
+  (a bare `care.local/setup` is treated as a search term).
+
+---
+
+## The download button on `/setup` gives a redirect page, not the cert
+
+The `/root.crt` file is gated so people go through the instructions. Use the page's
+**Download** button (it carries the `?ok=1` marker) — don't hit `/root.crt` directly,
+and don't `curl` it without `?ok=1` (you'll save the redirect HTML and get
+`Error reading file` when you try to trust it). With curl:
+`curl -o root.crt 'https://care.local/root.crt?ok=1'`.
 
 ---
 
@@ -40,11 +88,14 @@ not resolving, or the MinIO endpoint not reachable from other devices.
 **Cause:** `BUCKET_EXTERNAL_ENDPOINT` points somewhere devices can't reach (often
 `localhost`).
 
-- It must be a host **every device** can resolve: `http://care.local` (default)
-  or `http://<server-ip>`. Files are served through Caddy on port 80 — the same
-  address as the app — so no extra port is involved.
+- It must be a host **every device** can resolve: `https://care.local` (default)
+  or `https://<server-ip>`. Files are served through Caddy on the same origin as the
+  app — so no extra port is involved.
 - Check `care status` shows `minio running` (Caddy proxies to it).
 - After changing it in `backend.env`, run `care start`.
+
+> If previews fail with a *camera/scanner* error rather than a network error, the page
+> isn't a secure context — confirm you're on `https://` and the cert is trusted (above).
 
 ---
 
@@ -62,7 +113,20 @@ not resolving, or the MinIO endpoint not reachable from other devices.
 - Setup needs **internet** to clone the repos and pull base images. Confirm connectivity.
 - Re-run **Install & Start** (or `care setup`) — it's safe to repeat: existing clones
   and images are reused, and the secret/admin steps are idempotent.
+- On Windows, **Try again** first tears down leftover containers and wipes the
+  half-staged kit, so the retry starts clean.
 - Low disk space breaks image builds — you need ~10 GB free.
+
+---
+
+## Windows: backend crash-loops with `ModuleNotFoundError: No module named 'clinic_settings'` (or "is a directory")
+
+Docker Desktop's WSL2 file share can't read files created under `%AppData%` on some
+Windows setups, so the bind-mounted `clinic_settings.py` arrives as an **empty
+directory** and the backend can't start. The app avoids this by staging the kit under
+your **home dir** (`%USERPROFILE%\care-desktop\kit`), which Docker reads live — so a
+current install shouldn't hit this. If you see it on an older install, uninstall and
+reinstall so the kit is re-staged to the home dir.
 
 ---
 

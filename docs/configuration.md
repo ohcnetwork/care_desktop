@@ -26,7 +26,7 @@ value, then `care start`.
 ### Django settings module
 | Variable | Default | Meaning |
 |---|---|---|
-| `DJANGO_SETTINGS_MODULE` | `clinic_settings` | Selects the plain-HTTP clinic settings (see [architecture](architecture.md#plain-http-on-the-lan-clinic_settingspy)). **Don't change.** |
+| `DJANGO_SETTINGS_MODULE` | `clinic_settings` | Selects the clinic settings for a self-signed LAN cert (see [architecture](architecture.md#https-on-the-lan-clinic_settingspy)). **Don't change.** |
 | `PYTHONPATH` | `/settings:/app` | Lets Python find `clinic_settings.py` (mounted at `/settings`). **Don't change.** |
 
 ### Database (PostgreSQL)
@@ -54,11 +54,11 @@ value, then `care start`.
 | `DJANGO_DEBUG` | `False` | Never enable on a box holding patient data. |
 | `DJANGO_ALLOWED_HOSTS` | `["*"]` | Which hostnames the backend answers to. `*` is fine on a private LAN. |
 | `DJANGO_ADMIN_URL` | `admin` | Path of the Django admin (`/admin`). |
-| `DJANGO_SECURE_SSL_REDIRECT` | `False` | Must stay `False` — otherwise every `http://` request bounces to `https://` and the whole LAN breaks. |
-| `DJANGO_SECURE_HSTS_PRELOAD` | `False` | HTTPS-only; off for LAN. |
-| `DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS` | `False` | HTTPS-only; off for LAN. |
+| `DJANGO_SECURE_SSL_REDIRECT` | `False` | Keep `False` — **Caddy** already redirects `http://` → `https://`, so Django must not redirect again (it would loop, since Caddy forwards to the backend over http internally). The `X-Forwarded-Proto: https` header still tells Django the original request was secure. |
+| `DJANGO_SECURE_HSTS_PRELOAD` | `False` | Off — a self-signed LAN cert must not HSTS-pin clients. |
+| `DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS` | `False` | Off — self-signed LAN cert; no HSTS. |
 | `DJANGO_SECURE_CONTENT_TYPE_NOSNIFF` | `False` | Off for LAN. |
-| `CSRF_TRUSTED_ORIGINS` | `["http://care.local"]` | Origins allowed to POST to `/admin`. **Add your server IP origin** here if you access the admin by IP, e.g. `["http://care.local","http://192.168.1.50"]`. |
+| `CSRF_TRUSTED_ORIGINS` | `["https://care.local"]` | Origins allowed to POST to `/admin`. **Add your server IP origin** here if you access the admin by IP, e.g. `["https://care.local","https://192.168.1.50"]`. |
 
 ### Object storage (MinIO)
 File uploads/downloads use **presigned URLs** — the browser talks to MinIO
@@ -66,8 +66,8 @@ File uploads/downloads use **presigned URLs** — the browser talks to MinIO
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `BUCKET_EXTERNAL_ENDPOINT` | `http://care.local` | The URL devices use to reach files (served through Caddy on port 80, same as the app). **Never `localhost`** (that means *their* device). Use the server IP if devices can't resolve `care.local`. |
-| `BUCKET_ENDPOINT` | `http://minio:9000` | Internal endpoint the backend uses. Leave as-is. |
+| `BUCKET_EXTERNAL_ENDPOINT` | `https://care.local` | The URL devices use to reach files (served through Caddy on the same origin as the app). **Never `localhost`** (that means *their* device). Use `https://<server-ip>` if devices can't resolve `care.local`. |
+| `BUCKET_ENDPOINT` | `http://minio:9000` | Internal endpoint the backend uses (inside the Docker network, plain http). Leave as-is. |
 | `BUCKET_REGION` | `ap-south-1` | S3 region label (any valid value). |
 | `BUCKET_KEY` | `minioadmin` | Access key. Change for a non-trivial deployment (keep equal to `MINIO_ACCESS_KEY`). |
 | `BUCKET_SECRET` | `minioadmin` | Secret key (keep equal to `MINIO_SECRET_KEY`). |
@@ -105,7 +105,7 @@ Baked into the frontend image at **build** time. Edit, then `care rebuild-fronte
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `REACT_CARE_API_URL` | `http://care.local` | Backend base URL **without** `/api`. Must be a valid URL (empty is rejected by the build). Keeping it the same host as the app makes it same-origin (no CORS). |
+| `REACT_CARE_API_URL` | `https://care.local` | Backend base URL **without** `/api`. Must be a valid URL (empty is rejected by the build). Keeping it the same host as the app makes it same-origin (no CORS). Changing it needs `care rebuild-frontend` (Vite bakes it in at build time). |
 | `REACT_ALLOWED_LOCALES` | *(commented)* | Optional. Comma-separated languages, e.g. `"en,hi,ta,ml,mr,kn"`. |
 | `REACT_DEFAULT_COUNTRY` | *(commented)* | Optional default country. |
 
@@ -147,6 +147,40 @@ CARE_FE_REF=v25.1.0
 
 ---
 
+## Clinic address
+
+The address staff type in their browser, `https://care.local` by default. Set it in the
+installer's **Clinic address** field (step 1), or with `CARE_MDNS_NAME` for the CLI.
+Enter the label only; `.local` is added for you.
+
+Change it when a second CARE clinic already runs on the same WiFi. Two installs
+advertising the same name clash over mDNS, so give one of them its own, for example
+`care.local` and `caretest.local`.
+
+`care setup` rewrites the address everywhere it appears, in one pass:
+
+| File | What changes |
+|---|---|
+| `Caddyfile` | the site address, and the cert-download referer check |
+| `backend.env` | `BUCKET_EXTERNAL_ENDPOINT`, `CSRF_TRUSTED_ORIGINS` |
+| `frontend.env` | `REACT_CARE_API_URL` |
+| `setup/index.html` | the addresses shown on the cert-trust page |
+
+The rewrite matches whatever host is currently in those files, not a fixed
+`care.local`, so renaming a second time works too. Names are lowercase letters,
+numbers and hyphens.
+
+> The frontend **bakes** its API URL at build time, so changing the address after
+> setup needs `care rebuild-frontend` (or **Save & rebuild** in the app). Devices that
+> trusted the old certificate keep working: the CA is unchanged, but they must use the
+> new address.
+
+> Two clinics on **one computer** is a different problem: they would collide on ports
+> 80/443 and on the `care-desktop` compose project name. This setting is for two
+> clinics on one **network**.
+
+---
+
 ## Engine variables
 
 Not stored in a file — set by the desktop app (from the wizard) or as environment
@@ -156,7 +190,7 @@ variables when using the CLI.
 |---|---|---|
 | `BACKUP_DIR` | installer "Backup location" | Where daily backups go. Default `~/Desktop/care-db-backups`. |
 | `CARE_ADMIN_PASSWORD` | installer "Admin password" | Password for the first `admin` user. Default `admin`. |
-| `CARE_MDNS_NAME` | fixed `care` | The mDNS hostname (the app fixes it to `care`). |
+| `CARE_MDNS_NAME` | installer "Clinic address" | The host label, without `.local`. See [Clinic address](#clinic-address). |
 | `CARE_NO_MDNS` | `1` from the GUI | Skip the engine's own hostname-rename (the GUI verifies `care.local` as a step instead). |
 | `CARE_DESKTOP_DIR` | CLI override | Point the CLI at a specific kit folder (default: current directory). |
 | `CARE_BE_DIR` / `CARE_FE_DIR` | advanced | Where the source clones live (default `<kit>/care`, `<kit>/care_fe`). |

@@ -19,7 +19,19 @@ func TestMDNSLabel(t *testing.T) {
 	}
 }
 
-// lanIPv4s must only ever return non-loopback IPv4s. On a box with just loopback it
+// Resolves must never panic and must report false for a nil/stopped responder -
+// the safe path the watchdog relies on to re-advertise instead of crashing.
+func TestResolvesSafeOnStopped(t *testing.T) {
+	var nilAdv *Advertiser
+	if nilAdv.Resolves() {
+		t.Error("nil Advertiser.Resolves() = true, want false")
+	}
+	stopped := &Advertiser{name: "care"} // server == nil
+	if stopped.Resolves() {
+		t.Error("stopped Advertiser.Resolves() = true, want false")
+	}
+}
+
 // may legitimately return an error - that's not a test failure.
 func TestLANIPv4s(t *testing.T) {
 	ips, err := lanIPv4s()

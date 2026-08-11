@@ -97,9 +97,9 @@ func remoteEntryOf(entry catalogEntry) string {
 	return defaultRemoteEntry
 }
 
-// host is the address devices use, without a doubled ".local".
+// host is the address devices use: lowercase, with exactly one ".local".
 func (e *Engine) host() string {
-	return strings.TrimSuffix(e.mdnsName(), ".local") + ".local"
+	return mdnsLabel(e.mdnsName()) + ".local"
 }
 
 // bundleURL is the remoteEntry.js address for a bundle served out of the public

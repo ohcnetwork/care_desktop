@@ -1,7 +1,7 @@
 # Install CARE Desktop on Linux
 
 Follow these once on the **server machine** — the computer that stays on and runs
-the clinic. Other devices install nothing; they open `http://care.local`.
+the clinic. Other devices install nothing; they open `https://care.local`.
 
 > Budget ~15–20 minutes for the first setup. Internet is needed **for setup only**.
 
@@ -26,7 +26,7 @@ the clinic. Other devices install nothing; they open `http://care.local`.
 
 ## 2. Name the machine `care`
 
-Devices reach the clinic at `http://care.local`, advertised by Avahi once the
+Devices reach the clinic at `https://care.local`, advertised by Avahi once the
 hostname is `care`:
 
 ```bash
@@ -79,12 +79,24 @@ Click **Install & Start**. It clones + builds CARE and starts the stack (several
 
 ## 5. Log in
 
-Open **http://care.local/** on any device on the WiFi:
+Open **https://care.local/** on any device on the WiFi:
 
 - **Username:** `admin`
 - **Password:** what you set (or `admin`)
 
-**Change it immediately** at `http://care.local/admin/`.
+**Change it immediately** at `https://care.local/admin/`.
+
+## Trust the certificate on client devices
+
+The clinic runs over HTTPS with a self-signed cert. **The server itself trusts it
+automatically** on first start (you may get a one-time `pkexec`/sudo prompt to add it
+to the system store; approve it). **Every other device** trusts it once by opening
+**`https://care.local/setup`**, picking the device, and following the two steps
+(download `root.crt` → add to the trust store). It appears as **"CARE Desktop Local
+CA"**. On **iOS**, install the profile in **Safari**, then enable it under **Settings →
+General → About → Certificate Trust Settings**. See
+[troubleshooting.md](troubleshooting.md#security-warning--red-padlock-instead-of-a-green-one)
+if a warning persists.
 
 ---
 

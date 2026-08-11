@@ -8,309 +8,419 @@
 <body>
 <div id="app">
 
-  <!-- ===================== WIZARD ===================== -->
-  <div class="view" id="wizard" hidden>
-
-    <!-- setup form -->
-    <div class="wiz" id="wiz-form">
-      <aside class="wiz-rail">
-        <div class="brand">
-          <img src="/care_logo_mark.svg" alt="CARE" />
-          <div>
-            <div class="brand-name">CARE Desktop</div>
-            <div class="brand-kicker">First-time setup</div>
-          </div>
-        </div>
-        <h1>Set up your clinic</h1>
-        <p>A one-time setup runs the whole CARE system on this one computer, reachable by every phone and laptop on the clinic WiFi.</p>
-        <ol class="steps">
-          <li><span class="step-n">1</span><div><b>We check your computer</b><span>Done automatically. Nothing for you to do.</span></div></li>
-          <li><span class="step-n">2</span><div><b>Set up backups</b><span>Choose a safe drive and a backup password.</span></div></li>
-          <li><span class="step-n">3</span><div><b>Create the admin login</b><span>You'll add staff from inside CARE later.</span></div></li>
-        </ol>
-        <div class="grow"></div>
-        <div class="rail-note"><i class="ph ph-shield-check"></i><span>Runs fully offline after setup. Patient data never leaves the building.</span></div>
-      </aside>
-
-      <main class="wiz-main">
-        <div class="wiz-body">
-          <div style="display:flex; align-items:center; justify-content:space-between;">
-            <div class="section-label" style="margin:0;">Your computer</div>
-            <button class="btn tiny" id="check-reqs"><i class="ph ph-arrows-clockwise"></i>Check again</button>
-          </div>
-          <div class="req-list" style="margin-top:12px;">
-            <div class="req-row">
-              <div class="req-ico wait" id="runtime-ico"><i class="ph ph-circle-notch spin"></i></div>
-              <div class="req-txt"><div class="t">Runtime engine</div><div class="s">Everything CARE needs to run (Docker + Compose + Git).</div></div>
-              <span class="req-badge wait" id="runtime-badge">Checking...</span>
-            </div>
-            <div class="req-how" id="runtime-how" hidden></div>
-            <div class="req-div"></div>
-            <div class="req-row">
-              <div class="req-ico wait" id="mdns-ico"><i class="ph ph-circle-notch spin"></i></div>
-              <div class="req-txt"><div class="t">Network name  <code>care.local</code></div><div class="s">The address every device uses to reach the clinic.</div></div>
-              <span class="req-badge wait" id="mdns-badge">Checking...</span>
-            </div>
-            <div class="req-how" id="mdns-how" hidden></div>
-          </div>
-
-          <div class="section-label">Backup</div>
-          <div class="card">
-            <div class="card-sub-h">Backup drive</div>
-            <div class="drive-row">
-              <div class="drive-ico"><i class="ph ph-hard-drives"></i></div>
-              <div style="flex:1; min-width:0;">
-                <div class="path" id="backup-path">Desktop (default)</div>
-                <div class="tip">Tip: a USB or external drive means a dead computer can't take the backups with it.</div>
-              </div>
-              <button class="btn" id="choose-backup">Choose...</button>
-            </div>
-            <div class="card-div"></div>
-            <div class="card-sub-h" style="margin-bottom:4px;">Backup password</div>
-            <div class="card-hint" style="margin-bottom:10px;">Locks the daily backups so only your clinic can open them.</div>
-            <div class="input-wrap">
-              <i class="ph ph-shield-check lead"></i>
-              <input type="password" id="backuppw" placeholder="8-20 characters" autocomplete="new-password" />
-              <button class="eye" id="bpw-toggle"><i class="ph ph-eye" id="bpw-eye"></i></button>
-            </div>
-            <div class="hint" id="bpw-hint">Keep this safe. Without it, encrypted backups can never be recovered - not by anyone.</div>
-          </div>
-
-          <div class="section-label">Admin login</div>
-          <div class="card admin-card">
-            <div>
-              <label>Username</label>
-              <div class="user-chip"><i class="ph ph-user"></i>admin</div>
-            </div>
-            <div style="flex:1;">
-              <label>Password for the first admin login</label>
-              <div class="input-wrap">
-                <i class="ph ph-lock-key lead"></i>
-                <input type="password" id="adminpw" placeholder="8-20 characters" autocomplete="new-password" />
-                <button class="eye" id="pw-toggle"><i class="ph ph-eye" id="pw-eye"></i></button>
-              </div>
-              <div class="hint" id="pw-hint">8 to 20 characters, with an uppercase letter, a lowercase letter, and a number.</div>
-            </div>
-          </div>
-
-          <div class="wiz-actions">
-            <button class="btn primary lg" id="install" disabled><i class="ph-bold ph-rocket-launch"></i>Install &amp; Start</button>
-            <span class="note" id="install-note">Complete the steps above to continue.</span>
-          </div>
-        </div>
-      </main>
-    </div>
-
-    <!-- installing -->
-    <div class="center-screen" id="wiz-installing" hidden>
-      <div class="center-inner">
-        <img src="/care_logo_mark.svg" alt="CARE" />
-        <h2>Setting up your clinic...</h2>
-        <p>This needs the internet once and takes about 10 to 20 minutes, then it runs offline forever. You can leave this window open.</p>
-        <div class="progress" id="install-progress"><div class="bar" id="install-bar"></div></div>
-        <div class="pct" id="install-pct">Working...</div>
-        <div class="step-chip"><i class="ph ph-circle-notch spin"></i><span id="install-step-text">Getting started...</span></div>
+  <aside class="rail">
+    <div class="brand">
+      <img src="/care_logo_mark.svg" alt="CARE" />
+      <div>
+        <div class="brand-name">CARE Desktop</div>
+        <div class="brand-kicker" id="brand-kicker">First-time setup</div>
       </div>
     </div>
+    <div class="rail-div"></div>
 
-    <!-- failed -->
-    <div class="center-screen" id="wiz-failed" hidden>
-      <div class="center-inner">
-        <div class="fail-ico"><i class="ph-fill ph-warning-circle"></i></div>
-        <h2>Setup didn't finish</h2>
-        <p style="max-width:400px; margin-left:auto; margin-right:auto;">Something went wrong while setting up your clinic. Nothing was saved. The details are below - fix the issue and try again.</p>
-        <div class="fail-box"><pre id="fail-msg"></pre></div>
-        <button class="btn primary lg" id="fail-retry"><i class="ph-bold ph-arrow-counter-clockwise"></i>Try again</button>
-      </div>
+    <!-- wizard progress -->
+    <div class="rail-steps" id="rail-steps">
+      <div class="rail-step" data-step="checks"><span class="rail-dot">1</span><span>Computer check</span></div>
+      <div class="rail-step" data-step="backup"><span class="rail-dot">2</span><span>Backup</span></div>
+      <div class="rail-step" data-step="admin"><span class="rail-dot">3</span><span>Admin login</span></div>
+      <div class="rail-step" data-step="install"><span class="rail-dot">4</span><span>Install and start</span></div>
     </div>
-  </div>
 
-  <!-- ===================== CONTROL PANEL ===================== -->
-  <div class="view panel" id="panel" hidden>
-    <nav class="sidebar">
-      <div class="sidebar-brand"><img src="/care_logo_mark.svg" alt="CARE" /><span>CARE Desktop</span></div>
-      <div class="nav" id="nav">
-        <button class="nav-item active" data-tab="overview"><i class="ph ph-squares-four"></i>Overview</button>
-        <button class="nav-item" data-tab="backups"><i class="ph ph-archive"></i>Backups</button>
-      </div>
-      <div class="nav-spacer"></div>
-      <div class="nav-sep"></div>
-      <button class="nav-item nav-adv" data-tab="advanced"><i class="ph ph-wrench"></i>Advanced<span class="grow"></span><i class="ph ph-lock-simple lock" id="adv-lock-icon"></i></button>
-      <div class="mini-status">
-        <span class="mini-dot" id="mini-dot"></span>
-        <div class="mini-label" id="mini-label">checking...</div>
-      </div>
+    <!-- panel nav -->
+    <nav class="rail-nav" id="rail-nav" hidden>
+      <button class="nav-item" data-tab="overview"><span class="nav-mark"></span><span>Overview</span></button>
+      <button class="nav-item" data-tab="backups"><span class="nav-mark"></span><span>Backups</span></button>
+      <button class="nav-item" data-tab="advanced"><span class="nav-mark"></span><span>Advanced</span></button>
     </nav>
 
-    <section class="main">
-      <header class="main-head">
-        <div><h1 id="tab-title">Overview</h1><div class="sub" id="tab-sub">Your clinic server at a glance.</div></div>
-        <button class="btn ghost" id="open-link" style="color:var(--green3);"><i class="ph ph-arrow-square-out"></i>Open <span id="open-name">care.local</span></button>
-      </header>
+    <div class="grow"></div>
+    <div class="rail-status" id="rail-status" hidden>
+      <span class="rail-status-dot" id="rail-status-dot"></span>
+      <span id="rail-status-label">checking…</span>
+    </div>
+  </aside>
 
-      <div class="main-body">
+  <main class="main">
+
+    <!-- ===================== SETUP ===================== -->
+    <div class="screen" id="view-setup" hidden>
+      <div class="screen-head">
+        <h1>Set up your clinic</h1>
+        <p>One time, on this computer. About 15 minutes.</p>
+      </div>
+
+      <div class="screen-body sections">
+
+        <section class="acc open" id="sec-checks">
+          <div class="acc-head" data-acc="checks">
+            <span class="acc-dot" id="checks-dot">1</span>
+            <div class="acc-title">
+              <div class="t">Computer check</div>
+              <div class="s" id="checks-summary">Checking this computer</div>
+            </div>
+            <span class="pill" id="checks-badge">Checking</span>
+            <span class="caret"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></span>
+          </div>
+          <div class="acc-body" id="checks-body">
+            <div class="field">
+              <div class="field-head">
+                <label>Clinic address</label>
+                <button class="info" data-info="info-addr" title="The address staff type in their browser">i</button>
+              </div>
+              <div class="info-box" id="info-addr" hidden>The address staff type in their browser. Change it only if another CARE clinic is already running on this WiFi, so the two names do not clash.</div>
+              <div class="pw" id="addr-wrap">
+                <input type="text" id="mdnsname" value="care" spellcheck="false" autocapitalize="none" autocomplete="off" />
+                <span class="pw-note">.local</span>
+              </div>
+              <div class="msgs">
+                <span id="addr-msg">Staff will open https://care.local</span>
+              </div>
+            </div>
+            <div class="rows" id="check-rows"></div>
+            <div class="acc-foot">
+              <button class="btn" id="check-reqs">Check again</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="acc" id="sec-backup">
+          <div class="acc-head" data-acc="backup">
+            <span class="acc-dot" id="backup-dot">2</span>
+            <div class="acc-title">
+              <div class="t">Backup</div>
+              <div class="s" id="backup-summary">Drive and password for daily backups</div>
+            </div>
+            <span class="pill" id="backup-badge">To do</span>
+            <span class="caret"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></span>
+          </div>
+          <div class="acc-body" id="backup-body" hidden>
+            <div class="drive">
+              <span class="drive-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="5" width="18" height="6" rx="2"></rect><rect x="3" y="13" width="18" height="6" rx="2"></rect></svg></span>
+              <div class="drive-txt">
+                <div class="k">Drive</div>
+                <div class="v" id="backup-path">Desktop (default)</div>
+              </div>
+              <button class="btn" id="choose-backup">Choose</button>
+            </div>
+            <div class="field">
+              <div class="field-head">
+                <label>Backup password</label>
+                <button class="info" data-info="info-backup" title="Backups are encrypted with this password">i</button>
+              </div>
+              <div class="info-box" id="info-backup" hidden>Daily backups are encrypted with this password. If it is lost, the backups cannot be opened by anyone, including us. Store it somewhere safe.</div>
+              <div class="pw-pair">
+                <div class="pw" id="bpw-wrap">
+                  <input type="password" id="backuppw" placeholder="Password" autocomplete="new-password" />
+                  <button class="pw-eye" id="bpw-toggle">Show</button>
+                </div>
+                <div class="pw" id="bpwc-wrap">
+                  <input type="password" id="backuppwc" placeholder="Confirm password" autocomplete="new-password" />
+                  <span class="pw-note" id="bpwc-note"></span>
+                </div>
+              </div>
+              <div class="msgs">
+                <span id="bpw-msg">Use 8 to 20 characters with an uppercase letter, a lowercase letter and a number.</span>
+                <span id="bpwc-msg" hidden></span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="acc" id="sec-admin">
+          <div class="acc-head" data-acc="admin">
+            <span class="acc-dot" id="admin-dot">3</span>
+            <div class="acc-title">
+              <div class="t">Admin login</div>
+              <div class="s" id="admin-summary">The first login for this clinic</div>
+            </div>
+            <span class="pill" id="admin-badge">To do</span>
+            <span class="caret"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></span>
+          </div>
+          <div class="acc-body" id="admin-body" hidden>
+            <div class="user-row">
+              <span class="k">Username</span>
+              <span class="user-chip">admin</span>
+              <button class="info" data-info="info-admin" title="Staff accounts are added later inside CARE">i</button>
+            </div>
+            <div class="info-box" id="info-admin" hidden>This is the first login for the clinic. Add staff accounts later from inside CARE.</div>
+            <div class="field">
+              <div class="field-head"><label>Password</label></div>
+              <div class="pw-pair">
+                <div class="pw" id="apw-wrap">
+                  <input type="password" id="adminpw" placeholder="Password" autocomplete="new-password" />
+                  <button class="pw-eye" id="pw-toggle">Show</button>
+                </div>
+                <div class="pw" id="apwc-wrap">
+                  <input type="password" id="adminpwc" placeholder="Confirm password" autocomplete="new-password" />
+                  <span class="pw-note" id="apwc-note"></span>
+                </div>
+              </div>
+              <div class="msgs">
+                <span id="apw-msg">Use 8 to 20 characters with an uppercase letter, a lowercase letter and a number.</span>
+                <span id="apwc-msg" hidden></span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="screen-foot">
+        <button class="btn primary lg" id="install" disabled><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><polyline points="12 4 12 15"></polyline><polyline points="7 11 12 16 17 11"></polyline><polyline points="5 20 19 20"></polyline></svg>Install and start</button>
+        <span class="note" id="install-note">Complete the steps above to continue.</span>
+      </div>
+    </div>
+
+    <!-- ===================== INSTALLING ===================== -->
+    <div class="screen pad" id="view-installing" hidden>
+      <div class="run-head">
+        <span class="run-ico" id="run-ico"><span class="ring"></span></span>
+        <div class="grow">
+          <h1 id="run-title">Setting up your clinic</h1>
+          <p id="run-sub">This takes about 10 to 20 minutes.</p>
+        </div>
+        <span class="mono faint" id="elapsed">0:00</span>
+      </div>
+
+      <div class="progress-block">
+        <div class="progress-line">
+          <span id="step-label">Getting started</span>
+          <span class="pct" id="install-pct">0%</span>
+        </div>
+        <div class="progress"><div class="bar" id="install-bar"></div></div>
+      </div>
+
+      <section class="acc" id="sec-details">
+        <div class="acc-head" data-acc="details">
+          <div class="acc-title">
+            <div class="t">Details</div>
+            <div class="s" id="details-summary">Step 1 of 9</div>
+          </div>
+          <span class="caret"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></span>
+        </div>
+        <div class="acc-body" id="details-body" hidden>
+          <div class="steps-list" id="steps-list"></div>
+        </div>
+      </section>
+
+      <div class="grow"></div>
+      <div class="run-foot" id="run-foot" hidden>
+        <button class="btn primary lg" id="open-panel">Open control panel</button>
+        <span class="note">Clinic address <b class="mono green" id="run-addr">care.local</b></span>
+      </div>
+    </div>
+
+    <!-- ===================== FAILED ===================== -->
+    <div class="screen pad" id="view-failed" hidden>
+      <div class="run-head">
+        <span class="run-ico bad">!</span>
+        <div class="grow">
+          <h1>Installation failed</h1>
+          <p id="fail-sub">Nothing was saved. Fix the issue below and try again.</p>
+        </div>
+      </div>
+
+      <section class="acc" id="sec-fail">
+        <div class="acc-head" data-acc="fail">
+          <div class="acc-title">
+            <div class="t">Technical details</div>
+            <div class="s">For support only</div>
+          </div>
+          <span class="caret"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></span>
+        </div>
+        <div class="acc-body" id="fail-body" hidden>
+          <pre id="fail-msg"></pre>
+        </div>
+      </section>
+
+      <div class="grow"></div>
+      <div class="run-foot">
+        <button class="btn primary lg" id="fail-retry">Try again</button>
+        <button class="btn" id="fail-back">Back to setup</button>
+      </div>
+    </div>
+
+    <!-- ===================== CONTROL PANEL ===================== -->
+    <div class="screen" id="view-panel" hidden>
+      <div class="panel-head">
+        <div class="grow">
+          <h1 id="tab-title">Overview</h1>
+          <p id="tab-sub">Your clinic server at a glance.</p>
+        </div>
+        <button class="btn chip" id="open-link"><span class="mono" id="open-name">care.local</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><polyline points="9 5 19 5 19 15"></polyline><polyline points="19 5 6 18"></polyline></svg></button>
+      </div>
+
+      <div class="screen-body">
 
         <!-- OVERVIEW -->
         <div class="tab" id="tab-overview">
-          <div class="hero-row">
-            <div class="status-hero">
-              <div class="status-line">
-                <div class="status-ico" id="sys-tint"><i class="ph-fill ph-pulse" id="sys-icon"></i></div>
-                <div><div class="status-label" id="sys-label">checking...</div><div class="status-sub" id="sys-sub"></div></div>
-              </div>
-              <div class="hero-actions" id="hero-actions">
-                <button class="btn" id="btn-start"><i class="ph-fill ph-play"></i>Start</button>
-                <button class="btn" id="btn-stop"><i class="ph-fill ph-stop"></i>Stop</button>
-                <button class="btn ghost" id="btn-restart"><i class="ph ph-arrow-clockwise"></i>Restart</button>
-                <label class="switch" id="autostart-label">
-                  <span class="track"><span class="knob"></span></span>
-                  <input type="checkbox" id="autostart" hidden />Start at login
-                </label>
-              </div>
-              <div class="busy-banner" id="busy-banner" hidden>
-                <i class="ph ph-circle-notch spin"></i><span id="busy-text"></span>
-              </div>
+          <div class="status-card">
+            <span class="status-ico" id="sys-ico">●</span>
+            <div class="grow">
+              <div class="status-label" id="sys-label">checking…</div>
+              <div class="status-sub" id="sys-sub"></div>
             </div>
-            <div class="address-card">
-              <div class="addr-kicker">Clinic address</div>
-              <div class="addr-name" id="addr-name">care.local</div>
-              <div class="addr-sub">Open this on any phone or laptop on the clinic WiFi.</div>
-              <div class="grow"></div>
-              <div class="addr-actions">
-                <button class="btn white" id="open-link2"><i class="ph-bold ph-arrow-square-out"></i>Open</button>
-                <button class="btn glass" id="copy-addr"><i class="ph ph-copy"></i>Copy</button>
+            <div class="status-actions">
+              <button class="btn" id="btn-start">Start</button>
+              <button class="btn" id="btn-stop">Stop</button>
+              <button class="btn" id="btn-restart">Restart</button>
+              <div class="switch" id="autostart-label">
+                <span class="track"><span class="knob"></span></span>
+                <span>Start at login</span>
               </div>
             </div>
           </div>
-          <div class="strip">
-            <div class="strip-ico"><i class="ph ph-shield-check"></i></div>
-            <div style="flex:1;"><div class="t" id="backup-strip-title">Backups</div><div class="s" id="backup-strip-sub">-</div></div>
-            <button class="btn" id="view-backups">View backups</button>
+
+          <div class="cards2">
+            <div class="addr-card">
+              <div class="kicker">Clinic address</div>
+              <div class="addr" id="addr-name">care.local</div>
+              <div class="addr-sub">Open on any device on the clinic WiFi.</div>
+              <div class="grow"></div>
+              <div class="addr-actions">
+                <button class="btn white" id="open-link2">Open</button>
+                <button class="btn glass" id="copy-addr">Copy</button>
+                <button class="btn glass ghost" id="open-device-setup">Add a device</button>
+              </div>
+            </div>
+            <div class="backup-card">
+              <div class="kicker dark">Backups</div>
+              <div class="backup-title" id="backup-strip-title">—</div>
+              <div class="backup-sub" id="backup-strip-sub">—</div>
+              <div class="grow"></div>
+              <div class="addr-actions">
+                <button class="btn" id="view-backups">View backups</button>
+                <button class="btn soft" id="btn-backup-now2">Back up now</button>
+              </div>
+            </div>
           </div>
         </div>
 
         <!-- BACKUPS -->
         <div class="tab" id="tab-backups" hidden>
           <div class="bar-row">
-            <button class="btn primary" id="btn-backup-now"><i class="ph-bold ph-download-simple"></i>Back up now</button>
-            <span class="note">Automatic backups run daily.</span>
+            <button class="btn primary" id="btn-backup-now">Back up now</button>
+            <span class="note">Automatic, daily</span>
+            <button class="info" data-info="info-restore" title="Restoring replaces current data">i</button>
             <span class="grow"></span>
             <span class="note" id="backups-summary"></span>
-            <button class="btn ghost" id="backups-refresh"><i class="ph ph-arrows-clockwise"></i>Refresh</button>
+            <button class="btn" id="backups-refresh">Refresh</button>
           </div>
-          <div class="warn-banner">
-            <i class="ph-fill ph-info"></i>
-            <div>Restoring replaces today's data with an older copy. CARE pauses for a moment while it restores. We'll ask you to confirm right here first - no surprises.</div>
-          </div>
-          <div class="backups-list" id="backups-list"></div>
+          <div class="info-box" id="info-restore" hidden>Restoring replaces today's data with the chosen copy. CARE pauses for a moment while it restores, and you confirm before anything changes.</div>
+          <div class="list" id="backups-list"></div>
         </div>
 
         <!-- ADVANCED -->
         <div class="tab" id="tab-advanced" hidden>
-          <!-- gate -->
-          <div id="adv-gate">
-            <div class="gate">
-              <div class="gate-ico"><i class="ph ph-lock-simple"></i></div>
-              <h2>Enter the admin password</h2>
-              <p>These options can rebuild or remove CARE and change technical settings. Enter the admin password to continue.</p>
-              <div class="input-wrap" style="text-align:left;">
-                <i class="ph ph-lock-key lead"></i>
-                <input type="password" id="advpw" placeholder="Admin password" autocomplete="off" />
-                <button class="eye" id="advpw-toggle"><i class="ph ph-eye" id="advpw-eye"></i></button>
-              </div>
-              <div class="hint bad" id="adv-gate-err" hidden></div>
-              <button class="btn primary" id="adv-unlock" style="width:100%; justify-content:center; margin-top:14px;"><i class="ph ph-lock-key-open"></i>Unlock advanced options</button>
+          <div class="gate" id="adv-gate">
+            <span class="gate-ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg></span>
+            <div class="gate-title">Admin password</div>
+            <div class="gate-sub">These options can rebuild or remove CARE.</div>
+            <div class="pw" id="advpw-wrap">
+              <input type="password" id="advpw" placeholder="Password" autocomplete="off" />
+              <button class="pw-eye" id="advpw-toggle">Show</button>
             </div>
+            <div class="gate-err" id="adv-gate-err" hidden></div>
+            <button class="btn primary block" id="adv-unlock">Unlock</button>
           </div>
 
-          <!-- home -->
-          <div id="adv-home" hidden>
-            <div class="adv-col">
-              <div class="adv-warn"><i class="ph-fill ph-warning"></i>You're in advanced mode. Changes here can take CARE offline.</div>
-              <div class="adv-card">
-                <div class="adv-card-ico g"><i class="ph ph-hammer"></i></div>
-                <div style="flex:1;"><div class="t">Rebuild the app</div><div class="s">Rebuilds from the latest code and settings. Patient data is kept.</div></div>
-                <button class="btn" id="btn-rebuild">Rebuild</button>
-              </div>
-              <div class="adv-card">
-                <div class="adv-card-ico"><i class="ph ph-sliders-horizontal"></i></div>
-                <div style="flex:1;"><div class="t">System configuration</div><div class="s">Backend and frontend environment settings and plugins.</div></div>
-                <button class="btn" id="open-sysconfig">Open<i class="ph ph-arrow-right"></i></button>
-              </div>
-              <div class="danger-card">
-                <div class="danger-title"><i class="ph-fill ph-warning-octagon"></i>Uninstall CARE Desktop</div>
-                <p>Removes CARE and <b>all patient records and files</b> from this computer. This permanently deletes the data and can't be undone. Make sure you have a backup you trust.</p>
-                <label class="danger-check"><input type="checkbox" id="uninstall-backups" /><span>Also delete backups. <b>No way to recover the data afterward.</b></span></label>
-                <label class="danger-check" style="margin-top:-8px;"><input type="checkbox" id="uninstall-images" /><span>Also remove downloaded Docker images.</span></label>
-                <div id="uninstall-idle">
-                  <button class="btn danger" id="uninstall-run"><i class="ph-bold ph-trash"></i>Uninstall everything</button>
-                </div>
-                <div class="confirm-inline" id="uninstall-confirm" hidden>
-                  <div class="msg">Are you sure? This deletes CARE and all patient data on this computer.</div>
-                  <button class="btn" id="uninstall-cancel">Cancel</button>
-                  <button class="btn danger" id="uninstall-yes">Yes, delete everything</button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <div class="adv" id="adv-home" hidden>
 
-          <!-- system configuration -->
-          <div id="adv-sys" hidden>
-            <button class="btn" id="close-sysconfig" style="margin-bottom:16px;"><i class="ph ph-arrow-left"></i>Back to Advanced</button>
-            <div class="seg">
-              <button id="sel-backend" class="on">Backend</button>
-              <button id="sel-frontend">Frontend</button>
+            <div class="row-card">
+              <div class="grow">
+                <div class="t">Rebuild the app</div>
+                <div class="s">Latest code and settings. Patient data is kept.</div>
+              </div>
+              <button class="btn" id="btn-rebuild">Rebuild</button>
             </div>
-            <div class="cfg-col">
-              <div class="settings-card">
-                <div class="settings-head">
-                  <div class="card-title">Environment settings</div>
-                  <span class="tag" id="cfg-file">backend.env</span>
+
+            <section class="acc">
+              <div class="acc-head" data-acc="cfg">
+                <div class="acc-title">
+                  <div class="t">System configuration</div>
+                  <div class="s">Environment settings for the backend and the app</div>
                 </div>
-                <div class="card-hint" id="cfg-hint">Everyday settings for the backend, such as email delivery.</div>
+                <span class="caret"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></span>
+              </div>
+              <div class="acc-body" id="cfg-body" hidden>
+                <div class="seg">
+                  <button id="sel-backend" class="on">Backend</button>
+                  <button id="sel-frontend">Frontend</button>
+                </div>
+                <div class="sub-label">
+                  <span>Everyday settings</span>
+                  <span class="tag mono" id="cfg-file">backend.env</span>
+                </div>
                 <div class="env-form" id="env-form"></div>
-                <div class="adv-env">
-                  <button class="adv-env-toggle" id="adv-env-toggle"><i class="ph ph-caret-right" id="adv-env-caret"></i>Advanced environment<span class="c">system settings (<span id="adv-env-count">0</span>)</span></button>
-                  <div class="advanced-body" id="adv-env-body" hidden>
-                    <div class="adv-env-warn"><i class="ph-fill ph-warning"></i>Changing these can stop CARE from working. Only edit if you know what they do.</div>
+                <div class="inner-acc">
+                  <div class="inner-head" id="adv-env-toggle">
+                    <span class="caret"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></span>
+                    <span class="grow">Advanced environment</span>
+                    <span class="mono faint" id="adv-env-count">0</span>
+                  </div>
+                  <div class="inner-body" id="adv-env-body" hidden>
+                    <div class="warn-box sm"><span class="warn-dot">!</span><span>Editing these can stop CARE from working.</span></div>
                     <div class="env-form" id="adv-env-form"></div>
                   </div>
                 </div>
-                <div class="env-actions">
-                  <button class="btn ghost tiny" id="env-add"><i class="ph ph-plus"></i>Add setting</button>
-                  <div class="grow"></div>
-                  <button class="btn primary" id="env-save">Save &amp; apply</button>
+                <div class="acc-foot">
+                  <button class="btn" id="env-add">Add setting</button>
+                  <span class="grow"></span>
+                  <button class="btn primary" id="env-save">Save and apply</button>
                 </div>
               </div>
+            </section>
 
-              <div class="settings-card" id="plugins-card">
-                <div class="settings-head">
-                  <div class="card-title">Plugins</div>
-                  <span class="tag warn">rebuilds on save</span>
+            <section class="acc">
+              <div class="acc-head" data-acc="plugins">
+                <div class="acc-title">
+                  <div class="t">Plugins</div>
+                  <div class="s" id="plugins-summary">Extra features for CARE</div>
                 </div>
-                <div class="card-hint" id="plugins-hint">Extra features for the backend. Adding or changing plugins rebuilds it, which needs the internet.</div>
+                <span class="caret"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></span>
+              </div>
+              <div class="acc-body" id="plugins-body" hidden>
+                <div class="seg">
+                  <button id="psel-backend" class="on">Backend</button>
+                  <button id="psel-frontend">Frontend</button>
+                </div>
                 <div class="plugins-list" id="plugins-list"></div>
-                <div class="env-actions" id="be-plugins-actions">
-                  <select class="plugin-picker" id="plugin-picker"></select>
-                  <div class="grow"></div>
-                  <button class="btn primary" id="plugins-save">Save &amp; rebuild backend</button>
-                </div>
-                <div class="env-actions" id="fe-plugins-actions" hidden>
-                  <select class="plugin-picker" id="fe-plugin-picker"></select>
-                  <div class="grow"></div>
-                  <button class="btn primary" id="fe-plugins-save">Save frontend plugins</button>
+                <div class="acc-foot">
+                  <select class="picker" id="plugin-picker"></select>
+                  <span class="grow"></span>
+                  <button class="btn primary" id="plugins-save">Save and rebuild backend</button>
                 </div>
               </div>
-            </div>
+            </section>
+
+            <section class="acc danger">
+              <div class="acc-head" data-acc="danger">
+                <div class="acc-title">
+                  <div class="t red">Uninstall CARE Desktop</div>
+                  <div class="s">Removes CARE and all patient data from this computer</div>
+                </div>
+                <span class="caret"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></span>
+              </div>
+              <div class="acc-body" id="danger-body" hidden>
+                <label class="check"><input type="checkbox" id="uninstall-backups" /><span>Also delete backups. Nothing can be recovered afterwards.</span></label>
+                <label class="check"><input type="checkbox" id="uninstall-images" /><span>Also remove downloaded Docker images.</span></label>
+                <div id="uninstall-idle">
+                  <button class="btn danger" id="uninstall-run">Uninstall everything</button>
+                </div>
+                <div class="confirm" id="uninstall-confirm" hidden>
+                  <span class="grow">Delete CARE and all patient data on this computer?</span>
+                  <button class="btn" id="uninstall-cancel">Cancel</button>
+                  <button class="btn danger" id="uninstall-yes">Yes, delete</button>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
 
       </div>
-    </section>
-  </div>
+    </div>
+  </main>
 
-  <!-- toast -->
-  <div class="toast" id="toast" hidden><i class="ph-fill ph-check-circle"></i><span id="toast-msg"></span></div>
+  <div class="toast" id="toast" hidden><span id="toast-msg"></span></div>
 </div>
 
 <script type="module" src="/src/main.ts"></script>

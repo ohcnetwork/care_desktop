@@ -9,9 +9,11 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"care-desktop/app/internal/care"
@@ -28,8 +30,9 @@ func main() {
 	}
 	care.FixPath()
 	e := &care.Engine{
-		Kit: kit,
-		Log: func(s string) { fmt.Println(s) },
+		Kit:     kit,
+		Log:     func(s string) { fmt.Println(s) },
+		Confirm: confirmTTY,
 	}
 
 	var err error
@@ -162,6 +165,21 @@ func mdnsServe(e *care.Engine, args []string) error {
 	<-sig
 	fmt.Println("\nStopped advertising.")
 	return nil
+}
+
+// The CLI's stand-in for the app's native dialog. Without it the engine's
+// admin-requiring steps silently skip. False when stdin isn't a TTY so CI can't hang.
+func confirmTTY(title, message string) bool {
+	if fi, err := os.Stdin.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	fmt.Printf("\n%s\n%s\n[y/N]: ", title, message)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		return false
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes"
 }
 
 func usage() {

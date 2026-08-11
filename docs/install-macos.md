@@ -2,7 +2,7 @@
 
 Follow these once on the **server Mac** — the computer that stays on and runs the
 clinic. Other devices (phones, laptops) install nothing; they just open
-`http://care.local`.
+`https://care.local`.
 
 > Budget ~15–20 minutes for the first setup (it downloads + builds CARE). You need
 > internet **for the setup only**; after that it runs offline.
@@ -24,7 +24,7 @@ clinic. Other devices (phones, laptops) install nothing; they just open
 
 ## 2. Name the Mac `care` (so devices find it)
 
-Devices reach the clinic at `http://care.local`. macOS advertises this via Bonjour
+Devices reach the clinic at `https://care.local`. macOS advertises this via Bonjour
 once the Mac's **Local Hostname** is `care`.
 
 Run in **Terminal** (it asks for your password):
@@ -37,6 +37,13 @@ Verify:
 ```bash
 scutil --get LocalHostName     # should print: care
 ```
+
+> **This step is for *other* devices.** The Mac running CARE resolves `care.local`
+> through the hosts entry setup adds (`127.0.0.1 care.local`, one admin prompt), not
+> through Bonjour. A Mac's own resolver won't return a name that a second responder
+> on the same machine advertises. If you declined that prompt, the server's own
+> browser can't open the clinic; add it by hand with
+> `echo "127.0.0.1 care.local" | sudo tee -a /etc/hosts`.
 
 > The desktop installer also **checks** this for you (step 3) and shows these exact
 > instructions if it isn't set — but a GUI can't ask for your password, so set it in
@@ -74,13 +81,29 @@ stack up. Watch the log; the first run takes several minutes.
 
 ## 5. Log in
 
-When it finishes, open **http://care.local/** (on the Mac or any device on the same
+When it finishes, open **https://care.local/** (on the Mac or any device on the same
 WiFi) and log in:
 
 - **Username:** `admin`
 - **Password:** what you set in step 6 (or `admin`)
 
-**Change the password immediately** at `http://care.local/admin/`.
+**Change the password immediately** at `https://care.local/admin/`.
+
+## 6. Trust the certificate on client devices
+
+The clinic runs over HTTPS with a self-signed cert. **This Mac (the server) trusts it
+automatically** the first time the stack starts — you may see a one-time admin prompt
+to add it to the keychain; approve it. **Every other device** trusts it once:
+
+1. On the device, open **`https://care.local/setup`** (type the full `https://`).
+2. Pick the device type and follow the two steps: download `root.crt`, then add it to
+   the system trust store. It appears as **"CARE Desktop Local CA"**.
+3. **iOS:** install the profile in **Safari**, then enable it under **Settings →
+   General → About → Certificate Trust Settings**. Both steps are required.
+
+After trusting, the padlock turns green and the camera/file features work. See
+[troubleshooting.md](troubleshooting.md#security-warning--red-padlock-instead-of-a-green-one)
+if a device still shows a warning.
 
 ---
 

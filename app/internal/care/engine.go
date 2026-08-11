@@ -23,6 +23,9 @@ type Engine struct {
 	Kit string            // dir with docker-compose.yml, *.env, clinic_settings.py, ...
 	Env map[string]string // overrides: BACKUP_DIR, CARE_MDNS_NAME, CARE_ADMIN_PASSWORD, CARE_NO_MDNS
 	Log func(string)      // optional sink for streamed output (one line at a time)
+	// Confirm asks the user a yes/no question (native dialog in the app). When
+	// nil, callers treat it as "no" - never block a headless/CLI run.
+	Confirm func(title, message string) bool
 
 	versions map[string]string // parsed versions.env (lazy)
 	once     sync.Once
@@ -237,9 +240,18 @@ func (e *Engine) workdir() string {
 	return ""
 }
 
+// newCmd builds an exec.Cmd with the console window hidden on Windows - a GUI
+// app that polls docker must not flash a cmd window on every call. No-op on
+// other platforms. All command spawns in this package go through here.
+func newCmd(name string, args ...string) *exec.Cmd {
+	c := exec.Command(name, args...)
+	hideConsole(c)
+	return c
+}
+
 // run executes a command in the kit dir and streams stdout+stderr to Log.
 func (e *Engine) run(extraEnv []string, name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+	cmd := newCmd(name, args...)
 	cmd.Dir = e.workdir()
 	cmd.Env = append(e.baseEnv(), extraEnv...)
 
@@ -272,7 +284,7 @@ func (e *Engine) run(extraEnv []string, name string, args ...string) error {
 
 // capture runs a command and returns its trimmed stdout (no streaming).
 func (e *Engine) capture(name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
+	cmd := newCmd(name, args...)
 	cmd.Dir = e.workdir()
 	cmd.Env = e.baseEnv()
 	out, err := cmd.Output()

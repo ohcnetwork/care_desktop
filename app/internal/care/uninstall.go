@@ -2,8 +2,8 @@ package care
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // UninstallOptions controls how much of a CARE install to tear down. Containers,
@@ -18,6 +18,10 @@ type UninstallOptions struct {
 // volumes (all patient data). Best-effort throughout - a failure in one step is
 // logged and the rest still runs, so even a half-finished install can be cleaned up.
 func (e *Engine) Uninstall(opts UninstallOptions) error {
+	// 0. Grab the root CA before teardown - it lives in the caddy-data volume that
+	//    `compose down -v` destroys, so capture it now to untrust it at the end.
+	rootPEM := e.caddyRootPEM()
+
 	// 1. containers + private network + data volumes. Needs the compose file, so
 	//    do this first, while the kit still exists.
 	if _, err := os.Stat(filepath.Join(e.Kit, "docker-compose.yml")); err == nil {
@@ -26,14 +30,16 @@ func (e *Engine) Uninstall(opts UninstallOptions) error {
 			e.logln("  (compose down reported an error - continuing cleanup)")
 		}
 	}
+	// Safety net: compose down can silently fail to reach the project (e.g. a wrong
+	// working dir, or an interpolation error parsing the file - seen on Windows),
+	// leaving containers running. Force-remove anything still tagged with our
+	// compose project label, so uninstall always stops the stack.
+	e.forceRemoveProject()
 
-	// 2. images (optional): the two we built, plus the base images we pulled.
+	// 2. images (optional): everything we built, plus the base images we pulled.
 	if opts.RemoveImages {
 		e.logln("Removing Docker images...")
-		for _, img := range []string{
-			e.backendImage(), e.frontendImage(),
-			"postgres:17-alpine", "redis:8-alpine", "minio/minio:latest", "caddy:2",
-		} {
+		for _, img := range e.uninstallImages() {
 			e.removeImage(img) // best-effort; in-use base images are simply skipped
 		}
 	}
@@ -65,13 +71,29 @@ func (e *Engine) Uninstall(opts UninstallOptions) error {
 		}
 	}
 
+	// 6. the trusted root on THIS machine (best-effort; matched by fingerprint so
+	//    it only ever removes the cert we installed).
+	e.untrustLocalCA(rootPEM)
+	e.removeHostsEntry()   // drop the care.local hosts line we added
+	e.undoNetworkChanges() // Windows: revert profile to Public + drop the rules the Fix added
+
 	e.logln("Uninstall complete.")
 	return nil
 }
 
+// Tags come from the accessors that built them; hardcoding them here is what made
+// `--images` match nothing once versions.env pinned real versions.
+func (e *Engine) uninstallImages() []string {
+	return []string{
+		e.backendImage(), e.frontendImage(), e.wafCaddyImage(), e.backupImage(),
+		e.postgresImage(), e.redisImage(), e.minioImage(),
+		e.caddyImage(), e.caddyImage() + "-builder", // xcaddy build stage
+	}
+}
+
 // removeImage deletes one image quietly, ignoring "not found" / "still in use".
 func (e *Engine) removeImage(tag string) {
-	cmd := exec.Command("docker", "image", "rm", tag)
+	cmd := newCmd("docker", "image", "rm", tag)
 	cmd.Env = e.baseEnv()
 	cmd.Dir = e.workdir()
 	if cmd.Run() != nil {
@@ -79,6 +101,45 @@ func (e *Engine) removeImage(tag string) {
 		return
 	}
 	e.logln("  removed " + tag)
+}
+
+// TeardownProject force-removes this app's containers, volumes, and network by label
+// (no compose file/kit needed). Used by the retry cleanup to release a leftover
+// container's bind mounts before wiping the kit.
+func (e *Engine) TeardownProject() { e.forceRemoveProject() }
+
+// forceRemoveProject removes any containers, then volumes, then the network still
+// carrying our compose project label - the backstop for when `compose down` didn't
+// reach them. Talks to docker directly (no compose file / no kit dir needed), so it
+// works even after a broken or partial install. Best-effort throughout.
+func (e *Engine) forceRemoveProject() {
+	label := "label=com.docker.compose.project=" + composeProject
+
+	if ids := e.captureLines("docker", "ps", "-aq", "--filter", label); len(ids) > 0 {
+		e.logln("Force-removing leftover containers...")
+		_ = e.run(nil, "docker", append([]string{"rm", "-f"}, ids...)...)
+	}
+	if vols := e.captureLines("docker", "volume", "ls", "-q", "--filter", label); len(vols) > 0 {
+		_ = e.run(nil, "docker", append([]string{"volume", "rm", "-f"}, vols...)...)
+	}
+	if nets := e.captureLines("docker", "network", "ls", "-q", "--filter", label); len(nets) > 0 {
+		_ = e.run(nil, "docker", append([]string{"network", "rm"}, nets...)...)
+	}
+}
+
+// captureLines runs a command and returns its non-empty output lines (trimmed).
+func (e *Engine) captureLines(name string, args ...string) []string {
+	out, err := e.capture(name, args...)
+	if err != nil || out == "" {
+		return nil
+	}
+	var lines []string
+	for _, ln := range strings.Split(out, "\n") {
+		if s := strings.TrimSpace(ln); s != "" {
+			lines = append(lines, s)
+		}
+	}
+	return lines
 }
 
 // looksLikeSourceRepo guards against deleting the developer's git checkout when the
@@ -90,7 +151,18 @@ func looksLikeSourceRepo(dir string) bool {
 			return true
 		}
 	}
-	return false
+	// Also walk up: running from a subdir (e.g. app/) means the .git marker sits
+	// in a parent, not dir itself - a managed kit never has a .git ancestor.
+	for d := dir; ; {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return true
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return false
+		}
+		d = parent
+	}
 }
 
 func dirExists(p string) bool {
