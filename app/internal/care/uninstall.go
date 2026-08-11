@@ -36,13 +36,10 @@ func (e *Engine) Uninstall(opts UninstallOptions) error {
 	// compose project label, so uninstall always stops the stack.
 	e.forceRemoveProject()
 
-	// 2. images (optional): the two we built, plus the base images we pulled.
+	// 2. images (optional): everything we built, plus the base images we pulled.
 	if opts.RemoveImages {
 		e.logln("Removing Docker images...")
-		for _, img := range []string{
-			e.backendImage(), e.frontendImage(),
-			"postgres:17-alpine", "redis:8-alpine", "minio/minio:latest", "caddy:2",
-		} {
+		for _, img := range e.uninstallImages() {
 			e.removeImage(img) // best-effort; in-use base images are simply skipped
 		}
 	}
@@ -77,11 +74,21 @@ func (e *Engine) Uninstall(opts UninstallOptions) error {
 	// 6. the trusted root on THIS machine (best-effort; matched by fingerprint so
 	//    it only ever removes the cert we installed).
 	e.untrustLocalCA(rootPEM)
-	e.removeHostsEntry()   // Windows: drop the care.local hosts line we added
+	e.removeHostsEntry()   // drop the care.local hosts line we added
 	e.undoNetworkChanges() // Windows: revert profile to Public + drop the rules the Fix added
 
 	e.logln("Uninstall complete.")
 	return nil
+}
+
+// Tags come from the accessors that built them; hardcoding them here is what made
+// `--images` match nothing once versions.env pinned real versions.
+func (e *Engine) uninstallImages() []string {
+	return []string{
+		e.backendImage(), e.frontendImage(), e.wafCaddyImage(), e.backupImage(),
+		e.postgresImage(), e.redisImage(), e.minioImage(),
+		e.caddyImage(), e.caddyImage() + "-builder", // xcaddy build stage
+	}
 }
 
 // removeImage deletes one image quietly, ignoring "not found" / "still in use".

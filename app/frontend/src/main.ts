@@ -128,7 +128,12 @@ const CHECKS: Check[] = [
   { id: "runtime", title: "Runtime engine", detail: "Docker, Compose and Git", state: "wait", how: "", fixable: false },
   { id: "mdns", title: "Network name", detail: "care.local on the clinic WiFi", state: "wait", how: "", fixable: false },
 ];
+const setCheckDetail = (host: string): void => {
+  CHECKS[1].detail = `${host} on the clinic WiFi`;
+};
 let networkCheck: Check | null = null; // Windows-only gate
+let clinicHost = "care.local";
+let hostOk = true;
 let pwOk = false, pwcOk = false, bpwOk = false, bpwcOk = false;
 let backupDir = "";
 const install = $<HTMLButtonElement>("#install");
@@ -182,10 +187,11 @@ function renderChecks(): void {
 }
 
 function gate(): void {
-  const ready = checksState() === "ok" && pwOk && pwcOk && bpwOk && bpwcOk;
+  const ready = checksState() === "ok" && hostOk && pwOk && pwcOk && bpwOk && bpwcOk;
   install.disabled = !ready;
   $("#install-note").textContent = checksState() !== "ok"
     ? "Waiting for your computer to be ready…"
+    : !hostOk ? "Fix the clinic address to continue."
     : !(bpwOk && bpwcOk) ? "Set and confirm the backup password to continue."
       : !(pwOk && pwcOk) ? "Set and confirm the admin password to continue."
         : "Ready. This takes about 10 to 20 minutes.";
@@ -225,6 +231,43 @@ async function fixNetwork(btn: HTMLButtonElement): Promise<void> {
   await checkNetwork();
 }
 function recheck(): void { void Promise.all([checkRuntime(), checkMDNS(), checkNetwork()]); }
+
+// The address is applied before the name check runs, so step 1 verifies the name
+// the clinic actually picked rather than the default.
+const addrInput = $<HTMLInputElement>("#mdnsname");
+let addrTimer = 0;
+async function applyHost(): Promise<void> {
+  const raw = addrInput.value.trim();
+  const problem = await App.ValidateDomain(raw);
+  hostOk = problem === "";
+  $("#addr-wrap").classList.toggle("bad", !hostOk);
+  const msg = $("#addr-msg");
+  if (!hostOk) {
+    msg.textContent = problem;
+    msg.className = "bad";
+    gate();
+    return;
+  }
+  clinicHost = raw.replace(/\.local$/i, "").toLowerCase() + ".local";
+  msg.textContent = `Staff will open https://${clinicHost}`;
+  msg.className = "";
+  setCheckDetail(clinicHost);
+  try {
+    await App.SetMDNSName(clinicHost);
+  } catch (e) {
+    hostOk = false;
+    msg.textContent = String(e);
+    msg.className = "bad";
+    gate();
+    return;
+  }
+  void checkMDNS();
+  gate();
+}
+addrInput.addEventListener("input", () => {
+  window.clearTimeout(addrTimer);
+  addrTimer = window.setTimeout(() => void applyHost(), 400);
+});
 $("#check-reqs").addEventListener("click", (e) => { e.stopPropagation(); recheck(); });
 
 $("#choose-backup").addEventListener("click", () => void (async () => {
@@ -382,14 +425,14 @@ install.addEventListener("click", () => {
     install.disabled = true;
     $("#install-note").textContent = "Re-checking your computer…";
     await Promise.all([checkRuntime(), checkMDNS(), checkNetwork()]);
-    if (checksState() !== "ok" || !(pwOk && pwcOk && bpwOk && bpwcOk)) {
+    if (checksState() !== "ok" || !hostOk || !(pwOk && pwcOk && bpwOk && bpwcOk)) {
       $("#install-note").textContent = "A step is no longer met - fix it and try again.";
       return;
     }
     phase = "setup";
     startInstalling();
     append("Starting one-time setup...");
-    void App.RunSetup("care.local", $<HTMLInputElement>("#adminpw").value, $<HTMLInputElement>("#backuppw").value, true, "", backupDir).catch((e) => {
+    void App.RunSetup(clinicHost, $<HTMLInputElement>("#adminpw").value, $<HTMLInputElement>("#backuppw").value, true, "", backupDir).catch((e) => {
       lastError = String(e); append(`error: ${String(e)}`); showInstallFailed();
     });
   })();
@@ -639,21 +682,10 @@ type Row = { name: string; url: string; version: string; configs: ConfigRow[]; m
 type CatalogEntry = { value: string; label: string; row: Row };
 type FrontendPlugin = { slug: string; meta: Record<string, unknown> };
 
-const BE_CATALOG: CatalogEntry[] = [{
-  value: "care_notifications",
-  label: "Notifications (care_notifications)",
-  row: {
-    name: "care_notifications",
-    url: "git+https://github.com/ohcnetwork/care_notifications_be.git",
-    version: "@main",
-    configs: [{ key: "WEBPUSH_NOTIFICATIONS_ENABLED", value: "false" }],
-  },
-}];
-const FE_CATALOG: CatalogEntry[] = [{
-  value: "care_hello_fe",
-  label: "Hello World (sample)",
-  row: { name: "care_hello_fe", url: "https://ohcnetwork.github.io/care_hello_fe/assets/remoteEntry.js", version: "", configs: [], meta: {} },
-}];
+// Empty on purpose: this clinic ships no suggested plugins. Add entries here to
+// offer them in the picker.
+const BE_CATALOG: CatalogEntry[] = [];
+const FE_CATALOG: CatalogEntry[] = [];
 
 function parseConfigValue(v: string): unknown {
   const t = v.trim();
@@ -840,7 +872,7 @@ function fillPicker(section: Section): void {
   const catalog = section === "backend" ? BE_CATALOG : FE_CATALOG;
   pluginPicker.innerHTML = `<option value="">Add a plugin</option>` +
     catalog.map((c) => `<option value="${c.value}">${esc(c.label)}</option>`).join("") +
-    `<option value="custom">Custom, add by URL</option>`;
+    `<option value="custom">${catalog.length ? "Custom, add by URL" : "Add by URL"}</option>`;
 }
 pluginPicker.addEventListener("change", () => {
   const v = pluginPicker.value;
@@ -1040,6 +1072,10 @@ async function boot(): Promise<void> {
   else {
     phase = "setup";
     showView("setup");
+    clinicHost = state.mdns_name || "care.local";
+    addrInput.value = clinicHost.replace(/\.local$/i, "");
+    $("#addr-msg").textContent = `Staff will open https://${clinicHost}`;
+    setCheckDetail(clinicHost);
     openSetupSection("checks");
     recheck();
   }

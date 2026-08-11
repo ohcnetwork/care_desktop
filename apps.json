@@ -1,10 +1,3 @@
 {
-  "apps": [
-    {
-      "slug": "care_hello_fe",
-      "name": "Hello World (sample)",
-      "description": "A demo add-on used to check that optional apps load correctly. Safe to leave off.",
-      "bundle": "apps/care_hello_fe"
-    }
-  ]
+  "apps": []
 }

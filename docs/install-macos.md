@@ -38,6 +38,13 @@ Verify:
 scutil --get LocalHostName     # should print: care
 ```
 
+> **This step is for *other* devices.** The Mac running CARE resolves `care.local`
+> through the hosts entry setup adds (`127.0.0.1 care.local`, one admin prompt), not
+> through Bonjour. A Mac's own resolver won't return a name that a second responder
+> on the same machine advertises. If you declined that prompt, the server's own
+> browser can't open the clinic; add it by hand with
+> `echo "127.0.0.1 care.local" | sudo tee -a /etc/hosts`.
+
 > The desktop installer also **checks** this for you (step 3) and shows these exact
 > instructions if it isn't set — but a GUI can't ask for your password, so set it in
 > Terminal once as above.

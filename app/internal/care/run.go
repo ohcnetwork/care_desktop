@@ -29,7 +29,7 @@ func (e *Engine) Start() error {
 		return err
 	}
 	e.ensureMDNS()
-	e.ensureHostsEntry() // Windows: make care.local resolve for this PC's own browser
+	e.warnDomainDrift()
 	e.logln("Starting CARE...")
 	// Migrate with a SINGLE migrator: bring up the api backend (its start.sh does
 	// NOT migrate) + its deps, migrate to completion, then start the rest.
@@ -55,8 +55,10 @@ func (e *Engine) Start() error {
 		return err
 	}
 	e.logln("")
-	e.logln("CARE is up -> https://" + e.mdnsName() + ".local/   (login: admin)")
-	e.trustLocalCA() // best-effort: trust the cert on this machine too
+	e.logln("CARE is up -> https://" + e.host() + "/   (login: admin)")
+	// Only now: these need Caddy up (the CA lives in its volume).
+	e.writeCertInstallers()
+	e.ensureLocalAccess()
 	return nil
 }
 

@@ -300,6 +300,29 @@ func (a *App) ValidatePassword(pw string) string {
 	return ""
 }
 
+// ValidateDomain lets the wizard check the clinic address live as the user types.
+func (a *App) ValidateDomain(name string) string {
+	if err := care.ValidateMDNSLabel(name); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// SetMDNSName saves the chosen address and re-advertises under it, so the
+// installer's name check tests the name actually picked.
+func (a *App) SetMDNSName(name string) error {
+	if err := care.ValidateMDNSLabel(name); err != nil {
+		return err
+	}
+	cfg := a.loadConfig()
+	cfg.MDNSName = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(name)), ".local") + ".local"
+	if err := a.saveConfig(cfg); err != nil {
+		return err
+	}
+	a.restartAdvertise()
+	return nil
+}
+
 // VerifyAdminPassword gates the Advanced screen. It checks against the bcrypt hash
 // stored at setup. Legacy installs (set up before the hash existed) have none, so
 // any non-empty entry passes - a speed bump, not verification.

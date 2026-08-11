@@ -35,3 +35,21 @@ func TestPSSingleQuote(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestSHSingleQuote(t *testing.T) {
+	if got := shSingleQuote("a'b"); got != `'a'\''b'` {
+		t.Fatalf("got %q", got)
+	}
+	if got := shSingleQuote("127.0.0.1 care.local"); got != "'127.0.0.1 care.local'" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestASQuote(t *testing.T) {
+	if got := asQuote(`cat "$t"`); got != `"cat \"$t\""` {
+		t.Fatalf("got %q", got)
+	}
+	if got := asQuote(`a\b`); got != `"a\\b"` {
+		t.Fatalf("got %q", got)
+	}
+}

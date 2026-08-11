@@ -70,8 +70,12 @@ care restore care-20260701-020000.dump # DB + same-timestamp files, if present
   without it, it just prints what it would remove. Backups are kept unless you add
   `--backups`. Run from the repo root, it cleans Docker + the clones but leaves the
   source checkout itself in place. It does not rename the computer back. It **removes
-  the clinic's CA cert from *this* machine's trust store** (matched by fingerprint, so
-  only that cert is touched); other devices keep their copy and must remove it manually.
+  the clinic's CA cert(s) from *this* machine's trust store**: the root captured this
+  run (by fingerprint) *and* any left by earlier installs, matched on the
+  `CARE Desktop Local CA` common name our own Caddyfile sets, since setup mints a fresh
+  root each time. Nothing else is touched, and if it can't remove them it says so
+  rather than reporting a clean uninstall. Other devices keep their copy and must
+  remove it manually.
 - `care` never passes `-v` to `docker compose`, so **data volumes always survive**
   stop/start/rebuild. The only way to delete data is to remove the volumes yourself.
 - The CLI and the desktop app are interchangeable — you can set up with one and

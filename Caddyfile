@@ -26,6 +26,10 @@
 (bootstrap) {
 	handle_path /setup* {
 		root * /setup
+		# Written by the engine each start, with the CA embedded (see certscript.go).
+		@installer path /install-cert.sh /install-cert.ps1
+		header @installer Content-Disposition "attachment"
+		header @installer Content-Type "application/octet-stream"
 		file_server {
 			index index.html
 		}

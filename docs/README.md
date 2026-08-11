@@ -12,7 +12,7 @@ the same engine and behave identically.
 Traffic is served over **HTTPS** with a self-signed certificate from a built-in local
 CA. The server trusts its own cert automatically; every other device trusts it once
 from the built-in **[`https://care.local/setup`](architecture.md#certificate-trust--the-setup-bootstrap)**
-page (two taps). See [architecture.md](architecture.md#https-on-the-lan) for why HTTPS
+page (two taps). See [architecture.md](architecture.md#https-on-the-lan-clinic_settingspy) for why HTTPS
 is required.
 
 ---
@@ -63,11 +63,10 @@ is required.
 ## Requirements at a glance
 - **Docker**, running — any engine (Docker Engine, Colima, Podman, Rancher Desktop, OrbStack, or Docker Desktop), with the `docker compose` v2 plugin. *Required on every OS.*
 - **git** — used once to download + build CARE.
-- A way to be found as `care.local`: automatic on macOS/Linux (the in-app mDNS
-  responder; the setup can also set the hostname) and on the **Windows server itself**
-  (setup adds a hosts entry — no rename). For *other devices* to reach a Windows server,
-  recent Windows 11 resolves `care.local` natively; otherwise **Apple Bonjour or a
-  static IP**. See your OS install guide.
+- A way to be found as `care.local`: *other devices* are served by the in-app mDNS
+  responder (automatic on macOS/Linux; on Windows recent Windows 11 resolves it
+  natively, otherwise **Apple Bonjour or a static IP**). The **server itself** uses a
+  hosts entry setup adds on every OS, with no rename. See your OS install guide.
 
 > First-time setup downloads several GB of Docker images and builds the frontend —
 > budget **~10–20 minutes** and a working internet connection **for that step only**.

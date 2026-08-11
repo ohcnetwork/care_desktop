@@ -52,6 +52,8 @@ declare global {
           FixNetwork(): Promise<void>;
           CareHealth(): Promise<Health>;
           ValidatePassword(pw: string): Promise<string>;
+          ValidateDomain(name: string): Promise<string>;
+          SetMDNSName(name: string): Promise<void>;
           VerifyAdminPassword(pw: string): Promise<boolean>;
           CareAction(action: string): Promise<void>;
           CareStatus(): Promise<string>;

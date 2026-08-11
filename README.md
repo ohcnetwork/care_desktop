@@ -9,7 +9,7 @@ Drive it with a small **desktop app** (a few clicks) or the **`care` CLI**.
 
 Traffic is served over **HTTPS** with a self-signed certificate from a built-in local
 CA (browsers need a real `https://` origin for the camera/scanner and secure cookies —
-see [architecture.md](docs/architecture.md#https-on-the-lan)). The server trusts its
+see [architecture.md](docs/architecture.md#https-on-the-lan-clinic_settingspy)). The server trusts its
 own cert automatically; other devices trust it in two taps from the built-in
 **`https://care.local/setup`** page.
 
@@ -49,11 +49,16 @@ it trusts the clinic's local CA **once**:
 
 - **The server computer trusts itself automatically** the first time the stack starts —
   nothing to do there.
-- **Every other device:** open **`https://care.local/setup`**, pick the device type, and
-  follow the two-tap instructions (download `root.crt` → trust it). After that the
-  padlock is green and the camera/file features work. On iOS this installs a
-  configuration profile named **"CARE Desktop Local CA"**; Safari is required for the
-  install.
+- **Every other device:** open **`https://care.local/setup`** and pick the device type.
+  - **Windows / macOS / Linux**: download the **installer** and run it once. It carries
+    the certificate inside it and puts it in the right store for you (no wizard, no
+    keychain dialog). The manual steps are still there if you'd rather.
+  - **Android / iOS**: follow the two-tap instructions (download `root.crt`, then trust it).
+    On iOS this installs a configuration profile named **"CARE Desktop Local CA"**;
+    Safari is required, and you must then enable it under
+    *Settings → General → About → Certificate Trust Settings*.
+
+  After that the padlock is green and the camera/file features work.
 
 > Uninstalling from the app also **removes the certificate from the server machine**.
 > Other devices keep their copy — remove it from their trust store manually if needed.

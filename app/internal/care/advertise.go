@@ -105,7 +105,7 @@ func newMDNSServer(name string, ips []net.IP) (*mdns.Server, error) {
 // any surrounding dots (so a trailing "." doesn't defeat the suffix strip), then a
 // trailing ".local".
 func mdnsLabel(name string) string {
-	name = strings.Trim(strings.TrimSpace(name), ".")
+	name = strings.ToLower(strings.Trim(strings.TrimSpace(name), "."))
 	name = strings.TrimSuffix(name, ".local")
 	return strings.Trim(name, ".")
 }

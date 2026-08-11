@@ -31,7 +31,7 @@ What the engine does:
 | `backup-now` | write an immediate database dump |
 | `list-backups` | list the restorable points in the backup folder |
 | `restore` | stop app services → drop + re-create the DB from a chosen dump → (optionally) overwrite the MinIO volume from the matching files archive → bring the stack back up + migrate |
-| `uninstall` | `compose down -v` (containers + network + **data volumes**) → optionally remove images → delete the clones + kit dir → **remove the trusted CA cert from the server's keychain** → optionally delete backups. On Windows it also drops the `care.local` hosts line, removes the `CARE Desktop *` firewall rules, and reverts the network profile to Public. The app also clears its config + login-item so the next launch is a fresh first-run |
+| `uninstall` | `compose down -v` (containers + network + **data volumes**) → optionally remove images → delete the clones + kit dir → **remove the trusted CA cert from the server's keychain** → optionally delete backups. It also drops the `care.local` hosts line on every OS, and on Windows removes the `CARE Desktop *` firewall rules and reverts the network profile to Public. The app also clears its config + login-item so the next launch is a fresh first-run |
 
 ### 2. The runtime layer (Docker containers)
 The actual CARE stack, defined in `docker-compose.yml`. Project name is
@@ -139,6 +139,35 @@ auto-upgrades http→https — so the bootstrap must answer on both):
   `application/x-x509-ca-cert`. It's **gated**: a direct hit without the setup page's
   `?ok=1` marker (or a same-site `Referer`) is redirected back to `/setup`, so people
   go through the instructions instead of grabbing a raw file they don't know how to use.
+- **`/setup/install-cert.sh`** and **`/setup/install-cert.ps1`**: one-step installers
+  for laptops and desktops (see below). Served with `Content-Disposition: attachment`
+  so a browser downloads them instead of rendering the source.
+
+### One-step installers
+
+Trusting a CA by hand is the worst part of onboarding a device: on Windows it's a
+six-screen wizard, on macOS a keychain dialog plus a separate *Always Trust* toggle,
+on Linux a `cp` into a distro-specific directory. So for **Windows, macOS, and Linux**
+the setup page offers a script that does it in one run. Phones can't execute one, so
+Android and iOS keep the manual flow only.
+
+The engine renders both scripts on every `start`
+(`app/internal/care/certscript.go`) into the `setup/` directory Caddy serves. Two
+properties matter:
+
+- **The certificate is embedded in the script, not fetched.** A device that doesn't
+  trust the clinic yet cannot fetch over https, and an installer that disables TLS
+  verification to bootstrap itself would be a bad habit to ship. The script carries the
+  PEM inline, so it needs no network at all.
+- **They're regenerated each start**, because deleting the `caddy-data` volume re-mints
+  the root, and a stale script would install a CA the server no longer uses.
+
+Each script prints the certificate's **SHA-256 fingerprint**, which the setup page also
+shows, so the two can be compared before running it. The Unix script re-executes itself
+under `sudo`, detects macOS vs Linux, handles both the Debian and RHEL anchor layouts,
+and additionally loads the CA into the per-user **NSS** store when `certutil` is present
+(Firefox and Chrome on Linux keep their own, separate from the system bundle). The
+PowerShell script self-elevates through UAC and imports into `LocalMachine\Root`.
 
 The CA is **renamed** in the Caddyfile's `pki` block so the trust prompt (e.g. the iOS
 profile screen) reads **"CARE Desktop Local CA"** instead of Caddy's default
@@ -148,15 +177,40 @@ profile screen) reads **"CARE Desktop Local CA"** instead of Caddy's default
 **The server machine trusts its own cert automatically.** At the end of `start`, the
 engine (`app/internal/care/trustca.go`) pulls the root out of the `caddy-data` volume
 and installs it into the OS trust store — unprivileged first (login keychain / user
-store), and if that needs admin it shows a **Yes/No dialog** then elevates via the OS
-(macOS `osascript`, Windows `RunAs`, Linux `pkexec`). It's idempotent: if the cert is
+store), which on macOS usually succeeds outright. It's idempotent: if the cert is
 already trusted it does nothing.
 
-**Uninstall removes it again.** Because the root lives in the `caddy-data` volume that
-`compose down -v` destroys, `uninstall` captures the cert **before** teardown, then
-deletes it from the trust store by its **SHA-1 fingerprint** (the same id macOS
-`security` and Windows `certutil` use), so only *our* cert is removed. Only the server
-machine is cleaned up — other devices keep their copy and must remove it manually.
+### One install, one approval
+
+Two things must happen for the clinic to open in the **server's own** browser, and
+both need administrator rights: the hosts entry above, and trusting the CA. Neither
+can run before the stack is up (the CA doesn't exist until Caddy mints it into its
+volume), so both land at the end of `start`. Running them separately would mean
+two dialogs and two password prompts to finish one install.
+
+So `ensureLocalAccess` (`app/internal/care/localaccess.go`) collects whatever is
+still outstanding and runs it in a **single elevated call behind a single
+confirmation**. Each step is tried unprivileged first and drops out if it succeeds
+(or was already done), so the prompt lists only what genuinely needs admin, and a
+repeat `start` asks for nothing at all. The approval is a **native dialog** in the
+app and a `y/N` prompt in the CLI; elevation is `osascript` (macOS), `RunAs`/UAC
+(Windows), or `pkexec` (Linux). It's best-effort throughout and never fails `start`:
+by that point the clinic is already serving every other device.
+
+**Uninstall removes it again.** The root lives in the `caddy-data` volume that
+`compose down -v` destroys, so `uninstall` captures it **before** teardown, via
+`exec cat`, falling back to `compose cp` if the container won't take an exec, because
+there's only one attempt before the volume is gone.
+
+It then removes **every** CARE root, not just that one: by **SHA-1 fingerprint** (the
+id macOS `security` and Windows `certutil` both use) for the cert captured this run,
+*and* by the `CARE Desktop Local CA` common name that our own Caddyfile's `pki` block
+sets. The name sweep matters because setup mints a **fresh root every time**: matching
+only the current fingerprint left every earlier install's root trusted forever. That CN
+is ours by construction, so nothing else is ever touched. Each store is read first
+(free, no admin) so an uninstall with nothing to remove raises no prompt, and a failure
+is reported rather than swallowed. Only the server machine is cleaned up. Other devices
+keep their copy and must remove it manually.
 
 ---
 
@@ -173,11 +227,26 @@ probe via the system resolver — two consecutive misses, ~60s, before it acts, 
 flapping). This keeps the name reachable across network hiccups without a manual
 restart.
 
-On **Windows**, the server's *own* browser can't resolve the responder's `.local` name
-reliably, so setup also writes a single hosts-file line, `127.0.0.1 care.local`
-(`app/internal/care/hosts.go`, tagged `# care-desktop`, removed on uninstall). That's
-for the server machine only — other devices still resolve `care.local` via the mDNS
-responder above. No machine is ever renamed.
+**The server's own browser is a separate problem on every OS.** A host's resolver
+won't hand back a name that a *second* responder on the same machine advertises:
+Windows has no mDNS resolver at all without Bonjour; macOS's `mDNSResponder` owns
+`.local` and ignores multicast answers originating from its own addresses; Linux
+only resolves `.local` when `nss-mdns` is installed and wired into `nsswitch.conf`.
+The responder is reachable from *other* devices the whole time, just not from the
+box running it.
+
+That matters because the frontend has `https://care.local` baked in as its API base,
+so an unresolvable name means every call fails with `ERR_NAME_NOT_RESOLVED` even if
+you reach the app by IP, and since CARE gates its first paint on an API call the
+page sits on its loading logo. So CARE writes a single hosts-file line,
+`127.0.0.1 care.local` (`app/internal/care/hosts.go`, tagged `# care-desktop`,
+removed on uninstall), on **macOS, Linux, and Windows** alike. It's idempotent: an
+entry that already exists (ours, or one you added) means no write and no prompt.
+That's for the server machine only; other devices still resolve `care.local` via
+the mDNS responder above. No machine is ever renamed.
+
+This needs administrator rights, and so does trusting the CA below, so the two are
+batched into **one approval**, see [below](#one-install-one-approval).
 
 ---
 

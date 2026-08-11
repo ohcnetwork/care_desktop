@@ -14,90 +14,31 @@ import (
 	"time"
 )
 
-// trustLocalCA installs Caddy's internal root into the *host* trust store, so a
-// browser on the server machine opens https://care.local without warnings.
-// It tries without elevation first; if that needs admin it asks the user
-// (native yes/no) and re-runs through the OS elevation prompt (osascript /
-// UAC / pkexec). Best-effort and idempotent: skipped once the host trusts us,
-// so Start never re-prompts or fails.
-func (e *Engine) trustLocalCA() {
-	host := e.mdnsName() + ".local"
-	if e.hostTrustsCARE(host) {
-		return // already trusted - don't re-run or re-prompt
+func caInstallSh(path string) string {
+	if runtime.GOOS == "darwin" {
+		return "security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain " +
+			shSingleQuote(path)
 	}
-	pem, err := e.capture("docker", "compose", "exec", "-T", "caddy",
-		"cat", "/data/caddy/pki/authorities/local/root.crt")
-	if err != nil || !strings.Contains(pem, "BEGIN CERTIFICATE") {
-		return // caddy not ready or no root yet - silently skip
-	}
-	f, err := os.CreateTemp("", "care-root-*.crt")
-	if err != nil {
-		return
-	}
-	defer os.Remove(f.Name())
-	if _, err := f.WriteString(pem); err != nil {
-		f.Close()
-		return
-	}
-	f.Close()
-
-	// First try without elevation.
-	if err := e.installCA(f.Name(), false); err == nil {
-		e.logln("This machine now trusts https://" + host + "/.")
-		return
-	}
-	// Needs admin: ask, then re-run through the OS elevation prompt.
-	if e.Confirm == nil || !e.Confirm("Trust CARE on this machine?",
-		"Add the CARE security certificate to this computer so browsers open "+
-			"https://"+host+" without warnings?\n\nThis needs administrator approval.") {
-		e.logln("Skipped trusting the certificate here. Open http://" + host + "/setup to do it later.")
-		return
-	}
-	if err := e.installCA(f.Name(), true); err != nil {
-		e.logln("Could not trust the certificate (" + err.Error() +
-			"). Open http://" + host + "/setup to install it.")
-		return
-	}
-	e.logln("This machine now trusts https://" + host + "/.")
+	// Debian layout first, then RHEL.
+	q := shSingleQuote(path)
+	return "cp " + q + " /usr/local/share/ca-certificates/care-root.crt && update-ca-certificates " +
+		"|| { cp " + q + " /etc/pki/ca-trust/source/anchors/care-root.crt && update-ca-trust; }"
 }
 
-// installCA adds the cert at path to the host trust store. elevated=false uses
-// the current user's rights (may still pop a per-OS auth); elevated=true wraps
-// the command in the platform's privilege-escalation prompt.
-func (e *Engine) installCA(path string, elevated bool) error {
+func caInstallPS(path string) string {
+	return "certutil -addstore -f Root " + psSingleQuote(path)
+}
+
+func (e *Engine) installCAUnprivileged(path string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		if elevated {
-			// System keychain via the native admin prompt.
-			script := fmt.Sprintf(
-				`do shell script "security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain \"%s\"" with administrator privileges`,
-				path)
-			cmd = newCmd("osascript", "-e", script)
-		} else {
-			// login keychain = current user, no sudo.
-			cmd = newCmd("security", "add-trusted-cert", "-r", "trustRoot",
-				"-k", os.Getenv("HOME")+"/Library/Keychains/login.keychain-db", path)
-		}
+		cmd = newCmd("security", "add-trusted-cert", "-r", "trustRoot",
+			"-k", os.Getenv("HOME")+"/Library/Keychains/login.keychain-db", path)
 	case "windows":
-		if elevated {
-			// UAC prompt via RunAs; -Wait so we see the exit status.
-			ps := fmt.Sprintf(
-				`Start-Process certutil -ArgumentList '-addstore','-f','Root','%s' -Verb RunAs -Wait`,
-				path)
-			cmd = newCmd("powershell", "-NoProfile", "-Command", ps)
-		} else {
-			cmd = newCmd("certutil", "-addstore", "-f", "Root", path)
-		}
+		cmd = newCmd("certutil", "-addstore", "-f", "Root", path)
 	case "linux":
-		// Copy to the CA anchors then refresh (Debian layout first, then RHEL).
-		sh := "cp " + path + " /usr/local/share/ca-certificates/care-root.crt && update-ca-certificates " +
-			"|| { cp " + path + " /etc/pki/ca-trust/source/anchors/care-root.crt && update-ca-trust; }"
-		if elevated {
-			cmd = newCmd("pkexec", "sh", "-c", sh) // polkit GUI prompt
-		} else {
-			cmd = newCmd("sh", "-c", sh)
-		}
+		cmd = newCmd("sh", "-c", caInstallSh(path))
 	default:
 		return fmt.Errorf("unsupported OS %s", runtime.GOOS)
 	}
@@ -107,9 +48,42 @@ func (e *Engine) installCA(path string, elevated bool) error {
 	return nil
 }
 
-// hostTrustsCARE reports whether the host's own trust store already accepts the
-// live https cert - the idempotency gate for trustLocalCA (no InsecureSkipVerify
-// here on purpose: we want the real system verdict).
+// cleanup removes the staged cert; it must outlive the elevated call, so caStep
+// does not remove it itself.
+func (e *Engine) caStep(host string) (privilegedStep, func(), bool) {
+	noop := func() {}
+	if e.hostTrustsCARE(host) {
+		return privilegedStep{}, noop, false
+	}
+	pem := e.caddyRootPEM()
+	if pem == "" {
+		return privilegedStep{}, noop, false // caddy not ready or no root yet
+	}
+	f, err := os.CreateTemp("", "care-root-*.crt")
+	if err != nil {
+		return privilegedStep{}, noop, false
+	}
+	path := f.Name()
+	if _, err := f.WriteString(pem); err != nil {
+		f.Close()
+		os.Remove(path)
+		return privilegedStep{}, noop, false
+	}
+	f.Close()
+	cleanup := func() { os.Remove(path) }
+
+	if err := e.installCAUnprivileged(path); err == nil {
+		e.logln("This machine now trusts https://" + host + "/.")
+		return privilegedStep{}, cleanup, false
+	}
+	return privilegedStep{
+		what: "trust CARE's security certificate, so the browser shows no warning",
+		sh:   caInstallSh(path),
+		ps:   caInstallPS(path),
+	}, cleanup, true
+}
+
+// No InsecureSkipVerify on purpose: we want the real system verdict.
 func (e *Engine) hostTrustsCARE(host string) bool {
 	c := &http.Client{Timeout: 4 * time.Second}
 	resp, err := c.Get("https://" + host + "/ping/")
@@ -120,62 +94,194 @@ func (e *Engine) hostTrustsCARE(host string) bool {
 	return true
 }
 
-// caddyRootPEM reads Caddy's internal root CA out of the running container. Must
-// be called BEFORE `compose down -v` - the root lives in the caddy-data volume,
-// which teardown destroys. Empty string if caddy isn't up (nothing to untrust).
+const caddyRootPath = "/data/caddy/pki/authorities/local/root.crt"
+
+// Must run BEFORE `compose down -v` destroys caddy-data. Two ways in because
+// uninstall gets one attempt: exec, then cp if the container won't take an exec.
 func (e *Engine) caddyRootPEM() string {
-	pem, err := e.capture("docker", "compose", "exec", "-T", "caddy",
-		"cat", "/data/caddy/pki/authorities/local/root.crt")
-	if err != nil || !strings.Contains(pem, "BEGIN CERTIFICATE") {
+	if out, err := e.capture("docker", "compose", "exec", "-T", "caddy",
+		"cat", caddyRootPath); err == nil && strings.Contains(out, "BEGIN CERTIFICATE") {
+		return out
+	}
+	f, err := os.CreateTemp("", "care-root-*.crt")
+	if err != nil {
 		return ""
 	}
-	return pem
+	tmp := f.Name()
+	f.Close()
+	defer os.Remove(tmp)
+	if _, err := e.capture("docker", "compose", "cp", "caddy:"+caddyRootPath, tmp); err != nil {
+		return ""
+	}
+	b, err := os.ReadFile(tmp)
+	if err != nil || !strings.Contains(string(b), "BEGIN CERTIFICATE") {
+		return ""
+	}
+	return string(b)
 }
 
-// untrustLocalCA removes the CARE root from the host trust store on uninstall -
-// the mirror of trustLocalCA. Best-effort and never fatal: it deletes exactly the
-// cert we installed (matched by SHA-1 fingerprint), so it can't touch anything
-// else. pem is the root captured before teardown; empty pem = nothing to do.
+// Set by our Caddyfile's pki block, so a cert carrying it is ours by construction.
+const caCommonName = "CARE Desktop Local CA"
+
+var linuxCAAnchors = []string{
+	"/usr/local/share/ca-certificates/care-root.crt",
+	"/etc/pki/ca-trust/source/anchors/care-root.crt",
+}
+
+// Sweeps by CN as well as fingerprint: setup mints a new root each install, so
+// matching only the current one leaves every earlier root trusted forever.
 func (e *Engine) untrustLocalCA(pem string) {
 	fp := certSHA1Hex(pem)
-	if fp == "" {
-		return
+	removed, err := e.removeTrustedRoots(fp)
+	switch {
+	case err != nil:
+		e.logln("Could not remove CARE's certificate from this machine's trust store (" +
+			err.Error() + "). Remove \"" + caCommonName + "\" by hand if you want it gone.")
+	case removed:
+		e.logln("Removed CARE's certificate from this machine's trust store.")
+	case fp == "":
+		e.logln("Note: couldn't read CARE's certificate before teardown, and found none to remove. " +
+			"If a browser still trusts \"" + caCommonName + "\", remove it by hand.")
 	}
-	switch runtime.GOOS {
-	case "darwin":
-		// User keychain first (no prompt). delete-certificate takes the 40-hex SHA-1.
-		_ = newCmd("security", "delete-certificate", "-Z", fp,
-			os.Getenv("HOME")+"/Library/Keychains/login.keychain-db").Run()
-		// System keychain needs admin - only prompt if the cert is actually there.
-		if e.certInSystemKeychain(fp) {
-			if e.Confirm == nil || e.Confirm("Remove CARE certificate?",
-				"Remove the CARE security certificate from this computer's System keychain?\n\nThis needs administrator approval.") {
-				script := fmt.Sprintf(
-					`do shell script "security delete-certificate -Z %s /Library/Keychains/System.keychain" with administrator privileges`, fp)
-				_ = newCmd("osascript", "-e", script).Run()
-			}
-		}
-	case "windows":
-		ps := fmt.Sprintf(
-			`Start-Process certutil -ArgumentList '-delstore','Root','%s' -Verb RunAs -Wait`, fp)
-		_ = newCmd("powershell", "-NoProfile", "-Command", ps).Run()
-	case "linux":
-		// We wrote these exact files in installCA; remove them and refresh.
-		sh := "rm -f /usr/local/share/ca-certificates/care-root.crt /etc/pki/ca-trust/source/anchors/care-root.crt; " +
-			"update-ca-certificates 2>/dev/null; update-ca-trust 2>/dev/null; true"
-		if newCmd("sh", "-c", sh).Run() != nil && e.Confirm != nil &&
-			e.Confirm("Remove CARE certificate?", "Remove the CARE security certificate from this computer? Needs administrator approval.") {
-			_ = newCmd("pkexec", "sh", "-c", sh).Run()
-		}
-	default:
-		return
-	}
-	e.logln("Removed the CARE certificate from this machine's trust store.")
 }
 
-// certSHA1Hex returns the uppercase hex SHA-1 of the first certificate in pem -
-// the fingerprint macOS `security` and Windows `certutil` use to identify a cert.
-// Returns "" for anything that isn't a parseable certificate.
+func (e *Engine) removeTrustedRoots(fp string) (bool, error) {
+	switch runtime.GOOS {
+	case "darwin":
+		return e.removeTrustedRootsDarwin(fp)
+	case "windows":
+		return e.removeTrustedRootsWindows(fp)
+	case "linux":
+		return e.removeTrustedRootsLinux()
+	}
+	return false, nil
+}
+
+// System keychain is read first (free) so an empty store raises no admin prompt.
+func (e *Engine) removeTrustedRootsDarwin(fp string) (bool, error) {
+	login := os.Getenv("HOME") + "/Library/Keychains/login.keychain-db"
+	removed := false
+	for _, h := range darwinCARoots(login, fp) {
+		if newCmd("security", "delete-certificate", "-Z", h, login).Run() == nil {
+			removed = true
+		}
+	}
+
+	const sys = "/Library/Keychains/System.keychain"
+	hashes := darwinCARoots(sys, fp)
+	if len(hashes) == 0 {
+		return removed, nil
+	}
+	if e.Confirm == nil || !e.Confirm("Remove CARE's certificate?",
+		"Remove CARE's security certificate from this computer's System keychain?\n\nThis needs administrator approval.") {
+		return removed, nil
+	}
+	cmds := make([]string, 0, len(hashes))
+	for _, h := range hashes {
+		cmds = append(cmds, "security delete-certificate -Z "+h+" "+sys)
+	}
+	if err := e.runPrivileged(strings.Join(cmds, "; "), true); err != nil {
+		return removed, err
+	}
+	return true, nil
+}
+
+func darwinCARoots(keychain, fp string) []string {
+	var raw string
+	if b, err := newCmd("security", "find-certificate", "-a", "-Z",
+		"-c", caCommonName, keychain).Output(); err == nil {
+		raw = string(b)
+	}
+	hashes := parseSHA1Hashes(raw)
+	if fp != "" && certInKeychain(keychain, fp) {
+		hashes = appendUnique(hashes, fp)
+	}
+	return hashes
+}
+
+func parseSHA1Hashes(raw string) []string {
+	var out []string
+	for _, ln := range strings.Split(raw, "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(ln), "SHA-1 hash:"); ok {
+			out = appendUnique(out, rest)
+		}
+	}
+	return out
+}
+
+func appendUnique(list []string, h string) []string {
+	h = strings.ToUpper(strings.TrimSpace(h))
+	if h == "" {
+		return list
+	}
+	for _, existing := range list {
+		if existing == h {
+			return list
+		}
+	}
+	return append(list, h)
+}
+
+// One UAC prompt; presence checked first (readable without admin) so an uninstall
+// with nothing of ours never prompts.
+func (e *Engine) removeTrustedRootsWindows(fp string) (bool, error) {
+	if !windowsRootPresent(fp) {
+		return false, nil
+	}
+	cmds := []string{}
+	if fp != "" {
+		cmds = append(cmds, "certutil -delstore Root "+psSingleQuote(fp))
+	}
+	cmds = append(cmds, "certutil -delstore Root "+psSingleQuote(caCommonName))
+	inner := strings.Join(cmds, "; ")
+	ps := "Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-Command'," +
+		psSingleQuote(inner)
+	if err := newCmd("powershell", "-NoProfile", "-Command", ps).Run(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func windowsRootPresent(fp string) bool {
+	out, err := newCmd("certutil", "-store", "Root").Output()
+	if err != nil {
+		return fp != "" // can't tell - only bother if we actually captured a root
+	}
+	s := strings.ToUpper(string(out))
+	if strings.Contains(s, strings.ToUpper(caCommonName)) {
+		return true
+	}
+	// certutil prints fingerprints byte-spaced; compare without the spaces.
+	return fp != "" && strings.Contains(strings.ReplaceAll(s, " ", ""), strings.ToUpper(fp))
+}
+
+// File-based, so nothing accumulates and there is nothing to sweep by name.
+func (e *Engine) removeTrustedRootsLinux() (bool, error) {
+	present := false
+	for _, p := range linuxCAAnchors {
+		if fileExists(p) {
+			present = true
+		}
+	}
+	if !present {
+		return false, nil
+	}
+	sh := "rm -f " + strings.Join(linuxCAAnchors, " ") + "; " +
+		"update-ca-certificates 2>/dev/null; update-ca-trust 2>/dev/null; true"
+	if newCmd("sh", "-c", sh).Run() == nil && !fileExists(linuxCAAnchors[0]) {
+		return true, nil
+	}
+	if e.Confirm == nil || !e.Confirm("Remove CARE's certificate?",
+		"Remove CARE's security certificate from this computer?\n\nThis needs administrator approval.") {
+		return false, nil
+	}
+	if err := e.runPrivileged(sh, true); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// The fingerprint macOS `security` and Windows `certutil` both match on.
 func certSHA1Hex(pemData string) string {
 	block, _ := pem.Decode([]byte(pemData))
 	if block == nil || block.Type != "CERTIFICATE" {
@@ -188,14 +294,10 @@ func certSHA1Hex(pemData string) string {
 	return strings.ToUpper(hex.EncodeToString(sum[:]))
 }
 
-// certInSystemKeychain reports whether a cert with this SHA-1 is in the macOS
-// System keychain (reading it needs no admin - only deleting does), so we avoid a
-// pointless admin prompt when the cert was only ever added to the login keychain.
-func (e *Engine) certInSystemKeychain(fp string) bool {
-	out, err := newCmd("security", "find-certificate", "-a", "-Z",
-		"/Library/Keychains/System.keychain").Output()
+func certInKeychain(keychain, fp string) bool {
+	out, err := newCmd("security", "find-certificate", "-a", "-Z", keychain).Output()
 	if err != nil {
 		return false
 	}
-	return strings.Contains(strings.ToUpper(string(out)), fp)
+	return strings.Contains(strings.ToUpper(string(out)), strings.ToUpper(fp))
 }

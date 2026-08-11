@@ -13,7 +13,11 @@ not resolving, or the MinIO endpoint not reachable from other devices.
   - macOS: `scutil --get LocalHostName` → must be `care`. Fix: `sudo scutil --set LocalHostName care`.
   - Linux: `hostname` → must be `care`, and `systemctl status avahi-daemon` active.
   - Windows: **the server's own browser resolves `care.local` automatically** (CARE adds a `127.0.0.1 care.local` hosts entry at setup — no rename needed). For *other devices* to find it, set the network to **Private** and allow **UDP 5353** in Windows Firewall; recent Windows 11 then resolves `care.local` natively, older builds need **Apple Bonjour** or a static IP.
-- **Test from the server itself:** open `https://care.local/` on the server's own browser (works out of the box on every OS — macOS/Linux via mDNS, Windows via the hosts entry). If that works but phones don't, it's the device's mDNS / your network settings.
+- **Test from the server itself:** open `https://care.local/` on the server's own browser. On **every** OS this works via the hosts entry setup adds (`127.0.0.1 care.local`), *not* via mDNS. A machine's own resolver won't answer with the name its own in-app responder advertises. If the entry was skipped (you declined the admin prompt), add it by hand:
+  - macOS/Linux: `echo "127.0.0.1 care.local" | sudo tee -a /etc/hosts`
+  - Windows: add `127.0.0.1 care.local` to `C:\Windows\System32\drivers\etc\hosts` as Administrator
+
+  If the server works but phones don't, it's the device's mDNS / your network settings.
 - **Fallback — use the IP:** find the server's IP (`ipconfig` / `ip addr` / `ifconfig`) and open `https://<ip>/`. If you'll use the IP permanently, also set `BUCKET_EXTERNAL_ENDPOINT=https://<ip>` in `backend.env` and rebuild the frontend with `REACT_CARE_API_URL=https://<ip>` (see [configuration.md](configuration.md)). (Note: the cert is issued for `care.local`, so an IP URL shows a name-mismatch warning — prefer the name.)
 - Give the server a **DHCP reservation** in the router so its IP never changes.
 
@@ -47,9 +51,14 @@ immediately.
 
 **Cause:** the device hasn't trusted the clinic's local CA (or trusted an old one).
 
-- **Trust the cert:** open **`https://care.local/setup`**, pick the device, and follow
-  the steps (download `root.crt` → add it to the system trust store). The server
-  machine does this automatically on start; only *other* devices need it.
+- **Trust the cert:** open **`https://care.local/setup`** and pick the device. On
+  **Windows/macOS/Linux** download the **installer** and run it once. It embeds the
+  certificate and puts it in the right store (Windows: right-click → *Run with
+  PowerShell*; macOS/Linux: `sh ~/Downloads/install-cert.sh`). On phones, follow the
+  manual steps. The server machine does this automatically on start; only *other*
+  devices need it.
+- **The installer says "command not found" or won't run?** Use the manual steps on the
+  same page, and the download button for `root.crt` is still there below them.
 - **iOS is two steps:** installing the profile is **not** enough — after installing,
   go to **Settings → General → About → Certificate Trust Settings** and toggle
   **"CARE Desktop Local CA"** on. The profile install must be done in **Safari**

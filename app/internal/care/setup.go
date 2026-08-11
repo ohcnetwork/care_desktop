@@ -16,6 +16,9 @@ func (e *Engine) Setup() error {
 	if err := e.genSecret(); err != nil {
 		return err
 	}
+	if err := e.applyDomain(); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(e.backupDir(), 0o755); err != nil {
 		return err
 	}
@@ -40,7 +43,8 @@ func (e *Engine) Setup() error {
 		return err
 	}
 	e.ensureMDNS()
-	e.ensureHostsEntry() // Windows: make care.local resolve for this PC's own browser
+	// Hosts entry + cert trust wait for Start (ensureLocalAccess): one approval, and
+	// the CA doesn't exist until Caddy runs.
 	e.logln("Setup done.")
 	return nil
 }
@@ -188,9 +192,7 @@ func (e *Engine) ensureMDNS() {
 		_ = e.run(nil, "sudo", "hostnamectl", "set-hostname", name)
 		_ = e.run(nil, "sudo", "systemctl", "enable", "--now", "avahi-daemon")
 	case "windows":
-		// This PC resolves <name>.local via the hosts entry (see ensureHostsEntry);
-		// no rename needed. LAN clients use the in-app mDNS responder or their own
-		// hosts entry - or install Bonjour / a static IP for a network-wide name.
+		// This PC resolves <name>.local via the hosts entry (ensureLocalAccess).
 		e.logln("Windows: this PC uses a hosts entry for https://" + name + ".local; other devices use mDNS or a static IP.")
 	}
 }

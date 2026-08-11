@@ -26,7 +26,7 @@ value, then `care start`.
 ### Django settings module
 | Variable | Default | Meaning |
 |---|---|---|
-| `DJANGO_SETTINGS_MODULE` | `clinic_settings` | Selects the plain-HTTP clinic settings (see [architecture](architecture.md#plain-http-on-the-lan-clinic_settingspy)). **Don't change.** |
+| `DJANGO_SETTINGS_MODULE` | `clinic_settings` | Selects the clinic settings for a self-signed LAN cert (see [architecture](architecture.md#https-on-the-lan-clinic_settingspy)). **Don't change.** |
 | `PYTHONPATH` | `/settings:/app` | Lets Python find `clinic_settings.py` (mounted at `/settings`). **Don't change.** |
 
 ### Database (PostgreSQL)
@@ -147,6 +147,40 @@ CARE_FE_REF=v25.1.0
 
 ---
 
+## Clinic address
+
+The address staff type in their browser, `https://care.local` by default. Set it in the
+installer's **Clinic address** field (step 1), or with `CARE_MDNS_NAME` for the CLI.
+Enter the label only; `.local` is added for you.
+
+Change it when a second CARE clinic already runs on the same WiFi. Two installs
+advertising the same name clash over mDNS, so give one of them its own, for example
+`care.local` and `caretest.local`.
+
+`care setup` rewrites the address everywhere it appears, in one pass:
+
+| File | What changes |
+|---|---|
+| `Caddyfile` | the site address, and the cert-download referer check |
+| `backend.env` | `BUCKET_EXTERNAL_ENDPOINT`, `CSRF_TRUSTED_ORIGINS` |
+| `frontend.env` | `REACT_CARE_API_URL` |
+| `setup/index.html` | the addresses shown on the cert-trust page |
+
+The rewrite matches whatever host is currently in those files, not a fixed
+`care.local`, so renaming a second time works too. Names are lowercase letters,
+numbers and hyphens.
+
+> The frontend **bakes** its API URL at build time, so changing the address after
+> setup needs `care rebuild-frontend` (or **Save & rebuild** in the app). Devices that
+> trusted the old certificate keep working: the CA is unchanged, but they must use the
+> new address.
+
+> Two clinics on **one computer** is a different problem: they would collide on ports
+> 80/443 and on the `care-desktop` compose project name. This setting is for two
+> clinics on one **network**.
+
+---
+
 ## Engine variables
 
 Not stored in a file — set by the desktop app (from the wizard) or as environment
@@ -156,7 +190,7 @@ variables when using the CLI.
 |---|---|---|
 | `BACKUP_DIR` | installer "Backup location" | Where daily backups go. Default `~/Desktop/care-db-backups`. |
 | `CARE_ADMIN_PASSWORD` | installer "Admin password" | Password for the first `admin` user. Default `admin`. |
-| `CARE_MDNS_NAME` | fixed `care` | The mDNS hostname (the app fixes it to `care`). |
+| `CARE_MDNS_NAME` | installer "Clinic address" | The host label, without `.local`. See [Clinic address](#clinic-address). |
 | `CARE_NO_MDNS` | `1` from the GUI | Skip the engine's own hostname-rename (the GUI verifies `care.local` as a step instead). |
 | `CARE_DESKTOP_DIR` | CLI override | Point the CLI at a specific kit folder (default: current directory). |
 | `CARE_BE_DIR` / `CARE_FE_DIR` | advanced | Where the source clones live (default `<kit>/care`, `<kit>/care_fe`). |

@@ -62,6 +62,20 @@
             <span class="caret"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></span>
           </div>
           <div class="acc-body" id="checks-body">
+            <div class="field">
+              <div class="field-head">
+                <label>Clinic address</label>
+                <button class="info" data-info="info-addr" title="The address staff type in their browser">i</button>
+              </div>
+              <div class="info-box" id="info-addr" hidden>The address staff type in their browser. Change it only if another CARE clinic is already running on this WiFi, so the two names do not clash.</div>
+              <div class="pw" id="addr-wrap">
+                <input type="text" id="mdnsname" value="care" spellcheck="false" autocapitalize="none" autocomplete="off" />
+                <span class="pw-note">.local</span>
+              </div>
+              <div class="msgs">
+                <span id="addr-msg">Staff will open https://care.local</span>
+              </div>
+            </div>
             <div class="rows" id="check-rows"></div>
             <div class="acc-foot">
               <button class="btn" id="check-reqs">Check again</button>
