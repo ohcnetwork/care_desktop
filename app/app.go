@@ -303,6 +303,11 @@ func (a *App) PodmanMachineStatus() care.PodmanMachineStatus {
 // builds need. Stops and restarts the machine (drops any running containers).
 func (a *App) FixPodmanMachineMemory() error { return a.engine(nil).FixPodmanMachineMemory() }
 
+// FixPodmanMachineRootful switches the podman machine to rootful mode, so it can
+// bind the privileged ports (80/443) CARE's Caddy needs. Stops and restarts the
+// machine (drops any running containers).
+func (a *App) FixPodmanMachineRootful() error { return a.engine(nil).FixPodmanMachineRootful() }
+
 // ValidatePassword lets the wizard check the admin password live as the user types.
 // Returns "" when acceptable, otherwise a human-readable reason to show under the field.
 func (a *App) ValidatePassword(pw string) string {

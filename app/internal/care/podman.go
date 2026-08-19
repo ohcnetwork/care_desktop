@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // MinPodmanMachineMemoryMiB is the minimum we recommend for the podman machine
@@ -23,7 +24,8 @@ type PodmanMachineStatus struct {
 	OK         bool   `json:"ok"`
 	Message    string `json:"message"`
 	How        string `json:"how"`
-	Fixable    bool   `json:"fixable"` // FixPodmanMachineMemory can raise the memory in one step
+	Fixable    bool   `json:"fixable"`  // one of the Fix* methods below can repair this in one step
+	Blocking   bool   `json:"blocking"` // true: the stack is guaranteed to fail as-is (stopped/rootless); false: a risk, not a certainty (low memory - only builds are at risk)
 }
 
 // podmanMachine mirrors the fields we need from `podman machine list --format json`.
@@ -66,10 +68,35 @@ func defaultPodmanMachine(machines []podmanMachine) podmanMachine {
 	return machines[0]
 }
 
-// PodmanMachineCheck reports whether podman's VM is started and has enough
-// memory to build CARE's images without crashing mid-build. Only meaningful
-// once containerBin() has resolved to podman; a machine-less setup (Docker, or
-// native Linux podman) reports Applicable: false.
+// podmanMachineRootful reports whether the named machine (empty = the default)
+// runs rootful. ok=false means it couldn't be determined (treated as "don't
+// know" by callers, not as rootless).
+func (e *Engine) podmanMachineRootful(name string) (rootful bool, ok bool) {
+	args := []string{"machine", "inspect", "--format", "{{.Rootful}}"}
+	if name != "" {
+		args = append(args, name)
+	}
+	out, err := e.capture("podman", args...)
+	if err != nil {
+		return false, false
+	}
+	switch strings.TrimSpace(out) {
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+// PodmanMachineCheck reports whether podman's VM is started, can bind the
+// privileged ports (80/443) CARE's Caddy needs, and has enough memory to build
+// CARE's images without crashing mid-build. Only meaningful once containerBin()
+// has resolved to podman; a machine-less setup (Docker, or native Linux podman)
+// reports Applicable: false. Checked in the order a fresh install actually hits
+// them: stopped (nothing works) -> rootless (compose up fails outright on
+// `bind: permission denied` for :80/:443) -> underpowered (builds can crash).
 func (e *Engine) PodmanMachineCheck() PodmanMachineStatus {
 	if e.containerBin() != "podman" {
 		return PodmanMachineStatus{Applicable: false, OK: true, Message: "not using Podman"}
@@ -82,15 +109,26 @@ func (e *Engine) PodmanMachineCheck() PodmanMachineStatus {
 	m := defaultPodmanMachine(machines)
 	if !m.Running {
 		return PodmanMachineStatus{
-			Applicable: true, OK: false,
+			Applicable: true, OK: false, Blocking: true,
 			Message: "podman machine '" + m.Name + "' is stopped",
 			How:     "Start it: podman machine start" + machineArg(m.Name),
+		}
+	}
+	if rootful, known := e.podmanMachineRootful(m.Name); known && !rootful {
+		return PodmanMachineStatus{
+			Applicable: true, OK: false, Fixable: true, Blocking: true,
+			Message: "podman machine '" + m.Name + "' is running rootless",
+			How: "CARE's Caddy needs to bind ports 80/443, which rootless podman can't do " +
+				"(fails with 'cannot expose privileged port 80... permission denied'). " +
+				"Click Fix, or by hand: podman machine stop" + machineArg(m.Name) +
+				" && podman machine set --rootful" + machineArg(m.Name) +
+				" && podman machine start" + machineArg(m.Name),
 		}
 	}
 	mem := m.memoryMiB()
 	if mem > 0 && mem < MinPodmanMachineMemoryMiB {
 		return PodmanMachineStatus{
-			Applicable: true, OK: false, Fixable: true,
+			Applicable: true, OK: false, Fixable: true, // Blocking: false - a risk, not certain: the stack may still come up fine
 			Message: fmt.Sprintf("podman machine '%s' has only %dMiB of memory", m.Name, mem),
 			How: fmt.Sprintf("Builds (especially the frontend's Vite build) need at least %dMiB or the machine's VM can crash mid-build. "+
 				"Click Fix, or by hand: podman machine stop%s && podman machine set --memory %d%s && podman machine start%s",
@@ -100,41 +138,55 @@ func (e *Engine) PodmanMachineCheck() PodmanMachineStatus {
 	return PodmanMachineStatus{Applicable: true, OK: true, Message: fmt.Sprintf("podman machine '%s' running, %dMiB memory", m.Name, mem)}
 }
 
-// FixPodmanMachineMemory raises the default podman machine's memory to
-// MinPodmanMachineMemoryMiB. podman requires the machine to be stopped to
-// resize it, so this stops it (dropping any running containers - the caller
-// should warn first), resizes, then starts it back up.
-func (e *Engine) FixPodmanMachineMemory() error {
+// podmanMachineStopSetStart stops the default machine, runs `machine set
+// <setArgs...>`, then starts it back up - the stop/reconfigure/start dance
+// every podman machine setting change (memory, rootful, ...) needs.
+func (e *Engine) podmanMachineStopSetStart(action string, setArgs ...string) error {
 	machines, ok := e.podmanMachines()
 	if !ok {
 		return fmt.Errorf("no podman machine found")
 	}
 	m := defaultPodmanMachine(machines)
-	e.logln("Stopping podman machine '" + m.Name + "' to resize it...")
-	stopArgs := []string{"machine", "stop"}
-	if m.Name != "" {
-		stopArgs = append(stopArgs, m.Name)
-	}
-	if err := e.run(nil, "podman", stopArgs...); err != nil {
+	e.logln("Stopping podman machine '" + m.Name + "' to " + action + "...")
+	if err := e.podmanMachineCmd("stop", m.Name); err != nil {
 		return fmt.Errorf("couldn't stop podman machine '%s': %w", m.Name, err)
 	}
-	e.logln(fmt.Sprintf("Setting podman machine '%s' memory to %dMiB...", m.Name, MinPodmanMachineMemoryMiB))
-	setArgs := []string{"machine", "set", "--memory", strconv.Itoa(MinPodmanMachineMemoryMiB)}
-	if m.Name != "" {
-		setArgs = append(setArgs, m.Name)
-	}
-	if err := e.run(nil, "podman", setArgs...); err != nil {
-		return fmt.Errorf("couldn't resize podman machine '%s': %w", m.Name, err)
+	e.logln(fmt.Sprintf("%s podman machine '%s'...", strings.ToUpper(action[:1])+action[1:], m.Name))
+	if err := e.podmanMachineCmd("set", m.Name, setArgs...); err != nil {
+		return fmt.Errorf("couldn't reconfigure podman machine '%s': %w", m.Name, err)
 	}
 	e.logln("Starting podman machine '" + m.Name + "'...")
-	startArgs := []string{"machine", "start"}
-	if m.Name != "" {
-		startArgs = append(startArgs, m.Name)
-	}
-	if err := e.run(nil, "podman", startArgs...); err != nil {
+	if err := e.podmanMachineCmd("start", m.Name); err != nil {
 		return fmt.Errorf("couldn't start podman machine '%s': %w", m.Name, err)
 	}
 	return nil
+}
+
+// podmanMachineCmd runs `podman machine <verb> [setArgs...] [name]` - name goes
+// last, matching how `podman machine set --memory N <name>` etc. are invoked.
+func (e *Engine) podmanMachineCmd(verb, name string, args ...string) error {
+	full := append([]string{"machine", verb}, args...)
+	if name != "" {
+		full = append(full, name)
+	}
+	return e.run(nil, "podman", full...)
+}
+
+// FixPodmanMachineMemory raises the default podman machine's memory to
+// MinPodmanMachineMemoryMiB. podman requires the machine to be stopped to
+// resize it, so this stops it (dropping any running containers - the caller
+// should warn first), resizes, then starts it back up.
+func (e *Engine) FixPodmanMachineMemory() error {
+	return e.podmanMachineStopSetStart("resize", "--memory", strconv.Itoa(MinPodmanMachineMemoryMiB))
+}
+
+// FixPodmanMachineRootful switches the default podman machine to rootful mode,
+// so it can bind the privileged ports (80/443) CARE's Caddy needs. podman
+// requires the machine stopped to reconfigure it, so this stops it (dropping
+// any running containers - the caller should warn first), switches mode, then
+// starts it back up.
+func (e *Engine) FixPodmanMachineRootful() error {
+	return e.podmanMachineStopSetStart("switch to rootful mode on", "--rootful")
 }
 
 // machineArg renders " <name>" for commands that take an optional machine name

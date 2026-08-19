@@ -30,10 +30,17 @@ func (e *Engine) DockerCheck() DockerStatus {
 		if !e.hasCompose() {
 			return DockerStatus{OK: false, Message: label + " is running, but the Compose plugin is missing - install '" + bin + " compose' (v2)."}
 		}
+		if mach := e.PodmanMachineCheck(); mach.Applicable && !mach.OK && mach.Blocking {
+			// e.g. rootless podman: the engine itself is reachable, but the stack is
+			// guaranteed to fail later (compose can't bind :80/:443) - block now with
+			// an actionable message instead of letting the user hit a cryptic error
+			// mid-setup.
+			return DockerStatus{OK: false, Message: capitalize(mach.Message) + ". " + mach.How}
+		}
 		msg := label + " " + strings.TrimSpace(string(out))
 		if mach := e.PodmanMachineCheck(); mach.Applicable && !mach.OK {
-			// Machine's running (we got this far) but underpowered - surface the
-			// warning inline rather than blocking, since the engine itself is fine.
+			// Not blocking (e.g. low memory) - just a risk, so warn inline rather
+			// than blocking, since the engine itself is fine.
 			msg += " - warning: " + mach.Message + ". " + mach.How
 		}
 		return DockerStatus{OK: true, Message: msg}
@@ -41,10 +48,19 @@ func (e *Engine) DockerCheck() DockerStatus {
 		return DockerStatus{OK: false, Message: "No container engine found - install Docker (Docker Engine, Colima, Docker Desktop) or Podman, and start it."}
 	default:
 		if mach := e.PodmanMachineCheck(); mach.Applicable && !mach.OK && mach.Message != "" {
-			return DockerStatus{OK: false, Message: strings.ToUpper(mach.Message[:1]) + mach.Message[1:] + ". " + mach.How}
+			return DockerStatus{OK: false, Message: capitalize(mach.Message) + ". " + mach.How}
 		}
 		return DockerStatus{OK: false, Message: label + " is installed but not running - start it (Docker Desktop, Colima, Podman machine, ...)."}
 	}
+}
+
+// capitalize upper-cases the first letter, for turning a lowercase internal
+// message (e.g. "podman machine 'x' is stopped") into a sentence.
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // engineLabel is the human-facing name for a container engine binary.
