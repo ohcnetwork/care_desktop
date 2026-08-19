@@ -301,23 +301,48 @@ func (e *Engine) dc(args ...string) error {
 }
 
 // containerBin resolves and caches which container engine binary drives the
-// stack: `docker` if present, else `podman` (Podman's CLI is a drop-in for the
-// docker/docker-compose subcommands this package uses). Resolved once per
-// Engine and reused everywhere a call previously hardcoded "docker", so a
-// Podman-only machine (no `docker` on PATH) works without any other changes.
-// Falls back to "docker" when neither is found, so existing "not found"
-// error messages still name it.
+// stack: whichever of `docker`/`podman` actually answers `<bin> version`
+// (daemon reachable), docker preferred when both do. Podman's CLI is a
+// drop-in for the docker/docker-compose subcommands this package uses.
+// Resolved once per Engine and reused everywhere a call previously
+// hardcoded "docker".
+//
+// Checking reachability (not just PATH presence) matters: a machine can have
+// both CLIs installed with only one actually running (e.g. `docker` via a
+// stopped Colima, `podman` via a running podman machine) - preferring
+// whichever binary merely *exists* would wrongly report "Docker not
+// running" while a working Podman sits right there. Falls back to whichever
+// binary exists (docker first) when neither answers, so "not running"
+// error messages still name a real, installed engine.
 func (e *Engine) containerBin() string {
 	e.binOnce.Do(func() {
-		if _, err := exec.LookPath("docker"); err == nil {
+		_, dockerErr := exec.LookPath("docker")
+		_, podmanErr := exec.LookPath("podman")
+
+		if dockerErr == nil && e.engineReachable("docker") {
 			e.bin = "docker"
 			return
 		}
-		if _, err := exec.LookPath("podman"); err == nil {
+		if podmanErr == nil && e.engineReachable("podman") {
 			e.bin = "podman"
 			return
 		}
-		e.bin = "docker"
+		switch {
+		case dockerErr == nil:
+			e.bin = "docker"
+		case podmanErr == nil:
+			e.bin = "podman"
+		default:
+			e.bin = "docker"
+		}
 	})
 	return e.bin
+}
+
+// engineReachable reports whether bin's daemon actually answers (not just
+// that the binary exists on PATH).
+func (e *Engine) engineReachable(bin string) bool {
+	cmd := newCmd(bin, "version", "--format", "{{.Server.Version}}")
+	cmd.Env = e.baseEnv()
+	return cmd.Run() == nil
 }

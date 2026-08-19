@@ -1,6 +1,7 @@
 package care
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,17 @@ func fakeBinDir(t *testing.T, names ...string) string {
 		}
 	}
 	return dir
+}
+
+// putFakeBin writes a stand-in executable named name into dir that exits with
+// exitCode regardless of args - lets a test simulate an installed-but-unreachable
+// engine (e.g. `docker` present but its daemon/Colima isn't running).
+func putFakeBin(t *testing.T, dir, name string, exitCode int) {
+	t.Helper()
+	script := fmt.Sprintf("#!/bin/sh\nexit %d\n", exitCode)
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // containerBin must prefer docker when both are on PATH, fall back to podman
@@ -54,6 +66,34 @@ func TestContainerBinPrefersDockerFallsBackToPodman(t *testing.T) {
 	os.Setenv("PATH", podmanOnly)
 	if got := e.containerBin(); got != "docker" {
 		t.Fatalf("containerBin not cached: got %q after PATH change", got)
+	}
+}
+
+// containerBin must prefer a *reachable* engine over merely-present-on-PATH,
+// so `docker` on PATH but with a dead daemon (e.g. Colima stopped) doesn't
+// shadow a genuinely running `podman`. Regression test for the bug where both
+// CLIs were installed, only podman was running, and the app still reported
+// "Docker is installed but not running".
+func TestContainerBinPrefersReachableOverMerePresence(t *testing.T) {
+	orig := os.Getenv("PATH")
+	t.Cleanup(func() { os.Setenv("PATH", orig) })
+
+	dir := t.TempDir()
+	putFakeBin(t, dir, "docker", 1) // present, but its daemon isn't running
+	putFakeBin(t, dir, "podman", 0) // present and reachable
+	os.Setenv("PATH", dir)
+
+	if got := (&Engine{}).containerBin(); got != "podman" {
+		t.Fatalf("want podman (the reachable engine), got %q", got)
+	}
+
+	// Neither reachable: falls back to naming whichever binary exists, docker first.
+	dir2 := t.TempDir()
+	putFakeBin(t, dir2, "docker", 1)
+	putFakeBin(t, dir2, "podman", 1)
+	os.Setenv("PATH", dir2)
+	if got := (&Engine{}).containerBin(); got != "docker" {
+		t.Fatalf("want docker named as the fallback when neither is reachable, got %q", got)
 	}
 }
 
