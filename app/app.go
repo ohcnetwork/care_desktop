@@ -472,6 +472,21 @@ func actionFunc(e *care.Engine, action string) func() error {
 	return func() error { return errString("unknown action") }
 }
 
+// joinSuffixOnce joins base and suffix, unless base already ends with suffix.
+// Idempotent across setup retries: after a failed install, the folder the
+// wizard shows/re-picks may already be the previously-suffixed path (e.g. the
+// backup folder RunSetup created on the first attempt) - joining unconditionally
+// would then double the suffix (.../care-db-backups/care-db-backups), which is
+// exactly what caused a `statfs .../care-db-backups/care-db-backups: operation
+// not permitted` failure on retry.
+func joinSuffixOnce(base, suffix string) string {
+	base = filepath.Clean(base)
+	if filepath.Base(base) == suffix {
+		return base
+	}
+	return filepath.Join(base, suffix)
+}
+
 // RunSetup persists the wizard's choices, unpacks the kit, then runs setup+start.
 // Empty backupPassword = encryption off; rememberBackup saves it to the keychain.
 func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberBackup bool, installDir, backupDir string) error {
@@ -496,10 +511,10 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 		cfg.AdminPwHash = string(h) // so Advanced can be gated behind the admin password, offline
 	}
 	if strings.TrimSpace(installDir) != "" {
-		cfg.InstallDir = filepath.Join(strings.TrimSpace(installDir), "CARE Desktop")
+		cfg.InstallDir = joinSuffixOnce(strings.TrimSpace(installDir), "CARE Desktop")
 	}
 	if strings.TrimSpace(backupDir) != "" {
-		cfg.BackupDir = filepath.Join(strings.TrimSpace(backupDir), "care-db-backups")
+		cfg.BackupDir = joinSuffixOnce(strings.TrimSpace(backupDir), "care-db-backups")
 	}
 	if err := a.saveConfig(cfg); err != nil {
 		return err
