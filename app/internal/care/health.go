@@ -154,18 +154,19 @@ func (e *Engine) EnsurePortFree() error {
 }
 
 // caddyRunning reports whether our compose stack's caddy service is already up, so a
-// listener on :80 is ours (not a foreign conflict).
+// listener on :80 is ours (not a foreign conflict). Queries the engine's own `ps`
+// directly (not `compose ps`) by the standard compose labels both docker-compose and
+// podman-compose set - `compose ps --services --filter status=running` is docker
+// compose v2 syntax that podman-compose's CLI doesn't support at all ("unrecognized
+// arguments"), which made this silently report false under podman and produced a
+// bogus "port 80 already in use by gvproxy" on an idempotent restart of our own stack.
 func (e *Engine) caddyRunning() bool {
-	out, err := e.capture(e.containerBin(), "compose", "ps", "--services", "--filter", "status=running")
-	if err != nil {
-		return false
-	}
-	for _, s := range strings.Split(out, "\n") {
-		if strings.TrimSpace(s) == "caddy" {
-			return true
-		}
-	}
-	return false
+	out, err := e.capture(e.containerBin(), "ps",
+		"--filter", "label=com.docker.compose.project="+composeProject,
+		"--filter", "label=com.docker.compose.service=caddy",
+		"--filter", "status=running",
+		"--format", "{{.Names}}")
+	return err == nil && strings.TrimSpace(out) != ""
 }
 
 // tcpBusy reports whether something is already listening at addr (a successful
