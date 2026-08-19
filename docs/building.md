@@ -23,6 +23,11 @@ Linux desktop build deps:
 sudo apt install libgtk-3-dev libwebkit2gtk-4.0-dev build-essential
 ```
 
+Or skip all of the above with the repo's `flake.nix` (Go, Wails CLI, Node, and the
+Linux GTK/WebKit deps): `nix develop`. On macOS this still needs Xcode CLT installed
+(for cgo to link Cocoa/WebKit against the system SDK) — `nix develop` only pins `CC`/
+`SDKROOT` to it, it can't substitute for it.
+
 ---
 
 ## Layout
