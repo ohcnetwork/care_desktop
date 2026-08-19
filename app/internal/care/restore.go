@@ -270,7 +270,7 @@ rm -rf ./* ./.[!.]* ./..?* 2>/dev/null || true
 		"-v", e.backupDir()+":/backups:ro",
 		"-v", e.keysDir()+":/keys:ro",
 		e.backupImage(), "sh", "-c", script)
-	if err := e.run(nil, "docker", args...); err != nil {
+	if err := e.run(nil, e.containerBin(), args...); err != nil {
 		return fmt.Errorf("file restore failed: %w", err)
 	}
 	return nil

@@ -18,28 +18,38 @@ type DockerStatus struct {
 
 // DockerCheck is the one prerequisite the app can't bundle. Any Docker-compatible
 // engine works (Docker Engine, Colima, Podman, Rancher Desktop, OrbStack, Docker
-// Desktop) - we just need `docker` + the `docker compose` v2 plugin reachable.
+// Desktop) - we just need a `docker`/`podman` CLI + its compose v2 plugin reachable.
 func (e *Engine) DockerCheck() DockerStatus {
-	cmd := newCmd("docker", "version", "--format", "{{.Server.Version}}")
+	bin := e.containerBin()
+	label := engineLabel(bin)
+	cmd := newCmd(bin, "version", "--format", "{{.Server.Version}}")
 	cmd.Env = e.baseEnv()
 	out, err := cmd.Output()
 	switch {
 	case err == nil:
 		if !e.hasCompose() {
-			return DockerStatus{OK: false, Message: "Docker is running, but the Compose plugin is missing - install 'docker compose' (v2)."}
+			return DockerStatus{OK: false, Message: label + " is running, but the Compose plugin is missing - install '" + bin + " compose' (v2)."}
 		}
-		return DockerStatus{OK: true, Message: "Docker " + strings.TrimSpace(string(out))}
+		return DockerStatus{OK: true, Message: label + " " + strings.TrimSpace(string(out))}
 	case isNotFound(err):
-		return DockerStatus{OK: false, Message: "Docker not found - install Docker (Docker Engine, Colima, or Docker Desktop) and start it."}
+		return DockerStatus{OK: false, Message: "No container engine found - install Docker (Docker Engine, Colima, Docker Desktop) or Podman, and start it."}
 	default:
-		return DockerStatus{OK: false, Message: "Docker is installed but not running - start it (Docker Desktop, Colima, ...)."}
+		return DockerStatus{OK: false, Message: label + " is installed but not running - start it (Docker Desktop, Colima, Podman machine, ...)."}
 	}
 }
 
-// hasCompose reports whether the `docker compose` v2 plugin is available - often
+// engineLabel is the human-facing name for a container engine binary.
+func engineLabel(bin string) string {
+	if bin == "podman" {
+		return "Podman"
+	}
+	return "Docker"
+}
+
+// hasCompose reports whether the engine's compose v2 plugin is available - often
 // missing on non-Desktop installs, and the stack can't come up without it.
 func (e *Engine) hasCompose() bool {
-	cmd := newCmd("docker", "compose", "version")
+	cmd := newCmd(e.containerBin(), "compose", "version")
 	cmd.Env = e.baseEnv()
 	return cmd.Run() == nil
 }
@@ -121,7 +131,7 @@ func (e *Engine) EnsurePortFree() error {
 // caddyRunning reports whether our compose stack's caddy service is already up, so a
 // listener on :80 is ours (not a foreign conflict).
 func (e *Engine) caddyRunning() bool {
-	out, err := e.capture("docker", "compose", "ps", "--services", "--filter", "status=running")
+	out, err := e.capture(e.containerBin(), "compose", "ps", "--services", "--filter", "status=running")
 	if err != nil {
 		return false
 	}

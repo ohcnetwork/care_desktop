@@ -139,7 +139,7 @@ cache.delete(PlugConfigViewset.cache_key)`
 // plugRows returns the live plug_config rows keyed by slug — the single source of
 // truth for which apps are on.
 func (e *Engine) plugRows() (map[string]map[string]any, error) {
-	out, err := e.capture("docker", "compose", "exec", "-T", "backend",
+	out, err := e.capture(e.containerBin(), "compose", "exec", "-T", "backend",
 		"python", "manage.py", "shell", "-c", listRowsPy)
 	if err != nil {
 		return nil, fmt.Errorf("could not read the app list from CARE — is CARE running? (%w)", err)
@@ -204,7 +204,7 @@ func isJS(contentType string) bool {
 func (e *Engine) bundleReady(entry catalogEntry) (bool, string) {
 	dir := strings.Trim(entry.Bundle, "/")
 	object := fmt.Sprintf("local/%s/%s/%s", facilityBucket, dir, remoteEntryOf(entry))
-	out, err := e.capture("docker", "compose", "exec", "-T", "minio", "mc", "stat", "--json", object)
+	out, err := e.capture(e.containerBin(), "compose", "exec", "-T", "minio", "mc", "stat", "--json", object)
 	if err != nil {
 		return false, "Not installed on this computer yet. Copy the app's build into " +
 			facilityBucket + "/" + dir + " — see apps.json for the command."

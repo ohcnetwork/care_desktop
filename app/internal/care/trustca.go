@@ -99,7 +99,7 @@ const caddyRootPath = "/data/caddy/pki/authorities/local/root.crt"
 // Must run BEFORE `compose down -v` destroys caddy-data. Two ways in because
 // uninstall gets one attempt: exec, then cp if the container won't take an exec.
 func (e *Engine) caddyRootPEM() string {
-	if out, err := e.capture("docker", "compose", "exec", "-T", "caddy",
+	if out, err := e.capture(e.containerBin(), "compose", "exec", "-T", "caddy",
 		"cat", caddyRootPath); err == nil && strings.Contains(out, "BEGIN CERTIFICATE") {
 		return out
 	}
@@ -110,7 +110,7 @@ func (e *Engine) caddyRootPEM() string {
 	tmp := f.Name()
 	f.Close()
 	defer os.Remove(tmp)
-	if _, err := e.capture("docker", "compose", "cp", "caddy:"+caddyRootPath, tmp); err != nil {
+	if _, err := e.capture(e.containerBin(), "compose", "cp", "caddy:"+caddyRootPath, tmp); err != nil {
 		return ""
 	}
 	b, err := os.ReadFile(tmp)

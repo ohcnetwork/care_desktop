@@ -29,6 +29,9 @@ type Engine struct {
 
 	versions map[string]string // parsed versions.env (lazy)
 	once     sync.Once
+
+	bin     string // resolved container engine binary: "docker" or "podman" (lazy)
+	binOnce sync.Once
 }
 
 func (e *Engine) logln(s string) {
@@ -291,8 +294,30 @@ func (e *Engine) capture(name string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
-// dc runs `docker compose <args>` (streamed). Project name comes from the
+// dc runs `<engine> compose <args>` (streamed). Project name comes from the
 // compose `name:` key - we never pass -v, so volumes/data always survive.
 func (e *Engine) dc(args ...string) error {
-	return e.run(nil, "docker", append([]string{"compose"}, args...)...)
+	return e.run(nil, e.containerBin(), append([]string{"compose"}, args...)...)
+}
+
+// containerBin resolves and caches which container engine binary drives the
+// stack: `docker` if present, else `podman` (Podman's CLI is a drop-in for the
+// docker/docker-compose subcommands this package uses). Resolved once per
+// Engine and reused everywhere a call previously hardcoded "docker", so a
+// Podman-only machine (no `docker` on PATH) works without any other changes.
+// Falls back to "docker" when neither is found, so existing "not found"
+// error messages still name it.
+func (e *Engine) containerBin() string {
+	e.binOnce.Do(func() {
+		if _, err := exec.LookPath("docker"); err == nil {
+			e.bin = "docker"
+			return
+		}
+		if _, err := exec.LookPath("podman"); err == nil {
+			e.bin = "podman"
+			return
+		}
+		e.bin = "docker"
+	})
+	return e.bin
 }

@@ -95,7 +95,7 @@ func (e *Engine) buildBackend() error {
 		args = append(args, "--build-arg", "ADDITIONAL_PLUGS="+plugs)
 	}
 	args = append(args, e.beDir())
-	return e.run(nil, "docker", args...)
+	return e.run(nil, e.containerBin(), args...)
 }
 
 func (e *Engine) ensureBackendImage() error {
@@ -110,7 +110,7 @@ func (e *Engine) ensureBackendImage() error {
 func (e *Engine) buildBackup() error {
 	e.logln("Building the backup image (" + e.backupImage() + ")...")
 	df := filepath.Join(e.Kit, "backup.Dockerfile")
-	return e.run(nil, "docker", "build", "-f", df,
+	return e.run(nil, e.containerBin(), "build", "-f", df,
 		"--build-arg", "POSTGRES_IMAGE="+e.postgresImage(),
 		"-t", e.backupImage(), e.Kit)
 }
@@ -126,7 +126,7 @@ func (e *Engine) ensureBackupImage() error {
 func (e *Engine) buildCaddy() error {
 	e.logln("Building the Caddy + WAF image (" + e.wafCaddyImage() + ")... (compiles Caddy; a few minutes)")
 	df := filepath.Join(e.Kit, "caddy.Dockerfile")
-	return e.run(nil, "docker", "build", "-f", df,
+	return e.run(nil, e.containerBin(), "build", "-f", df,
 		"--build-arg", "CADDY_IMAGE="+e.caddyImage(),
 		"-t", e.wafCaddyImage(), e.Kit)
 }
@@ -151,7 +151,7 @@ func (e *Engine) buildFrontend() error {
 		return err
 	}
 	e.logln("Building the frontend image (" + e.frontendImage() + ")... (a few minutes)")
-	return e.run(nil, "docker", "build", "-t", e.frontendImage(), e.feDir())
+	return e.run(nil, e.containerBin(), "build", "-t", e.frontendImage(), e.feDir())
 }
 
 func (e *Engine) ensureFrontendImage() error {
@@ -162,7 +162,7 @@ func (e *Engine) ensureFrontendImage() error {
 }
 
 func (e *Engine) imageExists(tag string) bool {
-	cmd := newCmd("docker", "image", "inspect", tag)
+	cmd := newCmd(e.containerBin(), "image", "inspect", tag)
 	cmd.Env = e.baseEnv()
 	return cmd.Run() == nil
 }

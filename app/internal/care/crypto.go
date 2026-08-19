@@ -78,7 +78,7 @@ openssl req -x509 -newkey rsa:4096 -sha256 -days 36500 \
   -keyout /keys/` + e.encKeyName() + ` -out /keys/backup-cert.pem \
   -subj "/CN=care-backup" -passout env:PASS
 chmod 600 /keys/` + e.encKeyName() + ``
-	if err := e.run([]string{"PASS=" + passphrase}, "docker", "run", "--rm",
+	if err := e.run([]string{"PASS=" + passphrase}, e.containerBin(), "run", "--rm",
 		"-e", "PASS",
 		"-v", e.keysDir()+":/keys",
 		e.backupImage(), "sh", "-c", script); err != nil {
@@ -97,7 +97,7 @@ func (e *Engine) keyUnlocks(passphrase string) bool {
 	if !fileExists(e.encKeyPath()) {
 		return false
 	}
-	cmd := newCmd("docker", "run", "--rm",
+	cmd := newCmd(e.containerBin(), "run", "--rm",
 		"-e", "PASS",
 		"-v", e.keysDir()+":/keys:ro",
 		e.backupImage(), "sh", "-c",

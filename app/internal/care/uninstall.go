@@ -93,7 +93,7 @@ func (e *Engine) uninstallImages() []string {
 
 // removeImage deletes one image quietly, ignoring "not found" / "still in use".
 func (e *Engine) removeImage(tag string) {
-	cmd := newCmd("docker", "image", "rm", tag)
+	cmd := newCmd(e.containerBin(), "image", "rm", tag)
 	cmd.Env = e.baseEnv()
 	cmd.Dir = e.workdir()
 	if cmd.Run() != nil {
@@ -110,20 +110,22 @@ func (e *Engine) TeardownProject() { e.forceRemoveProject() }
 
 // forceRemoveProject removes any containers, then volumes, then the network still
 // carrying our compose project label - the backstop for when `compose down` didn't
-// reach them. Talks to docker directly (no compose file / no kit dir needed), so it
-// works even after a broken or partial install. Best-effort throughout.
+// reach them. Talks to the container engine directly (no compose file / no kit dir
+// needed), so it works even after a broken or partial install. Best-effort throughout.
+// The label itself is docker-compose's; podman compose sets the same label for
+// docker-compatibility, so this matches under Podman too.
 func (e *Engine) forceRemoveProject() {
 	label := "label=com.docker.compose.project=" + composeProject
 
-	if ids := e.captureLines("docker", "ps", "-aq", "--filter", label); len(ids) > 0 {
+	if ids := e.captureLines(e.containerBin(), "ps", "-aq", "--filter", label); len(ids) > 0 {
 		e.logln("Force-removing leftover containers...")
-		_ = e.run(nil, "docker", append([]string{"rm", "-f"}, ids...)...)
+		_ = e.run(nil, e.containerBin(), append([]string{"rm", "-f"}, ids...)...)
 	}
-	if vols := e.captureLines("docker", "volume", "ls", "-q", "--filter", label); len(vols) > 0 {
-		_ = e.run(nil, "docker", append([]string{"volume", "rm", "-f"}, vols...)...)
+	if vols := e.captureLines(e.containerBin(), "volume", "ls", "-q", "--filter", label); len(vols) > 0 {
+		_ = e.run(nil, e.containerBin(), append([]string{"volume", "rm", "-f"}, vols...)...)
 	}
-	if nets := e.captureLines("docker", "network", "ls", "-q", "--filter", label); len(nets) > 0 {
-		_ = e.run(nil, "docker", append([]string{"network", "rm"}, nets...)...)
+	if nets := e.captureLines(e.containerBin(), "network", "ls", "-q", "--filter", label); len(nets) > 0 {
+		_ = e.run(nil, e.containerBin(), append([]string{"network", "rm"}, nets...)...)
 	}
 }
 

@@ -101,7 +101,7 @@ func (e *Engine) RebuildFrontend() error {
 
 // Status returns `docker compose ps` as "<service> <state>" lines.
 func (e *Engine) Status() (string, error) {
-	return e.capture("docker", "compose", "ps", "--format", "{{.Service}} {{.State}}")
+	return e.capture(e.containerBin(), "compose", "ps", "--format", "{{.Service}} {{.State}}")
 }
 
 // BackupNow writes an immediate DB dump (encrypted -> .enc when encryption is on).
@@ -150,7 +150,7 @@ func (e *Engine) migrate() error {
 // normal case - we report it plainly. Output is captured (not streamed) so the
 // raw "CommandError ... exit status 1" never leaks into the log.
 func (e *Engine) createAdmin() {
-	cmd := newCmd("docker", "compose", "exec", "-T",
+	cmd := newCmd(e.containerBin(), "compose", "exec", "-T",
 		"-e", "DJANGO_SUPERUSER_PASSWORD="+e.adminPassword(),
 		"backend", "python", "manage.py", "createsuperuser", "--noinput",
 		"--username", "admin", "--email", "admin@care.local")

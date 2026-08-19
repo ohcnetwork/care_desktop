@@ -8,6 +8,55 @@ import (
 	"testing"
 )
 
+// fakeBinDir creates a directory on PATH containing no-op executable stand-ins
+// for the given names, so exec.LookPath finds them without needing the real
+// tool installed.
+func fakeBinDir(t *testing.T, names ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// containerBin must prefer docker when both are on PATH, fall back to podman
+// when docker is absent, and resolve once (cached) per Engine.
+func TestContainerBinPrefersDockerFallsBackToPodman(t *testing.T) {
+	orig := os.Getenv("PATH")
+	t.Cleanup(func() { os.Setenv("PATH", orig) })
+
+	both := fakeBinDir(t, "docker", "podman")
+	os.Setenv("PATH", both)
+	if got := (&Engine{}).containerBin(); got != "docker" {
+		t.Fatalf("want docker preferred, got %q", got)
+	}
+
+	podmanOnly := fakeBinDir(t, "podman")
+	os.Setenv("PATH", podmanOnly)
+	if got := (&Engine{}).containerBin(); got != "podman" {
+		t.Fatalf("want podman fallback, got %q", got)
+	}
+
+	os.Setenv("PATH", fakeBinDir(t))
+	if got := (&Engine{}).containerBin(); got != "docker" {
+		t.Fatalf("want docker as final fallback when neither found, got %q", got)
+	}
+
+	// cached: switching PATH after first resolution must not change the result.
+	e := &Engine{}
+	os.Setenv("PATH", both)
+	if got := e.containerBin(); got != "docker" {
+		t.Fatalf("initial resolution: got %q", got)
+	}
+	os.Setenv("PATH", podmanOnly)
+	if got := e.containerBin(); got != "docker" {
+		t.Fatalf("containerBin not cached: got %q after PATH change", got)
+	}
+}
+
 // genSecret must replace the placeholder with a real, long key - exactly once.
 func TestGenSecret(t *testing.T) {
 	dir := t.TempDir()
