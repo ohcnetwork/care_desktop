@@ -291,6 +291,18 @@ func (a *App) NetworkStatus() care.NetworkStatus { return a.engine(nil).NetworkC
 // FixNetwork sets the network Private and opens the clinic's ports (elevated).
 func (a *App) FixNetwork() error { return a.engine(nil).FixNetwork() }
 
+// PodmanMachineStatus flags a stopped or underpowered podman machine VM (macOS/
+// Windows only) - a common cause of builds crashing outright rather than failing
+// cleanly. Applicable is false when not using podman, or on native Linux podman
+// (no VM), and the wizard hides the row in that case.
+func (a *App) PodmanMachineStatus() care.PodmanMachineStatus {
+	return a.engine(nil).PodmanMachineCheck()
+}
+
+// FixPodmanMachineMemory raises the podman machine's memory to the minimum CARE's
+// builds need. Stops and restarts the machine (drops any running containers).
+func (a *App) FixPodmanMachineMemory() error { return a.engine(nil).FixPodmanMachineMemory() }
+
 // ValidatePassword lets the wizard check the admin password live as the user types.
 // Returns "" when acceptable, otherwise a human-readable reason to show under the field.
 func (a *App) ValidatePassword(pw string) string {

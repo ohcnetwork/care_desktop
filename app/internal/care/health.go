@@ -30,10 +30,19 @@ func (e *Engine) DockerCheck() DockerStatus {
 		if !e.hasCompose() {
 			return DockerStatus{OK: false, Message: label + " is running, but the Compose plugin is missing - install '" + bin + " compose' (v2)."}
 		}
-		return DockerStatus{OK: true, Message: label + " " + strings.TrimSpace(string(out))}
+		msg := label + " " + strings.TrimSpace(string(out))
+		if mach := e.PodmanMachineCheck(); mach.Applicable && !mach.OK {
+			// Machine's running (we got this far) but underpowered - surface the
+			// warning inline rather than blocking, since the engine itself is fine.
+			msg += " - warning: " + mach.Message + ". " + mach.How
+		}
+		return DockerStatus{OK: true, Message: msg}
 	case isNotFound(err):
 		return DockerStatus{OK: false, Message: "No container engine found - install Docker (Docker Engine, Colima, Docker Desktop) or Podman, and start it."}
 	default:
+		if mach := e.PodmanMachineCheck(); mach.Applicable && !mach.OK && mach.Message != "" {
+			return DockerStatus{OK: false, Message: strings.ToUpper(mach.Message[:1]) + mach.Message[1:] + ". " + mach.How}
+		}
 		return DockerStatus{OK: false, Message: label + " is installed but not running - start it (Docker Desktop, Colima, Podman machine, ...)."}
 	}
 }
