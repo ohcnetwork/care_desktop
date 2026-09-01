@@ -83,9 +83,11 @@ Usually already allowed once the network is Private — add this only if devices
 
 ## 3. Get the app
 
-1. Download `CARE-Desktop-windows.zip` from the project's **GitHub Releases** page.
-2. Unzip it. (Windows SmartScreen may warn about an unsigned app — **More info → Run anyway**.)
-3. Run **CARE Desktop.exe**.
+1. Download `CARE-Desktop-<version>-windows-amd64-setup.exe` from the project's **GitHub Releases** page.
+2. Run it. (SmartScreen may warn about an unsigned app — **More info → Run anyway**.) The
+   installer adds a Start-menu entry and an uninstaller, and installs the WebView2 runtime
+   if this PC doesn't already have it.
+3. Launch **CARE Desktop** from the Start menu.
 
 ---
 

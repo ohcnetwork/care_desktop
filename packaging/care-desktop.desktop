@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=CARE Desktop
+Comment=Self-contained, offline CARE for a small clinic
+Exec=care-desktop
+Icon=care-desktop
+Terminal=false
+Categories=Science;MedicalSoftware;

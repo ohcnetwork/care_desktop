@@ -16,10 +16,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-latest, platform: "darwin/universal", name: macos }
-          - { os: ubuntu-22.04, platform: "linux/amd64", name: linux }
-          - { os: windows-latest, platform: "windows/amd64", name: windows }
+          - { os: macos-latest,   platform: "darwin/universal", name: macos,   extra: "" }
+          - { os: ubuntu-22.04,   platform: "linux/amd64",      name: linux,   extra: "" }
+          - { os: windows-latest, platform: "windows/amd64",    name: windows, extra: "-nsis" }
     runs-on: ${{ matrix.os }}
+    # Signing is opt-in: absent secrets (fork PRs, untagged runs) fall back to ad-hoc.
+    env:
+      SIGN_MACOS: ${{ secrets.MACOS_CERT_P12 != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -31,34 +34,198 @@ jobs:
         with:
           node-version: 20
 
+      # NSIS writes the version as X.X.X.X, so it has to be plain numbers — a
+      # workflow_dispatch run has no tag and gets 0.0.0 rather than a branch name.
+      - name: Resolve version
+        id: v
+        shell: bash
+        run: |
+          case "$GITHUB_REF_NAME" in
+            v[0-9]*) version="${GITHUB_REF_NAME#v}" ;;
+            *)       version="0.0.0" ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # wails.json is the only place the version reaches both Info.plist and the
+      # NSIS installer, so stamp the tag in before building.
+      - name: Stamp version
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs"), p = "app/wails.json";
+            const j = JSON.parse(fs.readFileSync(p, "utf8"));
+            j.info.productVersion = process.argv[1];
+            fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
+          ' "${{ steps.v.outputs.version }}"
+
       - name: Install Linux build deps
-        if: matrix.os == 'ubuntu-22.04'
+        if: matrix.name == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      # wails only warns and exits 0 when makensis is absent, so without this a
+      # missing NSIS would produce a green build carrying no installer.
+      - name: Install NSIS
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis -y --no-progress
+            "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append
+          }
 
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
       - name: Build
         working-directory: app
-        run: wails build -platform ${{ matrix.platform }} -clean
+        run: wails build -platform ${{ matrix.platform }} -clean ${{ matrix.extra }}
 
-      - name: Package artifact
-        working-directory: app/build/bin
-        shell: bash
+      - name: Import signing certificate
+        if: matrix.name == 'macos' && env.SIGN_MACOS == 'true'
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
         run: |
-          case "${{ matrix.name }}" in
-            macos)   zip -ry "CARE-Desktop-macos.zip" *.app ;;
-            windows) 7z a "CARE-Desktop-windows.zip" *.exe ;;
-            linux)   tar -czf "CARE-Desktop-linux.tar.gz" "CARE Desktop" ;;
-          esac
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_pw=$(uuidgen)
+          security create-keychain -p "$keychain_pw" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_pw" "$keychain"
+
+          printf '%s' "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+          # Without this codesign blocks on a UI prompt no one can answer, and the
+          # job hangs until it times out.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$keychain_pw" "$keychain" > /dev/null
+
+          # The identity reads as invalid until its keychain is in the search list —
+          # trust can't chain to Apple's root otherwise.
+          security list-keychains -d user -s "$keychain" \
+            $(security list-keychains -d user | tr -d '"')
+
+          security find-identity -v -p codesigning "$keychain"
+          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Package macOS .dmg
+        if: matrix.name == 'macos'
+        shell: bash
+        working-directory: app/build/bin
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          NOTARY_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.APPSTORE_ISSUER_ID }}
+        run: |
+          # wails names the bundle from wails.json "name" (care-desktop), but this is
+          # the one name users see when they drag it to Applications.
+          app=$(ls -d *.app | head -1)
+          if [ "$app" != "CARE Desktop.app" ]; then
+            mv "$app" "CARE Desktop.app"
+            app="CARE Desktop.app"
+          fi
+          dmg="CARE-Desktop-$VERSION-macos.dmg"
+
+          if [ "$SIGN_MACOS" != "true" ]; then
+            # Ad-hoc: Apple Silicon refuses to launch a wholly unsigned bundle. Users
+            # still get the unidentified-developer warning.
+            codesign --force --sign - "$app"
+          else
+            notary_key="$RUNNER_TEMP/notary.p8"
+            printf '%s' "$NOTARY_KEY" > "$notary_key"
+            # 2h, not minutes: observed turnaround on this account has run to
+            # several hours, well past Apple's nominal 15 minutes.
+            notary=(--key "$notary_key" --key-id "$NOTARY_KEY_ID"
+                    --issuer "$NOTARY_ISSUER" --timeout 2h)
+
+            # --options runtime is what notarization requires; the bundle has no
+            # nested code, so there is nothing to sign inside-out.
+            codesign --force --timestamp --options runtime \
+              --keychain "$SIGNING_KEYCHAIN" --sign "$SIGN_IDENTITY" "$app"
+            codesign --verify --strict "$app"
+
+            ditto -c -k --keepParent "$app" notarize.zip
+            xcrun notarytool submit notarize.zip "${notary[@]}" --wait
+            rm -f notarize.zip
+            xcrun stapler staple "$app"
+          fi
+
+          mkdir staging
+          cp -R "$app" staging/
+          ln -s /Applications staging/Applications
+          hdiutil create -volname "CARE Desktop" -srcfolder staging -ov -format UDZO "$dmg"
+          rm -rf staging
+
+          if [ "$SIGN_MACOS" = "true" ]; then
+            codesign --force --timestamp \
+              --keychain "$SIGNING_KEYCHAIN" --sign "$SIGN_IDENTITY" "$dmg"
+            xcrun notarytool submit "$dmg" "${notary[@]}" --wait
+            xcrun stapler staple "$dmg"
+            rm -f "$RUNNER_TEMP/notary.p8"
+
+            # notarytool exits 0 even when it gives up on a network drop or timeout,
+            # so prove the ticket is attached rather than trusting the exit code.
+            xcrun stapler validate "$dmg"
+            xcrun stapler validate "$app"
+            spctl -a -vvv -t open --context context:primary-signature "$dmg"
+          fi
+
+      - name: Package Windows installer
+        if: matrix.name == 'windows'
+        shell: bash
+        working-directory: app/build/bin
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          installer=$(ls *installer.exe 2>/dev/null | head -1)
+          if [ -z "$installer" ]; then
+            echo "::error::wails produced no NSIS installer — is makensis on PATH?"
+            exit 1
+          fi
+          mv "$installer" "CARE-Desktop-$VERSION-windows-amd64-setup.exe"
+
+      - name: Package Linux .deb
+        if: matrix.name == 'linux'
+        shell: bash
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          # wails names the binary from outputfilename ("CARE Desktop"); dpkg wants a
+          # path-friendly one.
+          mv "$(find app/build/bin -maxdepth 1 -type f | head -1)" app/build/bin/care-desktop
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.41.3
+          nfpm package --config packaging/nfpm.yaml --packager deb --target app/build/bin/
+
+      - name: Remove signing keychain
+        if: always() && matrix.name == 'macos' && env.SIGN_MACOS == 'true'
+        run: security delete-keychain "${SIGNING_KEYCHAIN:-}" 2>/dev/null || true
+
+      # No tag means no release to attach to, so keep the installers as workflow
+      # artifacts — lets packaging changes be tested without cutting a tag.
+      - name: Upload artifacts (untagged run)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: care-desktop-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            app/build/bin/*.dmg
+            app/build/bin/*-setup.exe
+            app/build/bin/*.deb
 
       - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           draft: true
           name: "CARE Desktop ${{ github.ref_name }}"
           files: |
-            app/build/bin/CARE-Desktop-*.zip
-            app/build/bin/CARE-Desktop-*.tar.gz
+            app/build/bin/*.dmg
+            app/build/bin/*-setup.exe
+            app/build/bin/*.deb

@@ -1,0 +1,32 @@
+# Debian package for CARE Desktop. From the repo root, after a linux `wails build`:
+#   VERSION=0.1.0 nfpm package --config packaging/nfpm.yaml --packager deb
+name: care-desktop
+arch: amd64
+platform: linux
+version: ${VERSION}
+section: utils
+priority: optional
+# TODO: dpkg convention is "Name <email>" — add a contact address.
+maintainer: Open Healthcare Network
+vendor: Open Healthcare Network
+homepage: https://github.com/ohcnetwork/care_desktop
+description: |
+  Self-contained, offline CARE for a small clinic.
+  Runs the CARE backend, frontend, database and file storage on one computer,
+  reachable at http://care.local by every device on the local WiFi.
+
+# Built against WebKitGTK 4.0 on Ubuntu 22.04. Declared so apt refuses the install
+# outright rather than letting the app fail to open a window at launch.
+depends:
+  - libgtk-3-0
+  - libwebkit2gtk-4.0-37
+
+contents:
+  - src: app/build/bin/care-desktop
+    dst: /usr/bin/care-desktop
+  - src: packaging/care-desktop.desktop
+    dst: /usr/share/applications/care-desktop.desktop
+  # pixmaps rather than hicolor/<size>: the source icon is 1024x1024, which is not
+  # one of the hicolor buckets.
+  - src: app/build/appicon.png
+    dst: /usr/share/pixmaps/care-desktop.png

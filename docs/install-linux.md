@@ -15,7 +15,7 @@ the clinic. Other devices install nothing; they open `http://care.local`.
 | **Docker Engine** + **docker compose v2**, running | runs the whole stack | [docs.docker.com/engine/install](https://docs.docker.com/engine/install/) — install Docker Engine + the Compose plugin |
 | **git** | downloads + builds CARE once | `sudo apt install git` / `sudo dnf install git` |
 | **Avahi** | advertises `care.local` | `sudo apt install avahi-daemon` / `sudo dnf install avahi` (the CLI/app sets this up too) |
-| **WebKitGTK** (only for the desktop app) | renders the app window | `sudo apt install libgtk-3-0 libwebkit2gtk-4.0-37` |
+| **WebKitGTK** (only for the desktop app) | renders the app window | the `.deb` in step 3 pulls it in; otherwise `sudo apt install libgtk-3-0 libwebkit2gtk-4.0-37` |
 
 > Add your user to the `docker` group so you don't need `sudo` for Docker:
 > `sudo usermod -aG docker $USER` then log out/in.
@@ -48,9 +48,16 @@ hostname        # should print: care
 ## 3. Get the app
 
 **Option A — Desktop app:**
-1. Download `CARE-Desktop-linux.tar.gz` from the project's **GitHub Releases** page.
-2. Extract it: `tar -xzf CARE-Desktop-linux.tar.gz`
-3. Run the **CARE Desktop** binary (`./CARE\ Clinic`). Mark it executable if needed: `chmod +x`.
+1. Download `care-desktop_<version>_amd64.deb` from the project's **GitHub Releases** page.
+2. Install it — apt pulls in GTK and WebKitGTK if they're missing:
+   ```bash
+   sudo apt install ./care-desktop_<version>_amd64.deb
+   ```
+3. Launch **CARE Desktop** from the applications menu, or run `care-desktop`.
+
+> The `.deb` is built on Ubuntu 22.04 against WebKitGTK **4.0**. On a distribution that
+> ships only WebKitGTK 4.1 (Ubuntu 24.04+), apt refuses it — build from source there
+> ([building.md](building.md)).
 
 **Option B — Command line:** build the `care` CLI ([building.md](building.md)) or run
 it directly, then see [cli.md](cli.md):

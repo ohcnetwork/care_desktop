@@ -7,7 +7,7 @@ import (
 	"runtime"
 )
 
-const autostartLabel = "network.ohc.care.desktop"
+const autostartLabel = "ohc.care-desktop"
 const autostartName = "CARE Desktop"
 
 func (a *App) macPlistPath() string {

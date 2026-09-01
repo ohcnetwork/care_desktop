@@ -90,19 +90,41 @@ go vet ./...        # static checks
 
 ## Releases (CI)
 
-`.github/workflows/release.yml` builds all three OSes on a `v*` tag:
+`.github/workflows/release.yml` builds one installer per OS on a `v*` tag:
 
 1. Push a tag: `git tag v0.1.0 && git push --tags`.
-2. The matrix (macOS / Ubuntu / Windows) runs `wails build`, zips/tars the artifact,
-   and attaches it to a **draft GitHub Release**.
-3. Review the draft and publish.
+2. The tag's version (minus the `v`) is stamped into `app/wails.json`, so the `.app`
+   bundle, the NSIS installer and the `.deb` all report the same version.
+3. The matrix (macOS / Ubuntu 22.04 / Windows) builds, packages, and attaches the
+   installers to a **draft GitHub Release**.
+4. Review the draft and publish.
 
-Artifacts: `CARE-Desktop-macos.zip` (`.app`), `CARE-Desktop-windows.zip` (`.exe`),
-`CARE-Desktop-linux.tar.gz` (binary).
+| OS | Artifact | How it installs |
+|---|---|---|
+| macOS | `CARE-Desktop-<version>-macos.dmg` | universal (Intel + Apple Silicon); drag onto Applications |
+| Windows | `CARE-Desktop-<version>-windows-amd64-setup.exe` | NSIS; Start-menu entry, uninstaller, WebView2 bootstrap |
+| Linux | `care-desktop_<version>_amd64.deb` | `sudo apt install ./care-desktop_*.deb` |
+
+The macOS and Windows packaging is a few lines of `hdiutil` / `wails build -nsis` in
+the workflow. The `.deb` is built by [nfpm](https://nfpm.goreleaser.com) from
+[`packaging/nfpm.yaml`](../packaging/nfpm.yaml) plus
+[`packaging/care-desktop.desktop`](../packaging/care-desktop.desktop) — edit those to
+change the installed paths, menu entry, or declared dependencies.
+
+Running the workflow manually (`workflow_dispatch`) builds the same three installers
+at version `0.0.0` and uploads them as **workflow artifacts** instead of creating a
+release — use it to test packaging changes without cutting a tag.
 
 > **Signing/notarization** isn't set up yet, so users see an "unsigned app" warning
 > on first open (right-click → Open on macOS; "More info → Run anyway" on Windows).
-> Add Apple/Windows signing secrets to the workflow to remove it.
+> The macOS build is ad-hoc signed (`codesign --sign -`) only because Apple Silicon
+> refuses to launch a wholly unsigned bundle. Add Apple/Windows signing secrets to
+> the workflow to remove the warnings.
+
+> The `.deb` links against WebKitGTK **4.0** because it's built on Ubuntu 22.04, so
+> it won't install on Ubuntu 24.04+ (WebKitGTK 4.1 only). Moving that leg to
+> `ubuntu-24.04` with `-tags webkit2_41` swaps which side is covered; shipping both
+> needs a second Linux matrix entry.
 
 ---
 

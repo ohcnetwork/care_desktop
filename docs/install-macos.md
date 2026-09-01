@@ -47,9 +47,11 @@ scutil --get LocalHostName     # should print: care
 ## 3. Get the app
 
 **Option A — Desktop app (recommended):**
-1. Download `CARE-Desktop-macos.zip` from the project's **GitHub Releases** page.
-2. Unzip it and move **CARE Desktop.app** to **Applications**.
+1. Download `CARE-Desktop-<version>-macos.dmg` from the project's **GitHub Releases** page.
+2. Open the `.dmg` and drag **CARE Desktop** onto the **Applications** shortcut beside it.
 3. First open: right-click → **Open** (to bypass the unsigned-app warning), then **Open** again.
+
+> The `.dmg` is universal — one download for both Apple Silicon and Intel.
 
 **Option B — Command line** (for developers): see [building.md](building.md) to build
 the `care` CLI, then jump to [cli.md](cli.md).

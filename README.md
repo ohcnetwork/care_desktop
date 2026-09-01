@@ -54,6 +54,7 @@ cd care-desktop && care setup && care start
 | `clinic_settings.py` | plain-HTTP Django settings for the LAN |
 | `Caddyfile` | the reverse proxy (one address for app + API) |
 | `minio/`, `scripts/` | MinIO bucket setup + the daily backup loop (run inside containers) |
+| `packaging/` | the `.deb` recipe + Linux desktop entry ([building.md](docs/building.md)) |
 | `docs/` | all documentation |
 
 The repo-root files are the **single source of truth**; the app embeds them at build
