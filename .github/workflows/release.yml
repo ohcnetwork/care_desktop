@@ -139,10 +139,32 @@ jobs:
           else
             notary_key="$RUNNER_TEMP/notary.p8"
             printf '%s' "$NOTARY_KEY" > "$notary_key"
-            # 2h, not minutes: observed turnaround on this account has run to
-            # several hours, well past Apple's nominal 15 minutes.
             notary=(--key "$notary_key" --key-id "$NOTARY_KEY_ID"
-                    --issuer "$NOTARY_ISSUER" --timeout 2h)
+                    --issuer "$NOTARY_ISSUER")
+
+            # Submit, then poll separately. `submit --wait` dies on a single dropped
+            # packet, and Apple's queue has run to hours on this account, so the poll
+            # window is long enough that a blip is likely. Retry the poll, then read
+            # the status back explicitly rather than trusting any exit code.
+            field() { python3 -c 'import sys,json; print(json.load(sys.stdin)["'"$1"'"])'; }
+            notarize() {
+              local id status
+              id=$(xcrun notarytool submit "$1" "${notary[@]}" \
+                     --no-wait --output-format json | field id)
+              [ -n "$id" ] || { echo "::error::no submission id returned"; exit 1; }
+              echo "submitted $1 -> $id"
+              for attempt in 1 2 3 4 5 6; do
+                xcrun notarytool wait "$id" "${notary[@]}" --timeout 2h && break
+                echo "poll attempt $attempt dropped, retrying"
+              done
+              status=$(xcrun notarytool info "$id" "${notary[@]}" \
+                         --output-format json | field status)
+              echo "$1: $status"
+              if [ "$status" != "Accepted" ]; then
+                xcrun notarytool log "$id" "${notary[@]}" || true
+                exit 1
+              fi
+            }
 
             # --options runtime is what notarization requires; the bundle has no
             # nested code, so there is nothing to sign inside-out.
@@ -151,7 +173,7 @@ jobs:
             codesign --verify --strict "$app"
 
             ditto -c -k --keepParent "$app" notarize.zip
-            xcrun notarytool submit notarize.zip "${notary[@]}" --wait
+            notarize notarize.zip
             rm -f notarize.zip
             xcrun stapler staple "$app"
           fi
@@ -165,12 +187,11 @@ jobs:
           if [ "$SIGN_MACOS" = "true" ]; then
             codesign --force --timestamp \
               --keychain "$SIGNING_KEYCHAIN" --sign "$SIGN_IDENTITY" "$dmg"
-            xcrun notarytool submit "$dmg" "${notary[@]}" --wait
+            notarize "$dmg"
             xcrun stapler staple "$dmg"
             rm -f "$RUNNER_TEMP/notary.p8"
 
-            # notarytool exits 0 even when it gives up on a network drop or timeout,
-            # so prove the ticket is attached rather than trusting the exit code.
+            # Final proof the tickets are really attached.
             xcrun stapler validate "$dmg"
             xcrun stapler validate "$app"
             spctl -a -vvv -t open --context context:primary-signature "$dmg"
