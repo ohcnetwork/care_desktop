@@ -240,6 +240,15 @@ jobs:
             app/build/bin/*-setup.exe
             app/build/bin/*.deb
 
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CARE-Desktop-${{ matrix.name }}
+          path: |
+            app/build/bin/CARE-Desktop-*.zip
+            app/build/bin/CARE-Desktop-*.tar.gz
+          if-no-files-found: error
+
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2

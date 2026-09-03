@@ -1,9 +1,11 @@
 package care
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/mdns"
 )
@@ -62,6 +64,25 @@ func (a *Advertiser) IPsChanged() bool {
 	return !sameIPs(a.ips, cur)
 }
 
+// Resolves reports whether "<name>.local" currently answers on this host - the
+// watchdog's liveness check, so a responder that silently stopped (macOS
+// mDNSResponder dropped our record, sleep/wake, network flap) gets restarted.
+// ponytail: uses the system resolver (handles mDNS on macOS/Windows; on Linux
+// only with nss-mdns). Where it can't resolve .local it just reports false and
+// the caller re-advertises - cheap and harmless. Debounce lives in the caller.
+func (a *Advertiser) Resolves() bool {
+	if a == nil || a.server == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupHost(ctx, a.name+".local")
+	if err != nil || len(addrs) == 0 {
+		return false
+	}
+	return true
+}
+
 // newMDNSServer builds the responder. The hostName ("<name>.local.") is the record
 // a browser's "care.local" A-query matches (verified in hashicorp/mdns zone.go).
 func newMDNSServer(name string, ips []net.IP) (*mdns.Server, error) {
@@ -84,7 +105,7 @@ func newMDNSServer(name string, ips []net.IP) (*mdns.Server, error) {
 // any surrounding dots (so a trailing "." doesn't defeat the suffix strip), then a
 // trailing ".local".
 func mdnsLabel(name string) string {
-	name = strings.Trim(strings.TrimSpace(name), ".")
+	name = strings.ToLower(strings.Trim(strings.TrimSpace(name), "."))
 	name = strings.TrimSuffix(name, ".local")
 	return strings.Trim(name, ".")
 }

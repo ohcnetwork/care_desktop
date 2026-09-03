@@ -22,8 +22,8 @@ func main() {
 
 	err := wails.Run(&options.App{
 		Title:     "CARE Desktop",
-		Width:     920,
-		Height:    800,
+		Width:     1180,
+		Height:    900,
 		MinWidth:  720,
 		MinHeight: 560,
 		AssetServer: &assetserver.Options{

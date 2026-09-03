@@ -48,14 +48,14 @@ func TestBundleAddresses(t *testing.T) {
 	for _, name := range []string{"care", "care.local"} {
 		e := &Engine{Kit: t.TempDir(), Env: map[string]string{"CARE_MDNS_NAME": name}}
 		got := e.bundleURL(entry)
-		want := "http://care.local/facility-bucket/apps/care_x/assets/remoteEntry.js"
+		want := "https://care.local/facility-bucket/apps/care_x/assets/remoteEntry.js"
 		if got != want {
 			t.Fatalf("CARE_MDNS_NAME=%q: got %q, want %q", name, got, want)
 		}
 	}
 
 	e := &Engine{Kit: t.TempDir(), Env: map[string]string{"CARE_MDNS_NAME": "clinic"}}
-	if got := e.bundleURL(entry); !strings.HasPrefix(got, "http://clinic.local/") {
+	if got := e.bundleURL(entry); !strings.HasPrefix(got, "https://clinic.local/") {
 		t.Fatalf("renamed clinic not honored: %q", got)
 	}
 	// localPath is what CARE uses to find the plugin's own translations; the URL's
@@ -65,7 +65,7 @@ func TestBundleAddresses(t *testing.T) {
 	}
 
 	custom := catalogEntry{Slug: "care_y", Bundle: "/apps/care_y/", RemoteEntry: "/remoteEntry.js"}
-	if got := e.bundleURL(custom); got != "http://clinic.local/facility-bucket/apps/care_y/remoteEntry.js" {
+	if got := e.bundleURL(custom); got != "https://clinic.local/facility-bucket/apps/care_y/remoteEntry.js" {
 		t.Fatalf("stray slashes not trimmed: %q", got)
 	}
 }

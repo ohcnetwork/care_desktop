@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -92,20 +93,41 @@ func (a *App) advRunning() bool {
 	return a.adv != nil
 }
 
-// watchAdvertise re-advertises when the host's LAN IP changes (e.g. DHCP renew), so
-// care.local never points at a stale address. Cheap: a lookup every 30s.
+// watchAdvertise re-advertises when the host's LAN IP changes (e.g. DHCP renew)
+// or when care.local stops resolving (responder silently died - sleep/wake,
+// network flap, mDNSResponder dropped our record). Cheap: a lookup every 30s.
 func (a *App) watchAdvertise() {
 	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
+	misses := 0
 	for {
 		select {
 		case <-a.advStop:
 			return
 		case <-t.C:
 			a.advMu.Lock()
-			changed := a.adv != nil && a.adv.IPsChanged()
+			adv := a.adv
 			a.advMu.Unlock()
-			if changed {
+			if adv == nil {
+				continue
+			}
+			if adv.IPsChanged() {
+				misses = 0
+				a.restartAdvertise()
+				continue
+			}
+			// ponytail: debounce two misses so one flaky lookup doesn't churn
+			// the responder; a genuinely dead responder never recovers on its own.
+			if adv.Resolves() {
+				misses = 0
+				continue
+			}
+			misses++
+			if misses >= 2 {
+				misses = 0
+				if a.ctx != nil {
+					wruntime.EventsEmit(a.ctx, "care-log", "mDNS: care.local stopped resolving - re-advertising.")
+				}
 				a.restartAdvertise()
 			}
 		}
@@ -161,6 +183,14 @@ func (a *App) kitDir() string {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		base, _ = os.UserHomeDir()
+	}
+	if runtime.GOOS == "windows" {
+		// Docker Desktop can't read files under %AppData% live on Windows, so kit bind
+		// mounts arrive as empty dirs; stage under the home dir, which it reads live.
+		// (config.json stays in %AppData% - Docker never reads it.)
+		if home, herr := os.UserHomeDir(); herr == nil {
+			base = home
+		}
 	}
 	return filepath.Join(base, "care-desktop", "kit")
 }
@@ -220,6 +250,17 @@ func (a *App) engine(extra map[string]string) *care.Engine {
 		Kit: a.kitDir(),
 		Env: env,
 		Log: func(s string) { wruntime.EventsEmit(a.ctx, "care-log", s) },
+		Confirm: func(title, message string) bool {
+			sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
+				Type:          wruntime.QuestionDialog,
+				Title:         title,
+				Message:       message,
+				Buttons:       []string{"Yes", "No"},
+				DefaultButton: "Yes",
+				CancelButton:  "No",
+			})
+			return err == nil && sel == "Yes"
+		},
 	}
 }
 
@@ -244,6 +285,12 @@ func (a *App) DockerStatus() care.DockerStatus { return a.engine(nil).DockerChec
 func (a *App) GitStatus() care.DockerStatus    { return a.engine(nil).GitCheck() }
 func (a *App) CareHealth() care.Health         { return a.engine(nil).Ping() }
 
+// NetworkStatus flags a Public Windows profile (blocks LAN discovery of care.local).
+func (a *App) NetworkStatus() care.NetworkStatus { return a.engine(nil).NetworkCheck() }
+
+// FixNetwork sets the network Private and opens the clinic's ports (elevated).
+func (a *App) FixNetwork() error { return a.engine(nil).FixNetwork() }
+
 // ValidatePassword lets the wizard check the admin password live as the user types.
 // Returns "" when acceptable, otherwise a human-readable reason to show under the field.
 func (a *App) ValidatePassword(pw string) string {
@@ -251,6 +298,29 @@ func (a *App) ValidatePassword(pw string) string {
 		return err.Error()
 	}
 	return ""
+}
+
+// ValidateDomain lets the wizard check the clinic address live as the user types.
+func (a *App) ValidateDomain(name string) string {
+	if err := care.ValidateMDNSLabel(name); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// SetMDNSName saves the chosen address and re-advertises under it, so the
+// installer's name check tests the name actually picked.
+func (a *App) SetMDNSName(name string) error {
+	if err := care.ValidateMDNSLabel(name); err != nil {
+		return err
+	}
+	cfg := a.loadConfig()
+	cfg.MDNSName = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(name)), ".local") + ".local"
+	if err := a.saveConfig(cfg); err != nil {
+		return err
+	}
+	a.restartAdvertise()
+	return nil
 }
 
 // VerifyAdminPassword gates the Advanced screen. It checks against the bcrypt hash
@@ -345,7 +415,7 @@ func (a *App) notifyInstalled(mdnsName string) {
 	sel, _ := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
 		Type:          wruntime.InfoDialog,
 		Title:         "CARE Desktop installed",
-		Message:       "CARE is installed and running.\n\nOpen it at " + url + "\nLogin: admin / admin (change the password in the app).",
+		Message:       "",
 		Buttons:       []string{"Open CARE", "Close"},
 		DefaultButton: "Open CARE",
 	})
@@ -450,6 +520,49 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 		return e.Start()
 	}, true, "setup")
 	return nil
+}
+
+// CleanupFailedInstall lets Retry start clean: tear down the leftover Docker project
+// (a crash-looping container keeps re-creating the deleted kit files), then wipe the
+// staged kit and this app's %AppData% folders. Windows-only; no-op elsewhere. Safe on a
+// failed first-run - patient data lives in Docker volumes, not here.
+func (a *App) CleanupFailedInstall() error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	a.engine(nil).TeardownProject()
+
+	var firstErr error
+	remove := func(target string) {
+		if target == "" {
+			return
+		}
+		if a.ctx != nil {
+			wruntime.EventsEmit(a.ctx, "care-log", "cleanup: removing "+target)
+		}
+		if err := os.RemoveAll(target); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	remove(a.kitDir()) // before the config wipe below, since kitDir reads config
+	if base, err := os.UserConfigDir(); err == nil {
+		if entries, err := os.ReadDir(base); err == nil {
+			for _, ent := range entries {
+				if careAppDataName(ent.Name()) {
+					remove(filepath.Join(base, ent.Name()))
+				}
+			}
+		}
+	}
+	return firstErr
+}
+
+// careAppDataName matches this app's %AppData% folders (care-desktop, "CARE Desktop",
+// ...), case- and separator-insensitively, so cleanup only deletes our own.
+func careAppDataName(name string) bool {
+	n := strings.NewReplacer(" ", "", "-", "", "_", "").Replace(strings.ToLower(name))
+	return strings.HasPrefix(n, "care")
 }
 
 func (a *App) CareStatus() (string, error) { return a.engine(nil).Status() }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os/exec"
 	"runtime"
 	"strings"
 	"time"
@@ -21,7 +20,7 @@ type DockerStatus struct {
 // engine works (Docker Engine, Colima, Podman, Rancher Desktop, OrbStack, Docker
 // Desktop) - we just need `docker` + the `docker compose` v2 plugin reachable.
 func (e *Engine) DockerCheck() DockerStatus {
-	cmd := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
+	cmd := newCmd("docker", "version", "--format", "{{.Server.Version}}")
 	cmd.Env = e.baseEnv()
 	out, err := cmd.Output()
 	switch {
@@ -40,7 +39,7 @@ func (e *Engine) DockerCheck() DockerStatus {
 // hasCompose reports whether the `docker compose` v2 plugin is available - often
 // missing on non-Desktop installs, and the stack can't come up without it.
 func (e *Engine) hasCompose() bool {
-	cmd := exec.Command("docker", "compose", "version")
+	cmd := newCmd("docker", "compose", "version")
 	cmd.Env = e.baseEnv()
 	return cmd.Run() == nil
 }
@@ -152,7 +151,7 @@ func portOccupant(port int) string {
 	var name string
 	switch runtime.GOOS {
 	case "darwin", "linux":
-		out, err := exec.Command("lsof", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN", "-F", "c").Output()
+		out, err := newCmd("lsof", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN", "-F", "c").Output()
 		if err == nil {
 			for _, line := range strings.Split(string(out), "\n") {
 				if strings.HasPrefix(line, "c") { // "c<command>" field
@@ -172,7 +171,7 @@ func portOccupant(port int) string {
 
 // GitCheck reports whether git is available (needed for the one-time clone+build).
 func (e *Engine) GitCheck() DockerStatus {
-	cmd := exec.Command("git", "--version")
+	cmd := newCmd("git", "--version")
 	cmd.Env = e.baseEnv()
 	out, err := cmd.Output()
 	if err == nil {
