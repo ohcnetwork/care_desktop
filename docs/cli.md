@@ -33,6 +33,7 @@ care status
 | `care status` | Print each container's service + state. |
 | `care backup-now` | Write an immediate database dump into the backup folder. |
 | `care list-backups` | List the restorable points in the backup folder, newest first. |
+| `care options` | List the staff roles and facility types this install accepts. Read-only. |
 | `care restore <dump> [files.tar.gz]` | Restore a backup: drop + re-create the DB from `<dump>`, and (if a `files-*.tar.gz` is given, or auto-paired by timestamp) restore the uploaded files. **Replaces current data.** |
 | `care uninstall [--images] [--backups] --yes` | Remove everything: containers, network, **all data volumes**, the installed files, the downloaded source, and the **trusted CA cert from this server's keychain**. `--images` also removes the Docker images; `--backups` also deletes the backup folder. Requires `--yes`. |
 
@@ -60,9 +61,29 @@ care list-backups                      # copy the dump name you want
 care restore care-20260701-020000.dump # DB + same-timestamp files, if present
 ```
 
+Example — check the role and facility type names the clinic details screen offers:
+```bash
+care options
+```
+
 ## Notes
 - Every command streams its progress to the terminal and exits non-zero on failure
   (so it's CI/script friendly).
+- The clinic's facility and staff are entered once, on the second setup screen,
+  and written by `scripts/clinic_seed.py` running inside the backend container
+  through CARE's `load_fixtures` as the `admin` the installer created. It writes
+  through CARE's own API, so every validation runs; it never touches the admin
+  password, and it needs `DEBUG` to stay off. There is deliberately no way to
+  re-run it afterwards — once CARE is up, facilities and staff are managed from
+  inside CARE.
+- The same step runs `sync_permissions_roles` and `sync_valueset` first (celery-beat
+  runs them too, but only when it boots, which races a first install), then loads
+  CARE's bundled questionnaires and report templates from `data/*.json`. Those load
+  *after* the facility and staff commit, so a bad entry in a shipped file cannot
+  roll back what the operator typed.
+- That screen ships its own copy of the role and facility type lists, because it
+  runs before there is a backend to ask. `care options` is how you check that copy
+  still matches this install.
 - `care restore` is destructive: it drops the current database before loading the
   dump. It stops the app services during the swap and restarts them after. Take a
   fresh `care backup-now` first if you're unsure.

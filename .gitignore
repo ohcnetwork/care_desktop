@@ -13,3 +13,6 @@
 
 # Default backup dir if BACKUP_DIR is unset and compose runs from here.
 /db-backups/
+
+# Python bytecode (scripts/clinic_seed.py runs inside the backend container)
+__pycache__/

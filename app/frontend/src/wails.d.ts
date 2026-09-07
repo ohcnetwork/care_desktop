@@ -38,6 +38,28 @@ type FrontendPlugin = {
   slug: string;
   meta: Record<string, unknown>;
 };
+type SeedMember = {
+  username: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone_number: string;
+  gender: string;
+  role: string;
+  password: string;
+};
+type ClinicSeed = {
+  geo_organization: string;
+  facility: {
+    name: string;
+    facility_type: string;
+    address: string;
+    pincode: string;
+    phone_number: string;
+    description: string;
+  };
+  members: SeedMember[];
+};
 
 declare global {
   interface Window {
@@ -64,6 +86,7 @@ declare global {
             rememberBackup: boolean,
             installDir: string,
             backupDir: string,
+            seed: ClinicSeed,
           ): Promise<void>;
           CleanupFailedInstall(): Promise<void>;
           ReadEnv(name: string): Promise<string>;

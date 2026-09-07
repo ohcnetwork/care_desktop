@@ -27,6 +27,8 @@ What the engine does:
 | `stop` / `restart` | stop / restart containers (data always preserved) |
 | `rebuild-backend` | rebuild the backend image from new code, recreate + migrate |
 | `rebuild-frontend` | rebuild the frontend image (Vite bakes settings at build time) |
+| `options` | list the roles and facility types CARE accepts, so the clinic details screen's bundled copy can be checked |
+| `seed` | create the facility, its region and its staff, from the second setup screen only. Runs `scripts/clinic_seed.py` inside the backend container: syncs roles + valuesets, writes the clinic in one transaction so a rejected field leaves nothing behind, then loads CARE's bundled questionnaires and report templates. Not exposed as a command — first-run only |
 | `status` | report each container's state |
 | `backup-now` | write an immediate database dump |
 | `list-backups` | list the restorable points in the backup folder |
@@ -104,8 +106,9 @@ or `localhost`. Plain http would break those on every phone. No public CA can si
 `.local` name, so Caddy issues a **self-signed cert from a built-in local CA**
 (`tls internal`) and devices trust that CA once (see the next section).
 
-CARE's production settings assume HTTPS *and* a public cert, so `clinic_settings.py`
-imports the production settings and relaxes only what a **self-signed** LAN cert needs:
+CARE's deployment settings assume HTTPS *and* a public cert, so `clinic_settings.py`
+imports them and relaxes only what a **self-signed** LAN cert needs — plus one switch
+that closes OTP login (see [configuration](configuration.md#sms--otp)):
 
 ```python
 from config.settings.deployment import *
@@ -118,6 +121,10 @@ SECURE_HSTS_SECONDS = 0         # self-signed cert - don't HSTS-pin clients to h
 # the original https request (request.is_secure(), secure cookies, CSRF):
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 CORS_ALLOW_ALL_ORIGINS = True   # the proxy is same-origin anyway
+# Counter-intuitive: True is what DISABLES OTP login. Left False, CARE falls back to
+# its hardcoded non-production OTP; True routes the send through the deliberately
+# broken SMS_BACKEND, so no OTP is ever stored:
+USE_SMS = True
 ```
 
 It's mounted into the backend container at `/settings/` and selected with

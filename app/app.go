@@ -457,7 +457,8 @@ func actionFunc(e *care.Engine, action string) func() error {
 
 // RunSetup persists the wizard's choices, unpacks the kit, then runs setup+start.
 // Empty backupPassword = encryption off; rememberBackup saves it to the keychain.
-func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberBackup bool, installDir, backupDir string) error {
+// A seed with no facility name means the clinic details screen was skipped.
+func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberBackup bool, installDir, backupDir string, seed care.ClinicSeed) error {
 	if err := care.ValidatePassword(adminPassword); err != nil {
 		return err
 	}
@@ -517,7 +518,22 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 		if err := e.Setup(); err != nil {
 			return err
 		}
-		return e.Start()
+		if err := e.Start(); err != nil {
+			return err
+		}
+		// Clinic details last: they need the API the steps above bring up. A
+		// rejected field must not fail an install that already works - CARE is
+		// running and the details can be added later, so this only warns.
+		// SeedClinic reports its own progress through the engine logger, which is
+		// already wired to care-log; only the failure needs saying here.
+		if strings.TrimSpace(seed.Facility.Name) != "" {
+			if _, err := e.SeedClinic(seed); err != nil {
+				wruntime.EventsEmit(a.ctx, "care-log",
+					"note: your clinic details were not added ("+err.Error()+
+						") - CARE is running; add the facility and staff from inside CARE")
+			}
+		}
+		return nil
 	}, true, "setup")
 	return nil
 }

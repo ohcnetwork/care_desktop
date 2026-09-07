@@ -186,8 +186,7 @@ func TestLooksLikeSourceRepo(t *testing.T) {
 // Uninstall with RemoveKit must delete a managed kit but refuse to delete a dir
 // that looks like a source checkout - even when asked to. No compose file present,
 // so this never touches Docker.
-func TestUninstallKitRemovalGuard(t *testing.T) {
-	// managed kit -> removed.
+func TestUninstallKitRemovalGuard(t *testing.T) { // managed kit -> removed.
 	kit := filepath.Join(t.TempDir(), "kit")
 	if err := os.MkdirAll(filepath.Join(kit, "care"), 0o755); err != nil {
 		t.Fatal(err)
@@ -210,6 +209,29 @@ func TestUninstallKitRemovalGuard(t *testing.T) {
 	}
 	if _, err := os.Stat(repo); err != nil {
 		t.Fatalf("source checkout was removed: %v", err)
+	}
+}
+
+// A kit with no compose file must not tear down the compose project:
+// forceRemoveProject matches on the project label, so an uninstall run from an
+// unrelated dir used to `docker volume rm -f` a real install's database. Asserted
+// by counting docker calls, since the damage is invisible without a live stack.
+func TestUninstallWithoutComposeFileNeverCallsDocker(t *testing.T) {
+	var calls []string
+	kit := t.TempDir() // no docker-compose.yml
+	os.WriteFile(filepath.Join(kit, "backend.env"), []byte("x"), 0o644)
+	e := &Engine{
+		Kit: kit,
+		Env: map[string]string{"BACKUP_DIR": t.TempDir()},
+		Log: func(s string) { calls = append(calls, s) },
+	}
+	if err := e.Uninstall(UninstallOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range calls {
+		if strings.Contains(line, "Force-removing") || strings.Contains(line, "Removing containers") {
+			t.Fatalf("touched the compose project without owning a compose file: %q", line)
+		}
 	}
 }
 

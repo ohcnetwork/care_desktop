@@ -29,12 +29,17 @@ func (e *Engine) Uninstall(opts UninstallOptions) error {
 		if err := e.dc("down", "-v", "--remove-orphans"); err != nil {
 			e.logln("  (compose down reported an error - continuing cleanup)")
 		}
+		// Safety net: compose down can silently fail to reach the project (e.g. a
+		// wrong working dir, or an interpolation error parsing the file - seen on
+		// Windows), leaving containers running. Force-remove anything still tagged
+		// with our compose project label, so uninstall always stops the stack.
+		//
+		// Inside the compose-file check on purpose: forceRemoveProject matches on
+		// the project *label*, not on this kit, so it would delete the data volumes
+		// of an install somewhere else on the machine. Only a kit that owns a
+		// compose file is entitled to tear the project down.
+		e.forceRemoveProject()
 	}
-	// Safety net: compose down can silently fail to reach the project (e.g. a wrong
-	// working dir, or an interpolation error parsing the file - seen on Windows),
-	// leaving containers running. Force-remove anything still tagged with our
-	// compose project label, so uninstall always stops the stack.
-	e.forceRemoveProject()
 
 	// 2. images (optional): everything we built, plus the base images we pulled.
 	if opts.RemoveImages {

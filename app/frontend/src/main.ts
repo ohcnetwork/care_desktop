@@ -39,15 +39,15 @@ let backups: Backup[] = [];
 // ===========================================================================
 // Shell - views, rail, toast, log buffer
 // ===========================================================================
-type View = "setup" | "installing" | "failed" | "panel";
+type View = "setup" | "clinic" | "installing" | "failed" | "panel";
 function showView(v: View): void {
-  for (const name of ["setup", "installing", "failed", "panel"] as View[]) $(`#view-${name}`).hidden = name !== v;
+  for (const name of ["setup", "clinic", "installing", "failed", "panel"] as View[]) $(`#view-${name}`).hidden = name !== v;
   const inPanel = v === "panel";
   $("#brand-kicker").textContent = inPanel ? "Control panel" : "First-time setup";
   $("#rail-steps").hidden = inPanel;
   $("#rail-nav").hidden = !inPanel;
   $("#rail-status").hidden = !inPanel;
-  railStep(v === "installing" || v === "failed" ? "install" : openSection);
+  railStep(v === "setup" ? openSection : "install");
 }
 
 const toast = $("#toast"), toastMsg = $("#toast-msg");
@@ -370,32 +370,36 @@ const RUN_STEPS: RunStep[] = [
   { re: /Building the backend image/i, pct: 62, label: "Building the backend" },
   { re: /Building the frontend image/i, pct: 80, label: "Building the app" },
   { re: /Starting CARE/i, pct: 90, label: "Starting the services" },
-  { re: /database migrations/i, pct: 97, label: "Setting up the database" },
-  { re: /become healthy|CARE is up/i, pct: 100, label: "Waiting for CARE to answer" },
+  { re: /database migrations/i, pct: 94, label: "Setting up the database" },
+  { re: /become healthy|CARE is up/i, pct: 97, label: "Waiting for CARE to answer" },
+  { re: /clinic details|Added .* staff member/i, pct: 100, label: "Adding your clinic details" },
 ];
+// The steps this run will actually take: the clinic details step is dropped when
+// that screen was skipped, so the list never shows work that will not happen.
+let activeSteps: RunStep[] = RUN_STEPS;
 let stepIdx = 0, pct = 0, elapsedTimer = 0, startedAt = 0;
 let lastError = "";
 
 function renderSteps(): void {
   const done = pct >= 100;
-  $("#steps-list").innerHTML = RUN_STEPS.map((s, i) => {
+  $("#steps-list").innerHTML = activeSteps.map((s, i) => {
     const state = done || i < stepIdx ? "done" : i === stepIdx ? "now" : "todo";
     const dot = state === "now"
       ? `<span class="step-dot now"><span class="ring"></span></span>`
       : `<span class="step-dot ${state}">${state === "done" ? "&#10003;" : "&middot;"}</span>`;
     return `<div class="step-row ${state}">${dot}<span class="label">${esc(s.label)}</span><span class="n">${state === "done" ? "done" : state === "now" ? "working" : ""}</span></div>`;
   }).join("");
-  $("#details-summary").textContent = done ? `All ${RUN_STEPS.length} steps finished` : `Step ${stepIdx + 1} of ${RUN_STEPS.length}`;
-  $("#step-label").textContent = done ? "Done" : RUN_STEPS[stepIdx].label;
+  $("#details-summary").textContent = done ? `All ${activeSteps.length} steps finished` : `Step ${stepIdx + 1} of ${activeSteps.length}`;
+  $("#step-label").textContent = done ? "Done" : activeSteps[stepIdx].label;
   $("#install-pct").textContent = `${Math.floor(pct)}%`;
   $<HTMLDivElement>("#install-bar").style.width = `${pct}%`;
 }
 function bumpInstallProgress(line: string): void {
-  for (let i = 0; i < RUN_STEPS.length; i++) {
-    if (!RUN_STEPS[i].re.test(line)) continue;
-    if (RUN_STEPS[i].pct <= pct) return;
+  for (let i = 0; i < activeSteps.length; i++) {
+    if (!activeSteps[i].re.test(line)) continue;
+    if (activeSteps[i].pct <= pct) return;
     stepIdx = i;
-    pct = RUN_STEPS[i].pct;
+    pct = activeSteps[i].pct;
     renderSteps();
     return;
   }
@@ -429,13 +433,165 @@ install.addEventListener("click", () => {
       $("#install-note").textContent = "A step is no longer met - fix it and try again.";
       return;
     }
-    phase = "setup";
-    startInstalling();
-    append("Starting one-time setup...");
-    void App.RunSetup(clinicHost, $<HTMLInputElement>("#adminpw").value, $<HTMLInputElement>("#backuppw").value, true, "", backupDir).catch((e) => {
-      lastError = String(e); append(`error: ${String(e)}`); showInstallFailed();
-    });
+    install.disabled = false;
+    showClinicScreen();
   })();
+});
+
+// ===========================================================================
+// Setup step 2 - clinic details
+// ===========================================================================
+// The pickers CARE validates against. Read live by `care options` once CARE is
+// running, but this screen comes *before* the install, so there is no backend to
+// ask - these are the values CARE ships with.
+// ponytail: bundled list, so a backend that adds a role or facility type won't
+// offer it here until this list is updated. The seed is validated for real at the
+// end of the install, and a mismatch is reported without failing the install.
+const FACILITY_TYPES = [
+  "Private Hospital", "Clinical Non Governmental Organization", "Primary Health Centres",
+  "Family Health Centres", "Community Health Centres", "Taluk Hospitals",
+  "District Hospitals", "Govt Medical College Hospitals", "Co-operative hospitals",
+  "Autonomous healthcare facility", "Women and Child Health Centres",
+  "Non Clinical Non Governmental Organization", "Community Based Organization",
+  "Educational Inst", "Private Labs", "Govt Labs", "TeleMedicine", "Other",
+];
+const STAFF_ROLES = ["Doctor", "Nurse", "Staff", "Administrator", "Facility Admin", "Pharmacist", "Volunteer"];
+const GENDERS: [string, string][] = [["female", "Female"], ["male", "Male"], ["non_binary", "Non-binary"], ["transgender", "Transgender"]];
+
+type SeedMember = {
+  username: string; first_name: string; last_name: string; email: string;
+  phone_number: string; gender: string; role: string; password: string;
+};
+type ClinicSeed = {
+  geo_organization: string;
+  facility: { name: string; facility_type: string; address: string; pincode: string; phone_number: string; description: string };
+  members: SeedMember[];
+};
+
+const EMPTY_SEED: ClinicSeed = {
+  geo_organization: "",
+  facility: { name: "", facility_type: "", address: "", pincode: "", phone_number: "", description: "" },
+  members: [],
+};
+
+let memberCount = 0;
+const opt = (list: string[] | [string, string][], selected = ""): string =>
+  list.map((o) => {
+    const [value, label] = Array.isArray(o) ? o : [o, o];
+    return `<option value="${esc(value)}"${value === selected ? " selected" : ""}>${esc(label)}</option>`;
+  }).join("");
+
+function memberRow(i: number): string {
+  return `<div class="cf-member" data-member="${i}">
+    <div class="cf-member-head"><span>Staff member ${i + 1}</span><button class="cf-remove" data-remove="${i}">Remove</button></div>
+    <div class="cf-grid">
+      <div class="cf-field"><label>First name</label><input class="cf-input" data-f="first_name" autocomplete="off" /></div>
+      <div class="cf-field"><label>Last name</label><input class="cf-input" data-f="last_name" autocomplete="off" /></div>
+      <div class="cf-field"><label>Username</label><input class="cf-input" data-f="username" placeholder="asha" autocomplete="off" /></div>
+      <div class="cf-field"><label>Email</label><input class="cf-input" data-f="email" placeholder="asha@clinic.local" autocomplete="off" /></div>
+      <div class="cf-field"><label>Phone number</label><input class="cf-input" data-f="phone_number" placeholder="+919999999999" autocomplete="off" /></div>
+      <div class="cf-field"><label>Gender</label><select class="cf-input" data-f="gender">${opt(GENDERS)}</select></div>
+      <div class="cf-field"><label>Role</label><select class="cf-input" data-f="role">${opt(STAFF_ROLES, "Nurse")}</select></div>
+    </div>
+  </div>`;
+}
+
+function renumberMembers(): void {
+  const rows = document.querySelectorAll<HTMLElement>("#cf-members .cf-member");
+  rows.forEach((row, i) => { row.querySelector(".cf-member-head span")!.textContent = `Staff member ${i + 1}`; });
+  $("#cf-staff-summary").textContent = rows.length
+    ? `${rows.length} ${rows.length === 1 ? "person" : "people"}`
+    : "Nobody added yet";
+}
+
+$("#cf-add").addEventListener("click", () => {
+  $("#cf-members").insertAdjacentHTML("beforeend", memberRow(memberCount++));
+  renumberMembers();
+});
+$("#cf-members").addEventListener("click", (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLElement>("[data-remove]");
+  if (!btn) return;
+  btn.closest(".cf-member")!.remove();
+  renumberMembers();
+});
+
+function showClinicScreen(): void {
+  const type = $<HTMLSelectElement>("#cf-type");
+  if (!type.options.length) type.innerHTML = opt(FACILITY_TYPES, "Private Hospital");
+  $("#cf-note").textContent = "";
+  showView("clinic");
+}
+
+const val = (sel: string): string => $<HTMLInputElement>(sel).value.trim();
+
+// collectSeed returns the form as a seed, or null with a message on #cf-note.
+// Only shape is checked here - CARE owns the real rules (unique usernames, valid
+// pincodes) and reports them at the end of the install.
+function collectSeed(): ClinicSeed | null {
+  const fail = (msg: string, sel?: string): null => {
+    $("#cf-note").textContent = msg;
+    if (sel) { const el = $<HTMLElement>(sel); el.classList.add("bad"); el.focus(); }
+    return null;
+  };
+  document.querySelectorAll(".cf-input.bad").forEach((el) => el.classList.remove("bad"));
+
+  const name = val("#cf-name");
+  if (!name) return fail("Give the facility a name, or choose Skip.", "#cf-name");
+  const region = val("#cf-region");
+  if (!region) return fail("Give the region the facility is in.", "#cf-region");
+
+  const rows = [...document.querySelectorAll<HTMLElement>("#cf-members .cf-member")];
+  const staffPassword = val("#cf-staffpw");
+  if (rows.length && staffPassword.length < 8) {
+    return fail("Staff need a starting password of at least 8 characters.", "#cf-staffpw");
+  }
+
+  const members: SeedMember[] = [];
+  for (const [i, row] of rows.entries()) {
+    const field = (f: string): string => row.querySelector<HTMLInputElement>(`[data-f="${f}"]`)!.value.trim();
+    for (const required of ["first_name", "last_name", "username", "email", "phone_number"]) {
+      if (!field(required)) {
+        row.querySelector<HTMLElement>(`[data-f="${required}"]`)!.classList.add("bad");
+        return fail(`Staff member ${i + 1} needs every field filled in.`);
+      }
+    }
+    members.push({
+      username: field("username"), first_name: field("first_name"), last_name: field("last_name"),
+      email: field("email"), phone_number: field("phone_number"), gender: field("gender"),
+      role: field("role"), password: staffPassword,
+    });
+  }
+
+  return {
+    geo_organization: region,
+    facility: {
+      name, facility_type: $<HTMLSelectElement>("#cf-type").value, address: val("#cf-address"),
+      pincode: val("#cf-pincode"), phone_number: val("#cf-phone"), description: "",
+    },
+    members,
+  };
+}
+
+function beginInstall(seed: ClinicSeed): void {
+  const seeding = seed.facility.name !== "";
+  activeSteps = seeding ? RUN_STEPS : RUN_STEPS.filter((s) => !/clinic details/i.test(s.label));
+  activeSteps[activeSteps.length - 1] = { ...activeSteps[activeSteps.length - 1], pct: 100 };
+  phase = "setup";
+  startInstalling();
+  append("Starting one-time setup...");
+  void App.RunSetup(
+    clinicHost, $<HTMLInputElement>("#adminpw").value, $<HTMLInputElement>("#backuppw").value,
+    true, "", backupDir, seed,
+  ).catch((e) => {
+    lastError = String(e); append(`error: ${String(e)}`); showInstallFailed();
+  });
+}
+
+$("#cf-back").addEventListener("click", () => showView("setup"));
+$("#cf-skip").addEventListener("click", () => beginInstall(EMPTY_SEED));
+$("#cf-install").addEventListener("click", () => {
+  const seed = collectSeed();
+  if (seed) beginInstall(seed);
 });
 
 function showInstallFailed(): void {
@@ -1033,7 +1189,7 @@ on("care-done", (code: number) => {
 });
 on("setup-done", () => {
   clearInterval(elapsedTimer);
-  pct = 100; stepIdx = RUN_STEPS.length - 1;
+  pct = 100; stepIdx = activeSteps.length - 1;
   renderSteps();
   $("#run-ico").className = "run-ico done";
   $("#run-ico").innerHTML = "&#10003;";

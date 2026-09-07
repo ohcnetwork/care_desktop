@@ -81,16 +81,44 @@ File uploads/downloads use **presigned URLs** — the browser talks to MinIO
 > root credentials are baked in on first run.
 
 ### Offline-safe placeholders
-The production settings expect these to exist; on an offline LAN they're unused.
+The deployment settings expect these to exist; on an offline LAN they're unused.
 Leave them as dummy values.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SNS_ACCESS_KEY` / `SNS_SECRET_KEY` | `123` | AWS SNS (SMS) — disabled offline. |
+| `SNS_ACCESS_KEY` / `SNS_SECRET_KEY` | `123` | AWS SNS (SMS) — never reached; see `SMS_BACKEND` below. |
 | `EMAIL_HOST` / `EMAIL_USER` / `EMAIL_PASSWORD` | `123` | Email sending — disabled offline. |
 
-> **Consequence:** SMS/email OTP and notifications don't work offline. Use
-> **password (+ authenticator-app TOTP)** login, which is fully local.
+### SMS / OTP
+| Variable | Default | Meaning |
+|---|---|---|
+| `SMS_BACKEND` | `care.utils.sms.backend.base.SmsBackendBase` | CARE's abstract base backend: sending raises immediately, with no network call. **Don't point this at a real backend unless you have an SMS gateway on the LAN.** |
+
+> **Why a deliberately broken backend:** CARE only falls back to its hardcoded
+> non-production OTP (`45612`) when it believes SMS is switched *off*. So the clinic
+> sets `USE_SMS = True` in `clinic_settings.py` and hands it a backend that fails —
+> the send errors out and **no OTP is ever stored**. Together these close patient OTP
+> login and staff password-reset-by-phone, which on the LAN would otherwise let anyone
+> who knows a phone number log in as that patient, or take over that staff account.
+>
+> **Consequence:** SMS/email OTP and notifications don't work offline — by design.
+> Staff use **password (+ authenticator-app TOTP)** login, which is fully local, and
+> patients are registered and booked by staff (the public portal is switched off in
+> [`frontend.env`](#frontendenv)).
+
+### Login rate limit
+Not set by default — listed here because the defaults behave differently offline.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RATE_LIMIT` | `5/10m` | Wrong passwords per username before login returns `429`. |
+| `DISABLE_RATELIMIT` | `False` | `True` switches the throttle off entirely. |
+
+> A rate-limited login asks for a Google reCAPTCHA, which can't load offline, so the
+> only way past a `429` is to wait out the window (10 minutes by default). The clinic
+> keeps the throttle — it self-heals, and brute-force protection matters on a shared
+> WiFi — but loosen `RATE_LIMIT` or set `DISABLE_RATELIMIT=True` if staff hit it in
+> practice. The frontend is configured not to render the dead captcha box.
 
 ### Backups
 | Variable | Default | Meaning |
@@ -106,11 +134,19 @@ Baked into the frontend image at **build** time. Edit, then `care rebuild-fronte
 | Variable | Default | Meaning |
 |---|---|---|
 | `REACT_CARE_API_URL` | `https://care.local` | Backend base URL **without** `/api`. Must be a valid URL (empty is rejected by the build). Keeping it the same host as the app makes it same-origin (no CORS). Changing it needs `care rebuild-frontend` (Vite bakes it in at build time). |
+| `REACT_DISABLE_PATIENT_LOGIN` | `true` | Hides the public landing page and the patient OTP portal, so `https://care.local/` opens staff login. Keep it on: an offline clinic can't deliver an OTP, and patients are registered and booked by staff. |
+| `REACT_RECAPTCHA_SITE_KEY` | *(empty)* | Empty on purpose — the login form shows a Google reCAPTCHA after a rate-limited login, and `google.com` is unreachable offline. Empty means the widget isn't rendered at all. |
 | `REACT_ALLOWED_LOCALES` | *(commented)* | Optional. Comma-separated languages, e.g. `"en,hi,ta,ml,mr,kn"`. |
 | `REACT_DEFAULT_COUNTRY` | *(commented)* | Optional default country. |
 
 > These **override** `care_fe`'s own committed `.env` (logos, locales, etc.) via a
-> gitignored `.env.local` the build writes. You usually only need the API URL.
+> gitignored `.env.local` the build writes. You usually only need the API URL — the
+> other two are clinic hardening you shouldn't need to touch.
+
+> **Turning the patient portal back on** takes more than flipping
+> `REACT_DISABLE_PATIENT_LOGIN`: the OTP endpoints stay closed until the backend has a
+> working `SMS_BACKEND` (see [above](#sms--otp)). Without one, the portal renders but
+> no patient can get past the OTP screen.
 
 > **Changing the API host (e.g. to a static IP):** set `REACT_CARE_API_URL` to that
 > host and run `care rebuild-frontend`. A device must be able to reach that host, or
@@ -204,5 +240,6 @@ variables when using the CLI.
 | Any value in `backend.env` | `care start` (or **Save & apply** in the app) |
 | Any value in `frontend.env` | `care rebuild-frontend` (or **Save & rebuild** in the app) |
 | A version in `versions.env` | `care rebuild-backend` and/or `care rebuild-frontend` |
+| `clinic_settings.py` (bind-mounted, e.g. `USE_SMS`) | `care start` — it's read at container start |
 
 Nothing else needs editing — no files inside the images, no core CARE code.

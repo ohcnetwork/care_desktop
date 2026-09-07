@@ -165,8 +165,85 @@
       </div>
 
       <div class="screen-foot">
-        <button class="btn primary lg" id="install" disabled><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><polyline points="12 4 12 15"></polyline><polyline points="7 11 12 16 17 11"></polyline><polyline points="5 20 19 20"></polyline></svg>Install and start</button>
+        <button class="btn primary lg" id="install" disabled>Continue<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><polyline points="9 6 15 12 9 18"></polyline></svg></button>
         <span class="note" id="install-note">Complete the steps above to continue.</span>
+      </div>
+    </div>
+
+    <!-- ===================== CLINIC DETAILS ===================== -->
+    <div class="screen" id="view-clinic" hidden>
+      <div class="screen-head">
+        <div class="cf-kicker">Step 2 of 2</div>
+        <h1>Your clinic's details</h1>
+        <p>Added to CARE once the install finishes. You can skip this and add it later.</p>
+      </div>
+
+      <div class="screen-body sections">
+        <section class="acc open">
+          <div class="acc-head" data-acc="clinic-facility">
+            <span class="acc-dot done">&#10003;</span>
+            <div class="acc-title">
+              <div class="t">Facility</div>
+              <div class="s">The clinic this computer serves</div>
+            </div>
+            <span class="caret"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></span>
+          </div>
+          <div class="acc-body" id="clinic-facility-body">
+            <div class="cf-grid">
+              <div class="cf-field cf-wide">
+                <label for="cf-name">Facility name</label>
+                <input id="cf-name" class="cf-input" placeholder="Town Clinic" autocomplete="off" />
+              </div>
+              <div class="cf-field">
+                <label for="cf-type">Facility type</label>
+                <select id="cf-type" class="cf-input"></select>
+              </div>
+              <div class="cf-field">
+                <label for="cf-region">Region</label>
+                <input id="cf-region" class="cf-input" placeholder="District or state" autocomplete="off" />
+              </div>
+              <div class="cf-field cf-wide">
+                <label for="cf-address">Address</label>
+                <input id="cf-address" class="cf-input" placeholder="Street, area" autocomplete="off" />
+              </div>
+              <div class="cf-field">
+                <label for="cf-pincode">Pincode</label>
+                <input id="cf-pincode" class="cf-input" placeholder="682030" inputmode="numeric" autocomplete="off" />
+              </div>
+              <div class="cf-field">
+                <label for="cf-phone">Phone number</label>
+                <input id="cf-phone" class="cf-input" placeholder="+919999999999" autocomplete="off" />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="acc open">
+          <div class="acc-head" data-acc="clinic-staff">
+            <span class="acc-dot done">&#10003;</span>
+            <div class="acc-title">
+              <div class="t">Staff</div>
+              <div class="s" id="cf-staff-summary">Nobody added yet</div>
+            </div>
+            <span class="caret"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></span>
+          </div>
+          <div class="acc-body" id="clinic-staff-body">
+            <div class="info-box">Everyone here starts with the same password and signs in with their own username. The <b>admin</b> login you just set is separate and always works.</div>
+            <div class="cf-field cf-half">
+              <label for="cf-staffpw">Starting password for staff</label>
+              <input id="cf-staffpw" class="cf-input" type="text" placeholder="At least 8 characters" autocomplete="off" />
+            </div>
+            <div id="cf-members"></div>
+            <button class="btn" id="cf-add">+ Add a staff member</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="screen-foot">
+        <button class="btn lg" id="cf-back">Back</button>
+        <button class="btn primary lg" id="cf-install"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><polyline points="12 4 12 15"></polyline><polyline points="7 11 12 16 17 11"></polyline><polyline points="5 20 19 20"></polyline></svg>Install and start</button>
+        <button class="btn lg" id="cf-skip">Skip and install</button>
+        <span class="note" id="cf-note"></span>
       </div>
     </div>
 

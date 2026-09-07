@@ -419,3 +419,28 @@ label { font-size: 13px; font-weight: 600; color: var(--ink2); }
   font-size: 13.5px; padding: 12px 18px; border-radius: 10px;
   box-shadow: 0 12px 30px -12px rgba(1, 71, 55, .6); z-index: 20;
 }
+
+/* ---------- clinic details (setup step 2) ---------- */
+.cf-kicker { font-size: 12px; font-weight: 700; color: var(--green-ink); letter-spacing: .04em; text-transform: uppercase; margin-bottom: 6px; }
+.cf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.cf-field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.cf-field.cf-wide { grid-column: 1 / -1; }
+.cf-field.cf-half { max-width: 50%; margin-bottom: 14px; }
+.cf-input {
+  font: inherit; font-size: 14px; color: var(--ink); background: #fff;
+  border: 1px solid var(--line); border-radius: 9px; padding: 0 12px; height: 42px; min-width: 0;
+}
+.cf-input:focus { outline: none; border-color: var(--green); }
+.cf-input::placeholder { color: var(--faint); }
+.cf-input.bad { border-color: var(--red-line); }
+select.cf-input { cursor: pointer; }
+.cf-member { border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+.cf-member-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px; font-size: 13px; font-weight: 600; color: var(--ink2);
+}
+.cf-remove {
+  font: inherit; font-size: 12.5px; font-weight: 600; color: var(--gray);
+  background: none; border: none; padding: 2px 4px; cursor: pointer;
+}
+.cf-remove:hover { color: var(--red-ink); }
