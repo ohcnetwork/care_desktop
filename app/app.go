@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"care-desktop/app/internal/care"
@@ -291,6 +293,35 @@ func (a *App) NetworkStatus() care.NetworkStatus { return a.engine(nil).NetworkC
 // FixNetwork sets the network Private and opens the clinic's ports (elevated).
 func (a *App) FixNetwork() error { return a.engine(nil).FixNetwork() }
 
+// DockerPlan / GitPlan tell the wizard which button to put on a failing
+// prerequisite row - install it, start it, or just open the download page.
+func (a *App) DockerPlan() care.ToolPlan { return a.engine(nil).DockerPlan() }
+func (a *App) GitPlan() care.ToolPlan    { return a.engine(nil).GitPlan() }
+
+// InstallDocker, InstallGit and OpenDocker carry out those plans. They stream
+// progress through care-log like the install does, and block until finished, so
+// the wizard can re-run its checks the moment they return.
+func (a *App) InstallDocker() error { return a.engine(nil).InstallDocker() }
+func (a *App) InstallGit() error    { return a.engine(nil).InstallGit() }
+func (a *App) OpenDocker() error    { return a.engine(nil).OpenDocker() }
+
+// RestartPlan reports whether the machine has to restart before the
+// prerequisites will work. Only meaningful straight after an install - a restart
+// Windows wanted for its own reasons is not ours to nag about.
+func (a *App) RestartPlan() care.RestartPlan { return a.engine(nil).RestartPlan() }
+
+// RestartNow restarts the computer, having first made the app open again by
+// itself. Without the login item the operator comes back to a finished restart
+// and no sign of the half-done setup that caused it.
+func (a *App) RestartNow() error {
+	if err := a.SetAutostart(true); err != nil {
+		wruntime.EventsEmit(a.ctx, "care-log",
+			"note: couldn't set CARE Desktop to open after the restart ("+err.Error()+
+				") - open it yourself once the computer is back")
+	}
+	return a.engine(nil).RestartComputer()
+}
+
 // ValidatePassword lets the wizard check the admin password live as the user types.
 // Returns "" when acceptable, otherwise a human-readable reason to show under the field.
 func (a *App) ValidatePassword(pw string) string {
@@ -305,6 +336,43 @@ func (a *App) ValidateDomain(name string) string {
 	if err := care.ValidateMDNSLabel(name); err != nil {
 		return err.Error()
 	}
+	return ""
+}
+
+// ValidateBackupDir reports why dir can't hold the backups, or "" if it can.
+// The test is a real write. A read-only disk image, a USB stick macOS mounted
+// read-only because it is NTFS, and a plain permissions problem are
+// indistinguishable from a stat, and all three would otherwise only surface as
+// a failed install, once the engine tries to mkdir the backup folder.
+// An empty dir means "use the default", which lives under the home dir.
+func (a *App) ValidateBackupDir(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return ""
+	}
+	info, err := os.Stat(dir)
+	switch {
+	case os.IsNotExist(err):
+		return "That folder isn't there any more. If it is on a removable drive, plug the drive in and choose it again."
+	case err != nil:
+		return "Couldn't open that folder: " + err.Error()
+	case !info.IsDir():
+		return "That is a file, not a folder. Choose a folder to keep the backups in."
+	}
+	probe, err := os.CreateTemp(dir, ".care-write-test-*")
+	if err != nil {
+		switch {
+		case errors.Is(err, syscall.EROFS):
+			return "That drive is read-only, so backups can't be written to it. Disk images and USB drives formatted for Windows (NTFS) are read-only on this Mac. Choose a different folder."
+		case errors.Is(err, os.ErrPermission):
+			return "This computer isn't allowed to write to that folder. Choose a different folder."
+		default:
+			return "Couldn't write to that folder: " + err.Error()
+		}
+	}
+	name := probe.Name()
+	_ = probe.Close()
+	_ = os.Remove(name)
 	return ""
 }
 
@@ -458,7 +526,7 @@ func actionFunc(e *care.Engine, action string) func() error {
 // RunSetup persists the wizard's choices, unpacks the kit, then runs setup+start.
 // Empty backupPassword = encryption off; rememberBackup saves it to the keychain.
 // A seed with no facility name means the clinic details screen was skipped.
-func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberBackup bool, installDir, backupDir string, seed care.ClinicSeed) error {
+func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberBackup bool, installDir, backupDir string) error {
 	if err := care.ValidatePassword(adminPassword); err != nil {
 		return err
 	}
@@ -484,6 +552,16 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 	}
 	if strings.TrimSpace(backupDir) != "" {
 		cfg.BackupDir = filepath.Join(strings.TrimSpace(backupDir), "care-db-backups")
+	}
+	// Refuse here rather than minutes in: the engine's first act is to mkdir the
+	// backup folder. Checked against the folder this run will actually use, so a
+	// bad one carried over from an earlier attempt is caught too.
+	backupParent := strings.TrimSpace(backupDir)
+	if backupParent == "" && cfg.BackupDir != "" {
+		backupParent = filepath.Dir(cfg.BackupDir)
+	}
+	if problem := a.ValidateBackupDir(backupParent); problem != "" {
+		return errString(problem)
 	}
 	if err := a.saveConfig(cfg); err != nil {
 		return err
@@ -518,34 +596,22 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 		if err := e.Setup(); err != nil {
 			return err
 		}
-		if err := e.Start(); err != nil {
-			return err
-		}
-		// Clinic details last: they need the API the steps above bring up. A
-		// rejected field must not fail an install that already works - CARE is
-		// running and the details can be added later, so this only warns.
-		// SeedClinic reports its own progress through the engine logger, which is
-		// already wired to care-log; only the failure needs saying here.
-		if strings.TrimSpace(seed.Facility.Name) != "" {
-			if _, err := e.SeedClinic(seed); err != nil {
-				wruntime.EventsEmit(a.ctx, "care-log",
-					"note: your clinic details were not added ("+err.Error()+
-						") - CARE is running; add the facility and staff from inside CARE")
-			}
-		}
-		return nil
+		return e.Start()
 	}, true, "setup")
 	return nil
 }
 
 // CleanupFailedInstall lets Retry start clean: tear down the leftover Docker project
 // (a crash-looping container keeps re-creating the deleted kit files), then wipe the
-// staged kit and this app's %AppData% folders. Windows-only; no-op elsewhere. Safe on a
-// failed first-run - patient data lives in Docker volumes, not here.
+// staged kit and this app's config folders. Safe on a failed first-run - patient data
+// lives in Docker volumes, not here.
+//
+// This used to be Windows-only, which left the retry on macOS and Linux running
+// against the config the failed attempt had already written. RunSetup only
+// overwrites a saved backup folder when a new one is picked, so a folder that
+// broke the install - a read-only drive, say - survived into every retry and
+// failed it again, with no way to clear it from the wizard.
 func (a *App) CleanupFailedInstall() error {
-	if runtime.GOOS != "windows" {
-		return nil
-	}
 	a.engine(nil).TeardownProject()
 
 	var firstErr error
@@ -561,12 +627,20 @@ func (a *App) CleanupFailedInstall() error {
 		}
 	}
 
-	remove(a.kitDir()) // before the config wipe below, since kitDir reads config
-	if base, err := os.UserConfigDir(); err == nil {
-		if entries, err := os.ReadDir(base); err == nil {
-			for _, ent := range entries {
-				if careAppDataName(ent.Name()) {
-					remove(filepath.Join(base, ent.Name()))
+	remove(a.kitDir())                   // before the config wipe below, since kitDir reads config
+	remove(filepath.Dir(a.configPath())) // our own folder, named exactly
+	if runtime.GOOS == "windows" {
+		// The installer can land our data under any of several spellings
+		// ("care-desktop", "CARE Desktop", ...), so %AppData% is swept by name.
+		// Only on Windows: elsewhere UserConfigDir is a shared directory
+		// (~/Library/Application Support, ~/.config) where a prefix match could
+		// hit another vendor's "care..." folder.
+		if base, err := os.UserConfigDir(); err == nil {
+			if entries, err := os.ReadDir(base); err == nil {
+				for _, ent := range entries {
+					if careAppDataName(ent.Name()) {
+						remove(filepath.Join(base, ent.Name()))
+					}
 				}
 			}
 		}
@@ -675,11 +749,14 @@ func (a *App) RunUninstall(removeImages, removeBackups bool) error {
 			RemoveKit:     true,
 			RemoveBackups: removeBackups,
 		})
-		_ = a.SetAutostart(false)     // remove the login-item, if any
-		care.ForgetBackupPassword()   // drop the remembered backup password, if any
-		_ = os.Remove(a.configPath()) // forget setup - next launch shows the wizard
-		wruntime.EventsEmit(a.ctx, "care-log", "")
-		wruntime.EventsEmit(a.ctx, "care-log", "Uninstalled. This computer's name was not changed back.")
+		_ = a.SetAutostart(false)   // remove the login-item, if any
+		care.ForgetBackupPassword() // drop the remembered backup password, if any
+		// The whole app-support folder, not just config.json: the kit is unpacked
+		// underneath it, and an orphaned directory is still a change we made.
+		_ = os.RemoveAll(filepath.Dir(a.configPath()))
+		// No blanket "the name was not changed back" note any more: the default
+		// mode never renames the machine, and when a rename-mode install did,
+		// Uninstall reverts it and reports anything it genuinely could not.
 		wruntime.EventsEmit(a.ctx, "uninstalled", true)
 	}()
 	return nil
@@ -789,7 +866,14 @@ func (a *App) SaveFrontendPlugins(plugins []care.FrontendPlugin) error {
 func (a *App) OpenURL(url string) { wruntime.BrowserOpenURL(a.ctx, url) }
 
 func (a *App) ChooseFolder(title string) string {
-	dir, err := wruntime.OpenDirectoryDialog(a.ctx, wruntime.OpenDialogOptions{Title: title})
+	opts := wruntime.OpenDialogOptions{Title: title}
+	// Without a starting point the panel opens wherever the app was launched
+	// from — which, run straight off the DMG, is a read-only volume, and the
+	// operator only finds out mid-install.
+	if home, err := os.UserHomeDir(); err == nil {
+		opts.DefaultDirectory = home
+	}
+	dir, err := wruntime.OpenDirectoryDialog(a.ctx, opts)
 	if err != nil {
 		return ""
 	}

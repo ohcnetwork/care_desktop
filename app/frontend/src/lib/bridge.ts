@@ -48,8 +48,17 @@ type Methods = Record<string, (...args: unknown[]) => Promise<unknown>>;
 export const bridge = new Proxy({} as CareBridge, {
   get(_target, method) {
     if (typeof method !== "string") return undefined;
-    return async (...args: unknown[]) =>
-      ((await whenReady()) as unknown as Methods)[method](...args);
+    return async (...args: unknown[]) => {
+      const app = await whenReady();
+      const fn = (app as unknown as Methods)[method];
+      // Name the method. Without this a binding the Go side no longer exports —
+      // a version skew between the app and this bundle — fails as
+      // "(intermediate value)[i] is not a function", which says nothing.
+      if (typeof fn !== "function") {
+        throw new Error(`The CARE Desktop runtime has no "${method}" method.`);
+      }
+      return fn.apply(app, args);
+    };
   },
 }) as CareBridge;
 

@@ -1,9 +1,12 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 
+import { Spinner } from "@/components/spinner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { onCareEvent } from "@/lib/bridge";
+import { errorText, firstLine } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { Check } from "./use-requirement-checks";
+import type { Check, CheckId } from "./use-requirement-checks";
 
 const DOT: Record<Check["state"], string> = {
   wait: "bg-line text-faint",
@@ -15,61 +18,108 @@ const GLYPH: Record<Check["state"], string> = { wait: "·", ok: "✓", bad: "✗
 
 export function CheckRows({
   checks,
-  onFixNetwork,
+  onDone,
 }: {
   checks: Check[];
-  onFixNetwork: () => Promise<void>;
+  /** Re-run the checks once an action finishes, so the row settles by itself. */
+  onDone: () => void;
 }) {
-  const [fixing, setFixing] = useState(false);
+  const [running, setRunning] = useState<CheckId | null>(null);
+  const [progress, setProgress] = useState("");
+  const [failure, setFailure] = useState("");
+
+  // Installing Docker means a download of several hundred megabytes. Echoing the
+  // engine's log line keeps that from looking like a frozen window.
+  useEffect(() => {
+    if (!running) return;
+    setProgress("");
+    return onCareEvent("care-log", (line: unknown) => {
+      const text = firstLine(String(line ?? ""));
+      if (text) setProgress(text);
+    });
+  }, [running]);
+
+  const perform = (check: Check) => {
+    if (!check.action || running) return;
+    setRunning(check.id);
+    setFailure("");
+    void check.action
+      .run()
+      .catch((e) => setFailure(errorText(e)))
+      .finally(() => {
+        setRunning(null);
+        setProgress("");
+        onDone();
+      });
+  };
 
   return (
     <div className="overflow-hidden rounded-lg border border-line">
-      {checks.map((check, i) => (
-        <Fragment key={check.id}>
-          <div
-            className={cn(
-              "flex items-center gap-3 px-3.5 py-[13px]",
-              i > 0 && "border-t border-line",
-              check.state === "bad" && "bg-danger-tint",
-            )}
-          >
-            <span
+      {checks.map((check, i) => {
+        const busy = running === check.id;
+        return (
+          <Fragment key={check.id}>
+            <div
               className={cn(
-                "flex size-5 flex-none items-center justify-center rounded-full text-[11px] font-bold",
-                DOT[check.state],
+                "flex items-center gap-3 px-3.5 py-[13px]",
+                i > 0 && "border-t border-line",
+                check.state === "bad" && "bg-danger-tint",
               )}
             >
-              {GLYPH[check.state]}
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="text-[13.5px] font-semibold text-ink">{check.title}</div>
-              <div className="mt-px text-[12.5px] text-muted-foreground">{check.detail}</div>
-            </div>
-            <Badge variant={check.state === "wait" ? "default" : check.state}>
-              {check.state === "wait" ? "Checking" : check.state === "ok" ? "Ready" : "Not ready"}
-            </Badge>
-          </div>
-          {check.state === "bad" && check.how ? (
-            <div className="flex items-center gap-3 border-t border-danger-bg bg-[#fef6f6] py-3 pr-3.5 pl-[46px]">
-              <span className="flex-1 text-[12.5px] leading-[1.5] text-danger-ink">
-                {check.how}
+              <span
+                className={cn(
+                  "flex size-5 flex-none items-center justify-center rounded-full text-[11px] font-bold",
+                  DOT[check.state],
+                )}
+              >
+                {GLYPH[check.state]}
               </span>
-              {check.fixable ? (
-                <Button
-                  variant="destructive"
-                  disabled={fixing}
-                  onClick={() => {
-                    setFixing(true);
-                    void onFixNetwork().finally(() => setFixing(false));
-                  }}
-                >
-                  {fixing ? "Fixing…" : "Fix automatically"}
-                </Button>
-              ) : null}
+              <div className="min-w-0 flex-1">
+                <div className="text-[13.5px] font-semibold text-ink">{check.title}</div>
+                <div className="mt-px text-[12.5px] text-muted-foreground">{check.detail}</div>
+              </div>
+              <Badge variant={check.state === "wait" ? "default" : check.state}>
+                {check.state === "wait"
+                  ? "Checking"
+                  : check.state === "ok"
+                    ? "Ready"
+                    : "Not ready"}
+              </Badge>
             </div>
-          ) : null}
-        </Fragment>
-      ))}
+
+            {check.state === "bad" && (check.how || check.action) ? (
+              <div className="border-t border-danger-bg bg-[#fef6f6] py-3 pr-3.5 pl-[46px]">
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1 text-[12.5px] leading-[1.5] text-danger-ink">
+                    <div>{check.how}</div>
+                    {check.action ? (
+                      <div className="mt-1 text-muted-foreground">{check.action.detail}</div>
+                    ) : null}
+                  </div>
+                  {check.action ? (
+                    <Button
+                      variant="primary"
+                      disabled={running !== null}
+                      onClick={() => perform(check)}
+                    >
+                      {busy ? <Spinner className="size-3.5" /> : null}
+                      {busy ? "Working…" : check.action.label}
+                    </Button>
+                  ) : null}
+                </div>
+                {busy && progress ? (
+                  <div className="mt-2 truncate font-mono text-[12px] text-muted-foreground">
+                    {progress}
+                  </div>
+                ) : null}
+                {!busy && failure && running === null ? (
+                  <div className="mt-2 text-[12.5px] text-danger-ink">{failure}</div>
+                ) : null}
+              </div>
+            ) : null}
+          </Fragment>
+        );
+      })}
     </div>
   );
 }

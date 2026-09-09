@@ -16,24 +16,72 @@ type DockerStatus struct {
 	Message string `json:"message"`
 }
 
-// DockerCheck is the one prerequisite the app can't bundle. Any Docker-compatible
-// engine works (Docker Engine, Colima, Podman, Rancher Desktop, OrbStack, Docker
-// Desktop) - we just need `docker` + the `docker compose` v2 plugin reachable.
+// DockerCheck is the one prerequisite the app can't bundle. The test is
+// functional, never brand-based: whatever provides `docker` plus the `docker
+// compose` v2 plugin is accepted. Only the advice is per-OS, because what to go
+// and install genuinely differs - see dockerAdvice.
 func (e *Engine) DockerCheck() DockerStatus {
-	cmd := newCmd("docker", "version", "--format", "{{.Server.Version}}")
+	// Server.Os comes back in the same call: on Windows the daemon can be pointed
+	// at Windows containers, and knowing that early is worth the extra field.
+	cmd := newCmd("docker", "version", "--format", "{{.Server.Os}}/{{.Server.Version}}")
 	cmd.Env = e.baseEnv()
 	out, err := cmd.Output()
+	missing, stopped := dockerAdvice()
 	switch {
 	case err == nil:
-		if !e.hasCompose() {
-			return DockerStatus{OK: false, Message: "Docker is running, but the Compose plugin is missing - install 'docker compose' (v2)."}
+		serverOS, version, _ := strings.Cut(strings.TrimSpace(string(out)), "/")
+		if problem := wrongContainerOS(serverOS); problem != "" {
+			return DockerStatus{OK: false, Message: problem}
 		}
-		return DockerStatus{OK: true, Message: "Docker " + strings.TrimSpace(string(out))}
+		if !e.hasCompose() {
+			return DockerStatus{OK: false, Message: composeAdvice()}
+		}
+		return DockerStatus{OK: true, Message: "Docker " + version}
 	case isNotFound(err):
-		return DockerStatus{OK: false, Message: "Docker not found - install Docker (Docker Engine, Colima, or Docker Desktop) and start it."}
+		return DockerStatus{OK: false, Message: missing}
 	default:
-		return DockerStatus{OK: false, Message: "Docker is installed but not running - start it (Docker Desktop, Colima, ...)."}
+		return DockerStatus{OK: false, Message: stopped}
 	}
+}
+
+// dockerAdvice returns what to say when Docker is absent, and when it is present
+// but not running. The engine is deliberately not pinned on macOS and Linux -
+// Colima, OrbStack, Rancher Desktop and plain Docker Engine all serve. Windows is
+// the exception: the stack is Linux containers bind-mounting host paths, which in
+// practice means Docker Desktop on the WSL 2 backend.
+func dockerAdvice() (missing, stopped string) {
+	switch runtime.GOOS {
+	case "windows":
+		return "Docker Desktop is not installed. Install Docker Desktop with the WSL 2 backend, then start it.",
+			"Docker Desktop is installed but not running. Start it and wait until it reports \"Engine running\"."
+	case "darwin":
+		return "Docker not found. Install a Docker engine - Docker Desktop, OrbStack or Colima - and start it.",
+			"Docker is installed but not running. Start Docker Desktop or OrbStack, or run: colima start"
+	default:
+		return "Docker not found. Install Docker Engine plus the Compose v2 plugin, then start the service.",
+			"Docker is installed but not running. Start it with: sudo systemctl start docker"
+	}
+}
+
+// composeAdvice: Desktop-class engines bundle Compose, so a missing plugin there
+// means an old install rather than a missing package.
+func composeAdvice() string {
+	if runtime.GOOS == "linux" {
+		return "Docker is running, but the Compose plugin is missing. Install it: sudo apt install docker-compose-plugin (or the docker-compose-plugin package for your distro)."
+	}
+	return "Docker is running, but the Compose v2 plugin is missing. Update Docker Desktop, or install the docker-compose plugin for your engine."
+}
+
+// wrongContainerOS catches a Windows daemon switched to Windows containers, where
+// none of CARE's Linux images can run. Left to itself it surfaces much later as
+// "no matching manifest for windows/amd64", which names nothing the operator can
+// act on. Empty serverOS means an engine too old to report it - not worth failing.
+func wrongContainerOS(serverOS string) string {
+	if serverOS == "" || serverOS == "linux" {
+		return ""
+	}
+	return "Docker is set to " + serverOS + " containers, and CARE needs Linux containers. " +
+		"Right-click the Docker tray icon and choose \"Switch to Linux containers\"."
 }
 
 // hasCompose reports whether the `docker compose` v2 plugin is available - often

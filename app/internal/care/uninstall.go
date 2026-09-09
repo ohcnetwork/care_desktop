@@ -21,6 +21,9 @@ func (e *Engine) Uninstall(opts UninstallOptions) error {
 	// 0. Grab the root CA before teardown - it lives in the caddy-data volume that
 	//    `compose down -v` destroys, so capture it now to untrust it at the end.
 	rootPEM := e.caddyRootPEM()
+	// Same reason: the machine's original name is recorded in the kit, which
+	// step 4 may delete.
+	prevHostname := e.previousHostname()
 
 	// 1. containers + private network + data volumes. Needs the compose file, so
 	//    do this first, while the kit still exists.
@@ -47,6 +50,7 @@ func (e *Engine) Uninstall(opts UninstallOptions) error {
 		for _, img := range e.uninstallImages() {
 			e.removeImage(img) // best-effort; in-use base images are simply skipped
 		}
+		e.pruneBuildCache()
 	}
 
 	// 3. the git clones - always safe to delete, and the biggest downloads.
@@ -78,12 +82,68 @@ func (e *Engine) Uninstall(opts UninstallOptions) error {
 
 	// 6. the trusted root on THIS machine (best-effort; matched by fingerprint so
 	//    it only ever removes the cert we installed).
-	e.untrustLocalCA(rootPEM)
-	e.removeHostsEntry()   // drop the care.local hosts line we added
+	var failed []string
+	if s := e.untrustLocalCA(rootPEM); s != "" {
+		failed = append(failed, s)
+	}
+	if s := e.removeHostsEntry(); s != "" { // drop the care.local hosts line we added
+		failed = append(failed, s)
+	}
+	if s := e.restoreHostname(prevHostname); s != "" { // undo a "rename"-mode install
+		failed = append(failed, s)
+	}
 	e.undoNetworkChanges() // Windows: revert profile to Public + drop the rules the Fix added
 
-	e.logln("Uninstall complete.")
+	e.reportLeftovers(opts, failed)
 	return nil
+}
+
+// reportLeftovers closes the run with an honest account. "Uninstall complete" on
+// its own is a claim the operator can't check, and the two things most likely to
+// survive - a hosts line or a trusted root the admin prompt was declined for -
+// are exactly the ones worth naming.
+func (e *Engine) reportLeftovers(opts UninstallOptions, failed []string) {
+	var kept []string
+	if !opts.RemoveBackups {
+		if dir := e.backupDir(); dirExists(dir) {
+			kept = append(kept, "Backups in "+dir)
+		}
+	}
+	if !opts.RemoveImages {
+		kept = append(kept, "Downloaded Docker images and build cache")
+	}
+
+	e.logln("")
+	if len(failed) == 0 && len(kept) == 0 {
+		e.logln("Uninstall complete. Every change CARE made to this computer has been reverted.")
+		return
+	}
+	if len(failed) == 0 {
+		e.logln("Uninstall complete. Kept on purpose:")
+	} else {
+		e.logln("Uninstall finished, but these could NOT be reverted:")
+		for _, s := range failed {
+			e.logln("  ! " + s)
+		}
+		if len(kept) > 0 {
+			e.logln("Kept on purpose:")
+		}
+	}
+	for _, s := range kept {
+		e.logln("  - " + s)
+	}
+}
+
+// pruneBuildCache reclaims what our image builds left in Docker's build cache -
+// by far the largest thing an install leaves behind (tens of GB, dwarfing the
+// images themselves). The cache is machine-wide and carries no project label, so
+// there is no way to remove only ours; it runs under RemoveImages only, which is
+// already the "take the downloads with it" choice.
+func (e *Engine) pruneBuildCache() {
+	e.logln("Pruning Docker build cache (shared with any other projects on this computer)...")
+	if err := e.run(nil, "docker", "builder", "prune", "-f"); err != nil {
+		e.logln("  (couldn't prune the build cache - continuing)")
+	}
 }
 
 // Tags come from the accessors that built them; hardcoding them here is what made

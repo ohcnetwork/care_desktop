@@ -91,10 +91,14 @@ func (e *Engine) addHostsUnprivileged(host string) error {
 	return newCmd("sh", "-c", hostsAddSh(host)).Run()
 }
 
-func (e *Engine) removeHostsEntry() {
+// removeHostsEntry drops the line install added. It returns a description of what
+// was left behind, or "" when the file is clean — a surviving "127.0.0.1
+// care.local" is silently poisonous: the machine keeps resolving the name to
+// itself long after CARE is gone, and every other device on the LAN looks broken.
+func (e *Engine) removeHostsEntry() string {
 	data, err := os.ReadFile(hostsPath())
 	if err != nil || !strings.Contains(string(data), hostsMarker) {
-		return
+		return ""
 	}
 	e.logln("Removing the " + e.host() + " hosts entry...")
 	if runtime.GOOS == "windows" {
@@ -103,19 +107,32 @@ func (e *Engine) removeHostsEntry() {
 		ps := "Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-Command'," +
 			psSingleQuote(inner)
 		_ = newCmd("powershell", "-NoProfile", "-Command", ps).Run()
-		return
+		return e.hostsEntryLeftover()
 	}
 	// cat back rather than mv: keeps the file's inode, owner, and mode.
 	p := hostsPath()
 	sh := `t=$(mktemp) && grep -v ` + shSingleQuote(hostsMarker) + ` ` + p +
 		` > "$t" && cat "$t" > ` + p + `; rm -f "$t"`
 	if e.runPrivileged(sh, false) == nil {
-		return
+		return e.hostsEntryLeftover()
 	}
 	if e.Confirm == nil || e.Confirm("Remove the "+e.host()+" hosts entry?",
 		"Remove the line CARE added to this computer's hosts file?\n\nThis needs administrator approval.") {
 		_ = e.runPrivileged(sh, true)
 	}
+	return e.hostsEntryLeftover()
+}
+
+// hostsEntryLeftover re-reads the file: the removal runs through a shell (and on
+// Windows through an elevation prompt the operator can dismiss), so its exit
+// status says little about whether the line is actually gone.
+func (e *Engine) hostsEntryLeftover() string {
+	data, err := os.ReadFile(hostsPath())
+	if err != nil || !strings.Contains(string(data), hostsMarker) {
+		return ""
+	}
+	return "The line \"" + hostsLine(e.host()) + "\" is still in " + hostsPath() +
+		". Until it is removed this computer resolves " + e.host() + " to itself."
 }
 
 func (e *Engine) runPrivileged(sh string, elevated bool) error {

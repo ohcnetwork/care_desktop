@@ -1,11 +1,10 @@
-import { ChevronRight, Server } from "lucide-react";
+import { Download, Server } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Field } from "@/components/field";
 import { BoxNote, InputBox } from "@/components/input-box";
 import { FootNote, Screen, ScreenBody, ScreenFoot, ScreenHead } from "@/components/screen";
 import { SectionTitle, StepDot } from "@/components/section-header";
-import { toast } from "@/components/ui/sonner";
 import {
   Accordion,
   AccordionContent,
@@ -23,7 +22,9 @@ import { errorText, normaliseHost } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useCare, type SetupStep } from "@/state/care-store";
 import type { SetupForm } from "@/state/forms";
+import type { RestartPlan } from "@/types";
 import { CheckRows } from "./check-rows";
+import { RestartDialog } from "./restart-dialog";
 import { PasswordPair } from "./password-pair";
 import { useRequirementChecks } from "./use-requirement-checks";
 
@@ -41,15 +42,17 @@ export function SetupScreen({
   form: SetupForm;
   patch: (values: Partial<SetupForm>) => void;
 }) {
-  const { openStep, setOpenStep, setStepDone, goToClinicDetails } = useCare();
+  const { openStep, setOpenStep, setStepDone, startInstall } = useCare();
   const host = normaliseHost(form.hostInput);
-  const { checks, overall, recheckAll, checkMDNS, fixNetwork } = useRequirementChecks(host);
+  const { checks, overall, recheckAll, checkMDNS } = useRequirementChecks(host);
 
   const [expanded, setExpanded] = useState<string>(openStep);
   const [hostProblem, setHostProblem] = useState("");
   const [verifying, setVerifying] = useState(false);
   const [verifyNote, setVerifyNote] = useState("");
   const [showAdminInfo, setShowAdminInfo] = useState(false);
+  const [backupDirProblem, setBackupDirProblem] = useState("");
+  const [restart, setRestart] = useState<RestartPlan | null>(null);
 
   const adminStrength = usePasswordStrength(form.adminPassword);
   const backupStrength = usePasswordStrength(form.backupPassword);
@@ -60,7 +63,8 @@ export function SetupScreen({
   const backupDone =
     backupStrength.strong &&
     form.backupConfirm !== "" &&
-    form.backupConfirm === form.backupPassword;
+    form.backupConfirm === form.backupPassword &&
+    backupDirProblem === "";
   const ready = overall === "ok" && hostOk && backupDone && adminDone;
 
   useEffect(() => setStepDone("checks", overall === "ok"), [overall, setStepDone]);
@@ -99,26 +103,40 @@ export function SetupScreen({
     hostTimer.current = window.setTimeout(() => void applyHost(value), 400);
   };
 
+  // Probe the folder before accepting it: a read-only disk image or an NTFS
+  // stick would otherwise only fail once the install is already under way.
   const chooseBackupFolder = async () => {
     const chosen = await bridge.ChooseFolder("Choose backup folder");
-    if (chosen) patch({ backupDir: chosen });
+    if (!chosen) return;
+    setVerifyNote("");
+    setBackupDirProblem(await bridge.ValidateBackupDir(chosen));
+    patch({ backupDir: chosen });
   };
 
   const onContinue = async () => {
     setVerifying(true);
     setVerifyNote("");
-    const state = await recheckAll();
+    const [state, dirProblem] = await Promise.all([
+      recheckAll(),
+      bridge.ValidateBackupDir(form.backupDir),
+    ]);
+    setBackupDirProblem(dirProblem);
     setVerifying(false);
-    if (state !== "ok" || !hostOk || !adminDone || !backupDone) {
+    if (state !== "ok" || !hostOk || !adminDone || !backupDone || dirProblem !== "") {
       setVerifyNote("A step is no longer met — fix it and try again.");
       return;
     }
-    // Record the pass before navigating: this screen unmounts on the next
-    // commit, so the effect that mirrors `overall` into the rail would never
-    // see the result and the step would keep the "Checking" state it was put
-    // into a moment ago.
+    // Record the pass before starting: this screen unmounts on the next commit,
+    // so the effect that mirrors `overall` into the rail would never see the
+    // result and the step would keep the "Checking" state it was put into a
+    // moment ago.
     setStepDone("checks", true);
-    goToClinicDetails();
+    startInstall({
+      host,
+      adminPassword: form.adminPassword,
+      backupPassword: form.backupPassword,
+      backupDir: form.backupDir,
+    });
   };
 
   const issues = checks.filter((c) => c.state === "bad").length;
@@ -129,14 +147,17 @@ export function SetupScreen({
         ? "Waiting for your computer to be ready…"
         : !hostOk
           ? "Fix the clinic address to continue."
-          : !backupDone
-            ? "Set and confirm the backup password to continue."
-            : !adminDone
-              ? "Set and confirm the admin password to continue."
-              : "Ready. This takes about 10 to 20 minutes.");
+          : backupDirProblem
+            ? "Choose a backup folder this computer can write to."
+            : !backupDone
+              ? "Set and confirm the backup password to continue."
+              : !adminDone
+                ? "Set and confirm the admin password to continue."
+                : "Ready. This takes about 10 to 20 minutes.");
 
   return (
     <Screen>
+      <RestartDialog plan={restart} onDismiss={() => setRestart(null)} />
       <ScreenHead
         title="Set up your clinic"
         subtitle="One time, on this computer. About 15 minutes."
@@ -206,8 +227,12 @@ export function SetupScreen({
 
               <CheckRows
                 checks={checks}
-                onFixNetwork={async () => {
-                  toast(await fixNetwork());
+                onDone={async () => {
+                  await recheckAll();
+                  // Asked only here, right after an install: a restart Windows
+                  // wanted for its own reasons is not ours to nag about.
+                  const plan = await bridge.RestartPlan();
+                  if (plan.needed) setRestart(plan);
                 }}
               />
 
@@ -241,7 +266,12 @@ export function SetupScreen({
               </Badge>
             </AccordionTrigger>
             <AccordionContent>
-              <div className="flex items-center gap-3 rounded-lg border border-line bg-background px-3.5 py-[13px]">
+              <div
+                className={cn(
+                  "flex items-center gap-3 rounded-lg border bg-background px-3.5 py-[13px]",
+                  backupDirProblem ? "border-danger-line" : "border-line",
+                )}
+              >
                 <span className="flex size-[30px] flex-none items-center justify-center rounded-sm bg-brand-bg text-brand-ink">
                   <Server className="size-4" strokeWidth={2} />
                 </span>
@@ -255,6 +285,11 @@ export function SetupScreen({
                 </div>
                 <Button onClick={() => void chooseBackupFolder()}>Choose</Button>
               </div>
+              {backupDirProblem ? (
+                <div className="-mt-2 text-[12.5px] leading-[1.5] text-danger-ink">
+                  {backupDirProblem}
+                </div>
+              ) : null}
 
               <Field
                 label="Backup password"
@@ -341,8 +376,8 @@ export function SetupScreen({
           disabled={!ready || verifying}
           onClick={() => void onContinue()}
         >
-          Continue
-          <ChevronRight className="size-[17px]" strokeWidth={2.2} />
+          <Download className="size-[17px]" strokeWidth={2.2} />
+          Install and start
         </Button>
         <FootNote>{note}</FootNote>
       </ScreenFoot>

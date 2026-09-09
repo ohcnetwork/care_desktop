@@ -57,7 +57,6 @@ services:
     env_file: ./backend.env
     volumes:
       - ./clinic_settings.py:/settings/clinic_settings.py:ro
-      - ./scripts/clinic_seed.py:/clinic_seed.py:ro   # run on demand by `care seed` / the setup screen
     entrypoint: ["bash", "start.sh"]
     depends_on:
       db: {condition: service_healthy}

@@ -130,19 +130,27 @@ var linuxCAAnchors = []string{
 
 // Sweeps by CN as well as fingerprint: setup mints a new root each install, so
 // matching only the current one leaves every earlier root trusted forever.
-func (e *Engine) untrustLocalCA(pem string) {
+// untrustLocalCA removes the root we installed. It returns a description of what
+// was left behind, or "" when there is nothing to report — a still-trusted root
+// is the leftover with the longest reach, so uninstall names it rather than
+// burying it in the log.
+func (e *Engine) untrustLocalCA(pem string) string {
 	fp := certSHA1Hex(pem)
 	removed, err := e.removeTrustedRoots(fp)
 	switch {
 	case err != nil:
 		e.logln("Could not remove CARE's certificate from this machine's trust store (" +
 			err.Error() + "). Remove \"" + caCommonName + "\" by hand if you want it gone.")
+		return "The certificate \"" + caCommonName + "\" is still trusted by this computer (" +
+			err.Error() + "). Remove it in Keychain Access, or run: security delete-certificate -c " +
+			shSingleQuote(caCommonName)
 	case removed:
 		e.logln("Removed CARE's certificate from this machine's trust store.")
 	case fp == "":
 		e.logln("Note: couldn't read CARE's certificate before teardown, and found none to remove. " +
 			"If a browser still trusts \"" + caCommonName + "\", remove it by hand.")
 	}
+	return ""
 }
 
 func (e *Engine) removeTrustedRoots(fp string) (bool, error) {

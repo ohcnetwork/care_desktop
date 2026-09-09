@@ -193,7 +193,14 @@ function UninstallPanel() {
       </label>
       <label className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink2">
         <Checkbox checked={removeImages} onCheckedChange={(v) => setRemoveImages(v === true)} />
-        <span>Also remove downloaded Docker images.</span>
+        <span>
+          Also remove downloaded Docker images and clear Docker's build cache.
+          <span className="text-muted-foreground">
+            {" "}
+            The build cache is shared, so this frees space other projects on this
+            computer are using too.
+          </span>
+        </span>
       </label>
 
       {confirming ? (

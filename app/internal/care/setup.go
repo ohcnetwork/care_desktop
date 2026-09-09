@@ -178,9 +178,11 @@ func (e *Engine) ensureMDNS() {
 	name := e.mdnsName()
 	switch runtime.GOOS {
 	case "darwin":
-		if cur, _ := e.capture("scutil", "--get", "LocalHostName"); cur == name {
+		cur, _ := e.capture("scutil", "--get", "LocalHostName")
+		if cur == name {
 			return
 		}
+		e.savePreviousHostname(cur)
 		e.logln("Naming this Mac '" + name + "' so devices can use http://" + name + ".local ...")
 		if err := e.run(nil, "sudo", "scutil", "--set", "LocalHostName", name); err != nil {
 			e.logln("(skipped renaming - use the server IP)")
@@ -189,10 +191,79 @@ func (e *Engine) ensureMDNS() {
 		if _, err := exec.LookPath("avahi-daemon"); err != nil {
 			_ = e.run(nil, "sh", "-c", "sudo apt-get install -y avahi-daemon || sudo dnf install -y avahi || true")
 		}
+		cur, _ := e.capture("hostnamectl", "--static")
+		e.savePreviousHostname(cur)
 		_ = e.run(nil, "sudo", "hostnamectl", "set-hostname", name)
 		_ = e.run(nil, "sudo", "systemctl", "enable", "--now", "avahi-daemon")
 	case "windows":
 		// This PC resolves <name>.local via the hosts entry (ensureLocalAccess).
 		e.logln("Windows: this PC uses a hosts entry for https://" + name + ".local; other devices use mDNS or a static IP.")
 	}
+}
+
+// --- hostname, saved so "rename" mode can be undone -------------------------
+
+// The machine name from before a rename-mode install. It lives in the kit
+// because the engine has no other state store (the CLI has no config file), so
+// uninstall must read it before it deletes the kit.
+func (e *Engine) hostnameBackupPath() string {
+	return filepath.Join(e.Kit, ".previous-hostname")
+}
+
+// savePreviousHostname records the name we are about to replace. It never
+// overwrites an existing record: a second install would otherwise save CARE's
+// own name over the operator's original and make the rename permanent.
+func (e *Engine) savePreviousHostname(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" || name == e.mdnsName() {
+		return
+	}
+	if _, err := os.Stat(e.hostnameBackupPath()); err == nil {
+		return
+	}
+	if err := os.MkdirAll(e.Kit, 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(e.hostnameBackupPath(), []byte(name+"\n"), 0o644)
+}
+
+func (e *Engine) previousHostname() string {
+	b, err := os.ReadFile(e.hostnameBackupPath())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// restoreHostname puts the machine name back after a rename-mode install,
+// returning a description of what was left if it could not. The rename needs
+// sudo, which a windowed app has no terminal for, so the failure path hands the
+// operator the exact command rather than pretending it is done.
+func (e *Engine) restoreHostname(previous string) string {
+	if previous == "" {
+		return "" // never renamed - the default advertise mode touches no names
+	}
+	name := e.mdnsName()
+	var get []string
+	var set []string
+	switch runtime.GOOS {
+	case "darwin":
+		get = []string{"scutil", "--get", "LocalHostName"}
+		set = []string{"sudo", "scutil", "--set", "LocalHostName", previous}
+	case "linux":
+		get = []string{"hostnamectl", "--static"}
+		set = []string{"sudo", "hostnamectl", "set-hostname", previous}
+	default:
+		return ""
+	}
+	// Only undo our own rename: if the name is no longer the one we set, someone
+	// chose it deliberately and it is not ours to change back.
+	if cur, _ := e.capture(get[0], get[1:]...); strings.TrimSpace(cur) != name {
+		return ""
+	}
+	e.logln("Restoring this computer's name to '" + previous + "'...")
+	if err := e.run(nil, set[0], set[1:]...); err != nil {
+		return "This computer is still named \"" + name + "\". Restore it with:  " + strings.Join(set, " ")
+	}
+	return ""
 }

@@ -1,20 +1,34 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { bridge } from "@/lib/bridge";
+import type { ToolPlan } from "@/types";
 
 export type CheckTone = "wait" | "ok" | "bad";
+export type CheckId = "docker" | "git" | "mdns" | "network";
+
+/**
+ * What the operator can press on a failing row. The wizard is used by people who
+ * will not open a terminal, so a check that can't be acted on is a dead end -
+ * every failure that we know how to fix carries the fix.
+ */
+export type CheckAction = {
+  label: string;
+  detail: string;
+  run: () => Promise<void>;
+};
+
 export type Check = {
-  id: "runtime" | "mdns" | "network";
+  id: CheckId;
   title: string;
   detail: string;
   state: CheckTone;
   how: string;
-  fixable: boolean;
+  action?: CheckAction;
 };
 
-type Result = { state: CheckTone; how: string; fixable: boolean };
+type Result = { state: CheckTone; how: string; action?: CheckAction };
 
-const WAITING: Result = { state: "wait", how: "", fixable: false };
+const WAITING: Result = { state: "wait", how: "" };
 
 function summarise(results: Result[]): CheckTone {
   if (results.some((r) => r.state === "bad")) return "bad";
@@ -22,30 +36,75 @@ function summarise(results: Result[]): CheckTone {
 }
 
 /**
- * The three gates on "can this computer run a clinic". The network profile one
- * is Windows-only: elsewhere the host reports it as not applicable and it is
- * hidden rather than shown as passing.
+ * Turns a plan from the host into a button. "manual" means we can't do it here,
+ * so the button opens the vendor's download page instead of pretending.
+ */
+function actionFor(plan: ToolPlan, install: () => Promise<void>): CheckAction | undefined {
+  if (plan.action === "" || plan.label === "") return undefined;
+  if (plan.action === "manual") {
+    return {
+      label: plan.label,
+      detail: plan.detail,
+      run: () => bridge.OpenURL(plan.url),
+    };
+  }
+  return { label: plan.label, detail: plan.detail, run: install };
+}
+
+/**
+ * The prerequisites the app can't bundle, one row each. Docker and git are
+ * separate rows rather than one "runtime" row because they are fixed in
+ * different ways, and a row can only carry one button.
  */
 export function useRequirementChecks(host: string) {
-  const [runtime, setRuntime] = useState<Result>(WAITING);
+  const [docker, setDocker] = useState<Result>(WAITING);
+  const [git, setGit] = useState<Result>(WAITING);
   const [mdns, setMdns] = useState<Result>(WAITING);
   const [network, setNetwork] = useState<Result | null>(null);
 
-  const checkRuntime = useCallback(async (): Promise<Result> => {
-    setRuntime(WAITING);
+  const checkDocker = useCallback(async (): Promise<Result> => {
+    setDocker(WAITING);
     let result: Result;
     try {
-      const [docker, git] = await Promise.all([bridge.DockerStatus(), bridge.GitStatus()]);
-      const ok = docker.ok && git.ok;
-      result = {
-        state: ok ? "ok" : "bad",
-        how: ok ? "" : docker.ok ? git.message : docker.message,
-        fixable: false,
-      };
+      const status = await bridge.DockerStatus();
+      if (status.ok) {
+        result = { state: "ok", how: "" };
+      } else {
+        const plan = await bridge.DockerPlan();
+        result = {
+          state: "bad",
+          how: status.message,
+          action: actionFor(plan, () =>
+            plan.action === "open" ? bridge.OpenDocker() : bridge.InstallDocker(),
+          ),
+        };
+      }
     } catch (e) {
-      result = { state: "bad", how: String(e), fixable: false };
+      result = { state: "bad", how: String(e) };
     }
-    setRuntime(result);
+    setDocker(result);
+    return result;
+  }, []);
+
+  const checkGit = useCallback(async (): Promise<Result> => {
+    setGit(WAITING);
+    let result: Result;
+    try {
+      const status = await bridge.GitStatus();
+      if (status.ok) {
+        result = { state: "ok", how: "" };
+      } else {
+        const plan = await bridge.GitPlan();
+        result = {
+          state: "bad",
+          how: status.message,
+          action: actionFor(plan, () => bridge.InstallGit()),
+        };
+      }
+    } catch (e) {
+      result = { state: "bad", how: String(e) };
+    }
+    setGit(result);
     return result;
   }, []);
 
@@ -57,15 +116,16 @@ export function useRequirementChecks(host: string) {
       result = {
         state: status.ok ? "ok" : "bad",
         how: status.ok ? "" : status.how || status.message,
-        fixable: false,
       };
     } catch (e) {
-      result = { state: "bad", how: String(e), fixable: false };
+      result = { state: "bad", how: String(e) };
     }
     setMdns(result);
     return result;
   }, []);
 
+  // Windows-only gate; elsewhere the host reports it as not applicable and the
+  // row is hidden rather than shown as passing.
   const checkNetwork = useCallback(async (): Promise<Result | null> => {
     let result: Result | null;
     try {
@@ -74,7 +134,14 @@ export function useRequirementChecks(host: string) {
         ? {
             state: status.ok ? "ok" : "bad",
             how: status.ok ? "" : status.how || status.message,
-            fixable: status.fixable,
+            action:
+              status.ok || !status.fixable
+                ? undefined
+                : {
+                    label: "Fix automatically",
+                    detail: "Sets this WiFi network to Private and opens the clinic's ports.",
+                    run: () => bridge.FixNetwork(),
+                  },
           }
         : null;
     } catch {
@@ -85,20 +152,14 @@ export function useRequirementChecks(host: string) {
   }, []);
 
   const recheckAll = useCallback(async (): Promise<CheckTone> => {
-    const [r, m, n] = await Promise.all([checkRuntime(), checkMDNS(), checkNetwork()]);
-    return summarise(n ? [r, m, n] : [r, m]);
-  }, [checkMDNS, checkNetwork, checkRuntime]);
-
-  const fixNetwork = useCallback(async (): Promise<string> => {
-    let message = "Network set to Private.";
-    try {
-      await bridge.FixNetwork();
-    } catch (e) {
-      message = `Couldn't change the network: ${String(e)}`;
-    }
-    await checkNetwork();
-    return message;
-  }, [checkNetwork]);
+    const [d, g, m, n] = await Promise.all([
+      checkDocker(),
+      checkGit(),
+      checkMDNS(),
+      checkNetwork(),
+    ]);
+    return summarise(n ? [d, g, m, n] : [d, g, m]);
+  }, [checkDocker, checkGit, checkMDNS, checkNetwork]);
 
   useEffect(() => {
     void recheckAll();
@@ -107,10 +168,16 @@ export function useRequirementChecks(host: string) {
   const checks = useMemo<Check[]>(() => {
     const list: Check[] = [
       {
-        id: "runtime",
-        title: "Runtime engine",
-        detail: "Docker, Compose and Git",
-        ...runtime,
+        id: "docker",
+        title: "Docker",
+        detail: "Runs the clinic software on this computer",
+        ...docker,
+      },
+      {
+        id: "git",
+        title: "Git",
+        detail: "Downloads the clinic software",
+        ...git,
       },
       {
         id: "mdns",
@@ -128,9 +195,12 @@ export function useRequirementChecks(host: string) {
       });
     }
     return list;
-  }, [host, mdns, network, runtime]);
+  }, [docker, git, host, mdns, network]);
 
-  const overall = useMemo(() => summarise(network ? [runtime, mdns, network] : [runtime, mdns]), [mdns, network, runtime]);
+  const overall = useMemo(
+    () => summarise(network ? [docker, git, mdns, network] : [docker, git, mdns]),
+    [docker, git, mdns, network],
+  );
 
-  return { checks, overall, recheckAll, checkMDNS, fixNetwork };
+  return { checks, overall, recheckAll, checkMDNS };
 }

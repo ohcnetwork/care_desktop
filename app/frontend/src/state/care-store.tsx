@@ -15,10 +15,10 @@ import {
 import { toast } from "@/components/ui/sonner";
 import { bridge, onCareEvent } from "@/lib/bridge";
 import { errorText, firstLine } from "@/lib/format";
-import { stepsForRun, type RunStep } from "@/lib/run-steps";
-import type { Backup, ClinicSeed } from "@/types";
+import { RUN_STEPS, type RunStep } from "@/lib/run-steps";
+import type { Backup } from "@/types";
 
-export type Flow = "setup" | "clinic" | "installing" | "failed" | "panel";
+export type Flow = "setup" | "installing" | "failed" | "panel";
 export type SetupStep = "checks" | "backup" | "admin" | "install";
 export type PanelTab = "overview" | "backups" | "advanced";
 export type SystemState = "running" | "partial" | "stopped" | "unknown";
@@ -40,7 +40,7 @@ export type RunState = {
 };
 
 const IDLE_RUN: RunState = {
-  steps: stepsForRun(true),
+  steps: RUN_STEPS,
   stepIdx: 0,
   pct: 0,
   startedAt: 0,
@@ -75,11 +75,8 @@ type CareStore = {
   stepsDone: Record<SetupStep, boolean>;
   setStepDone: (step: SetupStep, done: boolean) => void;
 
-  goToClinicDetails: () => void;
-  backToSetupForm: () => void;
-
   run: RunState;
-  startInstall: (params: InstallParams, seed: ClinicSeed) => void;
+  startInstall: (params: InstallParams) => void;
   retryInstall: () => Promise<void>;
   restartSetup: () => void;
   openPanel: () => void;
@@ -312,16 +309,13 @@ export function CareProvider({ children }: { children: ReactNode }) {
   }, [bootPanel, setFlow]);
 
   // --- setup flow -------------------------------------------------------
-  const goToClinicDetails = useCallback(() => setFlow("clinic"), [setFlow]);
-  const backToSetupForm = useCallback(() => setFlow("setup"), [setFlow]);
-
   const startInstall = useCallback(
-    (params: InstallParams, seed: ClinicSeed) => {
+    (params: InstallParams) => {
       logRef.current = [];
       lastErrorRef.current = "";
       setMdnsName(params.host);
       setRun({
-        steps: stepsForRun(seed.facility.name !== ""),
+        steps: RUN_STEPS,
         stepIdx: 0,
         pct: 0,
         startedAt: Date.now(),
@@ -338,7 +332,6 @@ export function CareProvider({ children }: { children: ReactNode }) {
           true,
           "",
           params.backupDir,
-          seed,
         )
         .catch((e) => {
           lastErrorRef.current = errorText(e);
@@ -447,8 +440,6 @@ export function CareProvider({ children }: { children: ReactNode }) {
       setOpenStep,
       stepsDone,
       setStepDone,
-      goToClinicDetails,
-      backToSetupForm,
       run,
       startInstall,
       retryInstall,
@@ -470,8 +461,8 @@ export function CareProvider({ children }: { children: ReactNode }) {
       log,
     }),
     [
-      ready, flow, mdnsName, openStep, stepsDone, setStepDone, goToClinicDetails,
-      backToSetupForm, run, startInstall, retryInstall, restartSetup, openPanel,
+      ready, flow, mdnsName, openStep, stepsDone, setStepDone,
+      run, startInstall, retryInstall, restartSetup, openPanel,
       tab, busy, busyLabel, system, backups, autostart, refresh, reloadBackups,
       runAction, setAutostart, restore, uninstall, log,
     ],

@@ -3,7 +3,7 @@
 //
 //	care setup | start | stop | restart | rebuild-backend | rebuild-frontend |
 //	     status | backup-now | list-backups | restore <dump> [files.tar.gz] |
-//	     uninstall [--images] [--backups] --yes | mdns [name] | options
+//	     uninstall [--images] [--backups] --yes | mdns [name]
 //
 // The kit dir defaults to the current directory (override with CARE_DESKTOP_DIR).
 package main
@@ -64,8 +64,6 @@ func main() {
 		err = uninstall(e, os.Args[2:])
 	case "mdns":
 		err = mdnsServe(e, os.Args[2:])
-	case "options":
-		err = printOptions(e)
 	default:
 		usage()
 		os.Exit(1)
@@ -185,24 +183,5 @@ func confirmTTY(title, message string) bool {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: care [setup|start|stop|restart|rebuild-backend|rebuild-frontend|status|backup-now|list-backups|restore <dump> [files.tar.gz]|uninstall [--images] [--backups] --yes|mdns [name]|options]")
-}
-
-// printOptions lists the roles and facility types this install accepts. The
-// clinic details screen ships its own copy of these lists because it runs before
-// there is a backend to ask - this is how you check that copy is still right.
-func printOptions(e *care.Engine) error {
-	opts, err := e.Options()
-	if err != nil {
-		return err
-	}
-	fmt.Println("roles:")
-	for _, role := range opts.Roles {
-		fmt.Println(" ", role)
-	}
-	fmt.Println("facility types:")
-	for _, t := range opts.FacilityTypes {
-		fmt.Println(" ", t)
-	}
-	return nil
+	fmt.Fprintln(os.Stderr, "usage: care [setup|start|stop|restart|rebuild-backend|rebuild-frontend|status|backup-now|list-backups|restore <dump> [files.tar.gz]|uninstall [--images] [--backups] --yes|mdns [name]]")
 }

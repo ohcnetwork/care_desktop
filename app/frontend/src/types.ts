@@ -11,6 +11,25 @@ export type NetworkStatus = {
   fixable: boolean;
 };
 export type Health = { active: boolean; code: number; detail: string };
+
+/** Whether this machine must restart before the prerequisites will work. */
+export type RestartPlan = {
+  needed: boolean;
+  title: string;
+  detail: string;
+  label: string;
+};
+
+/** What the app can do about a prerequisite that isn't ready on this machine. */
+export type ToolAction = "" | "install" | "open" | "manual";
+export type ToolPlan = {
+  tool: string;
+  action: ToolAction;
+  label: string;
+  detail: string;
+  needs_admin: boolean;
+  url: string;
+};
 export type AppState = { setup_done: boolean; mdns_name: string; docker: DockerStatus };
 
 export type Backup = {
@@ -41,30 +60,6 @@ export type ClinicApp = {
   url: string;
   warning: string;
   needs_backend_plug: string;
-};
-
-export type SeedMember = {
-  username: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  phone_number: string;
-  gender: string;
-  role: string;
-  password: string;
-};
-
-export type ClinicSeed = {
-  geo_organization: string;
-  facility: {
-    name: string;
-    facility_type: string;
-    address: string;
-    pincode: string;
-    phone_number: string;
-    description: string;
-  };
-  members: SeedMember[];
 };
 
 /** Which of the two .env files / plugin sets an editor is pointed at. */

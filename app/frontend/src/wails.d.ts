@@ -6,12 +6,13 @@ import type {
   Backup,
   CarePlugin,
   ClinicApp,
-  ClinicSeed,
   DockerStatus,
   FrontendPlugin,
   Health,
   NameStatus,
   NetworkStatus,
+  RestartPlan,
+  ToolPlan,
 } from "./types";
 
 declare global {
@@ -25,9 +26,17 @@ declare global {
           MDNSStatus(): Promise<NameStatus>;
           NetworkStatus(): Promise<NetworkStatus>;
           FixNetwork(): Promise<void>;
+          DockerPlan(): Promise<ToolPlan>;
+          GitPlan(): Promise<ToolPlan>;
+          InstallDocker(): Promise<void>;
+          InstallGit(): Promise<void>;
+          OpenDocker(): Promise<void>;
+          RestartPlan(): Promise<RestartPlan>;
+          RestartNow(): Promise<void>;
           CareHealth(): Promise<Health>;
           ValidatePassword(pw: string): Promise<string>;
           ValidateDomain(name: string): Promise<string>;
+          ValidateBackupDir(dir: string): Promise<string>;
           SetMDNSName(name: string): Promise<void>;
           VerifyAdminPassword(pw: string): Promise<boolean>;
           CareAction(action: string): Promise<void>;
@@ -39,7 +48,6 @@ declare global {
             rememberBackup: boolean,
             installDir: string,
             backupDir: string,
-            seed: ClinicSeed,
           ): Promise<void>;
           CleanupFailedInstall(): Promise<void>;
           ReadEnv(name: string): Promise<string>;
