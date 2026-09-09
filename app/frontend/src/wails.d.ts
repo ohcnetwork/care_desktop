@@ -1,65 +1,18 @@
 // Ambient types for the Wails bridge that the runtime injects on window.
-// Go methods (main.App) are exposed as window.go.main.App.<Method> returning Promises;
-// events go through window.runtime.
-
-export {};
-
-type DockerStatus = { ok: boolean; message: string };
-type NameStatus = { ok: boolean; message: string; how: string };
-type NetworkStatus = { applicable: boolean; ok: boolean; message: string; how: string; fixable: boolean };
-type Health = { active: boolean; code: number; detail: string };
-type AppState = { setup_done: boolean; mdns_name: string; docker: DockerStatus };
-type Backup = {
-  db_dump: string;
-  files_archive: string;
-  label: string;
-  manual: boolean;
-  encrypted: boolean;
-  size_bytes: number;
-};
-type CarePlugin = {
-  name: string;
-  package_name: string;
-  version?: string;
-  configs?: Record<string, unknown>;
-};
-type ClinicApp = {
-  slug: string;
-  name: string;
-  description: string;
-  enabled: boolean;
-  managed: boolean;
-  ready: boolean;
-  url: string;
-  warning: string;
-  needs_backend_plug: string;
-};
-type FrontendPlugin = {
-  slug: string;
-  meta: Record<string, unknown>;
-};
-type SeedMember = {
-  username: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  phone_number: string;
-  gender: string;
-  role: string;
-  password: string;
-};
-type ClinicSeed = {
-  geo_organization: string;
-  facility: {
-    name: string;
-    facility_type: string;
-    address: string;
-    pincode: string;
-    phone_number: string;
-    description: string;
-  };
-  members: SeedMember[];
-};
+// Go methods (main.App) are exposed as window.go.main.App.<Method> returning
+// Promises; events go through window.runtime.
+import type {
+  AppState,
+  Backup,
+  CarePlugin,
+  ClinicApp,
+  ClinicSeed,
+  DockerStatus,
+  FrontendPlugin,
+  Health,
+  NameStatus,
+  NetworkStatus,
+} from "./types";
 
 declare global {
   interface Window {

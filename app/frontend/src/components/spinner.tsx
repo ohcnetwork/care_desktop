@@ -1,0 +1,15 @@
+import { cn } from "@/lib/utils";
+
+/** The design's activity ring — a border circle with one side knocked out. */
+export function Spinner({ className }: { className?: string }) {
+  return (
+    <span
+      role="status"
+      aria-label="Working"
+      className={cn(
+        "block size-[17px] animate-spin rounded-full border-2 border-current border-t-transparent",
+        className,
+      )}
+    />
+  );
+}

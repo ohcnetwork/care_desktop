@@ -1,0 +1,227 @@
+import { Lock } from "lucide-react";
+import { useState } from "react";
+
+import { InputBox } from "@/components/input-box";
+import { SectionTitle } from "@/components/section-header";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { Button } from "@/components/ui/button";
+import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { bridge } from "@/lib/bridge";
+import { useCare } from "@/state/care-store";
+import type { Section } from "@/types";
+import { EnvEditor } from "./env-editor";
+import { PluginTable } from "./plugin-table";
+
+export function AdvancedTab() {
+  const [unlocked, setUnlocked] = useState(false);
+  // Both editors follow one switch, the way the panel has always worked.
+  const [section, setSection] = useState<Section>("backend");
+
+  if (!unlocked) return <AdminGate onUnlock={() => setUnlocked(true)} />;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <RebuildCard />
+
+      <Accordion type="multiple">
+        <AccordionItem value="config">
+          <AccordionTrigger>
+            <SectionTitle
+              title="System configuration"
+              summary="Environment settings for the backend and the app"
+            />
+          </AccordionTrigger>
+          <AccordionContent>
+            <SectionSwitch section={section} onChange={setSection} />
+            <EnvEditor key={section} section={section} />
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="plugins">
+          <AccordionTrigger>
+            <SectionTitle title="Plugins" summary="Extra features for CARE" />
+          </AccordionTrigger>
+          <AccordionContent>
+            <SectionSwitch section={section} onChange={setSection} />
+            <PluginTable key={section} section={section} />
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="danger" className="border-danger-line">
+          <AccordionTrigger>
+            <SectionTitle
+              title={<span className="text-danger-ink">Uninstall CARE Desktop</span>}
+              summary="Removes CARE and all patient data from this computer"
+            />
+          </AccordionTrigger>
+          <AccordionContent>
+            <UninstallPanel />
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
+    </div>
+  );
+}
+
+function SectionSwitch({
+  section,
+  onChange,
+}: {
+  section: Section;
+  onChange: (section: Section) => void;
+}) {
+  return (
+    <Tabs value={section} onValueChange={(v) => onChange(v as Section)}>
+      <TabsList>
+        <TabsTrigger value="backend">Backend</TabsTrigger>
+        <TabsTrigger value="frontend">Frontend</TabsTrigger>
+      </TabsList>
+    </Tabs>
+  );
+}
+
+function RebuildCard() {
+  const { busy, runAction } = useCare();
+  return (
+    <Card className="flex items-center gap-3.5 px-[18px] py-4">
+      <div className="min-w-0 flex-1">
+        <CardTitle>Rebuild the app</CardTitle>
+        <CardDescription>Latest code and settings. Patient data is kept.</CardDescription>
+      </div>
+      <Button disabled={busy} onClick={() => void runAction("rebuild-frontend")}>
+        Rebuild
+      </Button>
+    </Card>
+  );
+}
+
+function AdminGate({ onUnlock }: { onUnlock: () => void }) {
+  const [password, setPassword] = useState("");
+  const [reveal, setReveal] = useState(false);
+  const [error, setError] = useState("");
+  const [checking, setChecking] = useState(false);
+
+  const unlock = async () => {
+    if (password === "") {
+      setError("Enter the admin password.");
+      return;
+    }
+    setChecking(true);
+    try {
+      if (await bridge.VerifyAdminPassword(password)) {
+        onUnlock();
+        return;
+      }
+      setError("That password does not match the admin password.");
+    } catch {
+      setError("Couldn't check the password.");
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto mt-[34px] max-w-[420px] rounded-2xl border border-line bg-card p-[26px] text-center shadow-card">
+      <span className="mx-auto flex size-10 items-center justify-center rounded-full bg-hair text-muted-foreground">
+        <Lock className="size-[18px]" strokeWidth={2} />
+      </span>
+      <div className="mt-3.5 text-[17px] font-bold text-ink">Admin password</div>
+      <div className="mt-[5px] text-[13px] text-muted-foreground">
+        These options can rebuild or remove CARE.
+      </div>
+      <InputBox tone={error ? "bad" : "neutral"} className="mt-4">
+        <Input
+          type={reveal ? "text" : "password"}
+          placeholder="Password"
+          autoComplete="off"
+          className="h-full flex-1 rounded-none border-none bg-transparent px-0 focus-visible:border-none"
+          value={password}
+          onChange={(e) => {
+            setPassword(e.target.value);
+            setError("");
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void unlock();
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => setReveal((v) => !v)}
+          className="cursor-pointer p-1 text-xs font-semibold text-muted-foreground hover:text-brand-ink"
+        >
+          {reveal ? "Hide" : "Show"}
+        </button>
+      </InputBox>
+      {error ? (
+        <div className="mt-2 text-left text-[12.5px] text-danger-ink">{error}</div>
+      ) : null}
+      <Button
+        variant="primary"
+        size="block"
+        className="mt-3.5"
+        disabled={checking}
+        onClick={() => void unlock()}
+      >
+        Unlock
+      </Button>
+    </div>
+  );
+}
+
+function UninstallPanel() {
+  const { busy, uninstall } = useCare();
+  const [removeBackups, setRemoveBackups] = useState(false);
+  const [removeImages, setRemoveImages] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
+  return (
+    <>
+      <label className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink2">
+        <Checkbox
+          checked={removeBackups}
+          onCheckedChange={(v) => setRemoveBackups(v === true)}
+        />
+        <span>Also delete backups. Nothing can be recovered afterwards.</span>
+      </label>
+      <label className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink2">
+        <Checkbox checked={removeImages} onCheckedChange={(v) => setRemoveImages(v === true)} />
+        <span>Also remove downloaded Docker images.</span>
+      </label>
+
+      {confirming ? (
+        <div className="flex items-center gap-3 rounded-lg border border-danger-bg bg-danger-tint px-4 py-[13px] text-[12.5px] text-danger-ink">
+          <span className="flex-1">
+            Delete CARE and all patient data on this computer?
+          </span>
+          <Button onClick={() => setConfirming(false)}>Cancel</Button>
+          <Button
+            variant="destructive"
+            onClick={() => {
+              setConfirming(false);
+              void uninstall(removeImages, removeBackups);
+            }}
+          >
+            Yes, delete
+          </Button>
+        </div>
+      ) : (
+        <Button
+          variant="destructive"
+          className="self-start"
+          disabled={busy}
+          onClick={() => setConfirming(true)}
+        >
+          Uninstall everything
+        </Button>
+      )}
+    </>
+  );
+}
