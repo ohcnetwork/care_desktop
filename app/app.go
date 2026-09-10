@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"sync"
 	"time"
 
+	"github.com/ohcnetwork/care_desktop/app/internal/release"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/mdns"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 
@@ -16,16 +18,29 @@ import (
 // window.go.main.App.<Method>. It owns config persistence and drives the engine.
 type App struct {
 	ctx       context.Context
-	installFS fs.FS // embedded deployment install dir
+	installFS fs.FS         // embedded deployment install dir
+	pins      *release.Pins // release pins from the embedded .env
 
 	advMu   sync.Mutex       // guards adv
 	adv     *mdns.Advertiser // the running mDNS responder (advertise mode), if any
 	advStop chan struct{}    // closed on shutdown to end the DHCP watcher
 }
 
-func NewApp(installFS fs.FS) *App {
+// NewApp fails if the embedded .env is missing or incomplete. That is a broken
+// build, not a runtime condition: without pins the app cannot name a single image,
+// so starting up and failing later - halfway through a clinic's setup - would be
+// worse than refusing now.
+func NewApp(installFS fs.FS) (*App, error) {
 	proc.FixPath() // make docker/git findable when launched from Finder/Explorer
-	return &App{installFS: installFS}
+	env, err := fs.ReadFile(installFS, "install/"+release.EnvFile)
+	if err != nil {
+		return nil, fmt.Errorf("this build is missing its embedded %s: %w", release.EnvFile, err)
+	}
+	pins, err := release.Load(env)
+	if err != nil {
+		return nil, err
+	}
+	return &App{installFS: installFS, pins: pins}, nil
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -49,12 +64,9 @@ func (a *App) shutdown(context.Context) {
 	a.advMu.Unlock()
 }
 
-// startAdvertise brings up the mDNS responder for the configured name, unless mDNS
-// is in "rename"/"off" mode. Best-effort: a failure is logged, never fatal.
+// startAdvertise brings up the mDNS responder for the configured name.
+// Best-effort: a failure is logged, never fatal.
 func (a *App) startAdvertise() {
-	if a.engine(nil).MDNSMode() != "advertise" {
-		return
-	}
 	a.advMu.Lock()
 	defer a.advMu.Unlock()
 	if a.adv != nil {

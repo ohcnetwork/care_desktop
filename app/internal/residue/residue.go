@@ -44,7 +44,6 @@ type Options struct {
 	Project      string   // compose project label, e.g. care-desktop
 	InstallDir   string   // where an install would have unpacked itself
 	ConfigPath   string   // the app's own config.json
-	CloneDirs    []string // the care / care_fe checkouts
 	Images       []string // every image tag an install builds or pulls
 	StoredSecret bool     // a backup password is in the OS secret store
 }
@@ -78,11 +77,6 @@ func Scan(o Options) Report {
 
 	if _, err := os.Stat(filepath.Join(o.InstallDir, "docker-compose.yml")); err == nil {
 		add("install-dir", "Installed files", o.InstallDir)
-	}
-	for _, dir := range o.CloneDirs {
-		if st, err := os.Stat(dir); err == nil && st.IsDir() {
-			add("clones", "Downloaded source code", dir)
-		}
 	}
 	if o.ConfigPath != "" && proc.FileExists(o.ConfigPath) {
 		add("config", "Saved settings", o.ConfigPath)

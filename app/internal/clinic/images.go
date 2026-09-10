@@ -13,12 +13,12 @@ func (e *Clinic) pruneBuildCache() {
 }
 
 // Tags come from the accessors that built them; hardcoding them here is what made
-// `--images` match nothing once versions.env pinned real versions.
+// `--images` match nothing once .env pinned real versions.
 func (e *Clinic) uninstallImages() []string {
 	return []string{
-		e.backendImage(), e.frontendImage(), e.wafCaddyImage(), e.backupImage(),
-		e.postgresImage(), e.redisImage(), e.minioImage(),
-		e.caddyImage(), e.caddyImage() + "-builder", // xcaddy build stage
+		e.Pins.BackendImage, e.Pins.FrontendImage, e.Pins.CaddyWafImage, e.Pins.BackupImage,
+		e.Pins.PostgresImage, e.Pins.RedisImage, e.Pins.MinioImage,
+		e.Pins.CaddyImage, e.Pins.CaddyImage + "-builder", // xcaddy build stage
 	}
 }
 

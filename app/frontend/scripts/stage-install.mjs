@@ -13,7 +13,10 @@ const here = dirname(fileURLToPath(import.meta.url)); // app/frontend/scripts
 const source = join(here, "..", "..", "..", "deployments");
 const install = join(here, "..", "..", "install"); // app/install
 
-const items = readdirSync(source).filter((name) => !name.startsWith("."));
+// .env must be staged: Compose auto-loads it from the project dir, and it is
+// what pins every image. Only OS/editor junk is skipped.
+const SKIP = new Set([".DS_Store", "Thumbs.db", ".gitkeep"]);
+const items = readdirSync(source).filter((name) => !SKIP.has(name));
 if (items.length === 0) throw new Error(`nothing to stage: ${source} is empty`);
 
 // Clear first, so a file deleted from deployments/ cannot linger in an install

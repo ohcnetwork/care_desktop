@@ -5,33 +5,38 @@
 package clinic
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
-	"sync"
+	"path/filepath"
 
+	"github.com/compose-spec/compose-go/v2/dotenv"
 	"github.com/ohcnetwork/care_desktop/app/internal/compose"
-	"github.com/ohcnetwork/care_desktop/app/internal/settings"
+	"github.com/ohcnetwork/care_desktop/app/internal/release"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 )
 
 // Clinic runs CARE actions against an install directory (the folder holding
 // docker-compose.yml, the env files, and the mounted configs).
 type Clinic struct {
-	InstallDir string            // dir with docker-compose.yml, *.env, clinic_settings.py, ...
-	Env        map[string]string // overrides: BACKUP_DIR, CARE_MDNS_NAME, CARE_ADMIN_PASSWORD, CARE_NO_MDNS
-	Log        func(string)      // optional sink for streamed output (one line at a time)
+	InstallDir string // dir with docker-compose.yml, *.env, clinic_settings.py, ...
+
+	// Operator choices, supplied by the caller for the run that needs them. They
+	// are deliberately not read from the environment or .env: Compose interpolates
+	// .env into every service, so a password there would be visible stack-wide.
+	MDNSName       string // clinic address label, without ".local" (default "care")
+	AdminPassword  string // CARE superuser password; empty means don't create one
+	BackupPassword string // encrypts backups; empty means write them in plaintext
+	BackupDir      string // where backups are written (default ~/Desktop/care-db-backups)
+
+	// Pins are the release pins (images, source refs), loaded and validated once
+	// at startup from the embedded .env. Every action needs them.
+	Pins *release.Pins
+
+	Log func(string) // optional sink for streamed output (one line at a time)
 	// Confirm asks the user a yes/no question (native dialog in the app). When
-	// nil, callers treat it as "no" - never block a headless/CLI run.
+	// nil, callers treat it as "no" - never block on a missing UI.
 	Confirm func(title, message string) bool
-
-	set  *settings.Settings
-	once sync.Once
-}
-
-// cfg lazily binds the settings reader to this engine's dir and overrides.
-func (e *Clinic) cfg() *settings.Settings {
-	e.once.Do(func() { e.set = &settings.Settings{Dir: e.InstallDir, Env: e.Env} })
-	return e.set
 }
 
 func (e *Clinic) logln(s string) {
@@ -48,21 +53,46 @@ func (e *Clinic) baseEnv() []string {
 	env := os.Environ()
 	set := func(k, v string) { env = append(env, k+"="+v) }
 	set("PATH", proc.AugmentedPath())
-	set("BACKEND_IMAGE", e.backendImage())
-	set("FRONTEND_IMAGE", e.frontendImage())
-	set("POSTGRES_IMAGE", e.postgresImage())
-	set("REDIS_IMAGE", e.redisImage())
-	set("MINIO_IMAGE", e.minioImage())
-	set("CADDY_IMAGE", e.caddyImage())
-	set("CADDY_WAF_IMAGE", e.wafCaddyImage())
-	set("BACKUP_IMAGE", e.backupImage())
-	set("MINIO_ACCESS_KEY", "minioadmin")
-	set("MINIO_SECRET_KEY", "minioadmin")
+	set("BACKEND_IMAGE", e.Pins.BackendImage)
+	set("FRONTEND_IMAGE", e.Pins.FrontendImage)
+	set("POSTGRES_IMAGE", e.Pins.PostgresImage)
+	set("REDIS_IMAGE", e.Pins.RedisImage)
+	set("MINIO_IMAGE", e.Pins.MinioImage)
+	set("CADDY_IMAGE", e.Pins.CaddyImage)
+	set("CADDY_WAF_IMAGE", e.Pins.CaddyWafImage)
+	set("BACKUP_IMAGE", e.Pins.BackupImage)
+	// MinIO's root credentials must match what the backend authenticates with.
+	// They are read from backend.env - the file the UI edits - because hardcoding
+	// them here meant changing them in Settings moved the backend's key while
+	// MinIO kept the old root user, and uploads failed with an auth error that
+	// pointed nowhere near the cause.
+	creds := e.minioCreds()
+	set("MINIO_ACCESS_KEY", creds[0])
+	set("MINIO_SECRET_KEY", creds[1])
 	set("BACKUP_DIR", e.backupDir())
-	for k, v := range e.Env {
-		set(k, v)
-	}
 	return env
+}
+
+// minioCreds returns MinIO's access key and secret from backend.env, falling
+// back to MinIO's own defaults only when the file cannot be read (before setup,
+// when no container will be started anyway).
+func (e *Clinic) minioCreds() [2]string {
+	out := [2]string{"minioadmin", "minioadmin"}
+	b, err := os.ReadFile(filepath.Join(e.InstallDir, "backend.env"))
+	if err != nil {
+		return out
+	}
+	env, err := dotenv.Parse(bytes.NewReader(b))
+	if err != nil {
+		return out
+	}
+	if v := env["MINIO_ACCESS_KEY"]; v != "" {
+		out[0] = v
+	}
+	if v := env["MINIO_SECRET_KEY"]; v != "" {
+		out[1] = v
+	}
+	return out
 }
 
 // workdir returns the install dir only if it exists - before setup it doesn't, and a
@@ -100,29 +130,25 @@ func (e *Clinic) dc(args ...string) error {
 	return e.run(nil, "docker", append([]string{"compose"}, args...)...)
 }
 
-// Settings forwarders. See internal/settings.
-func (e *Clinic) backendImage() string   { return e.cfg().BackendImage() }
-func (e *Clinic) frontendImage() string  { return e.cfg().FrontendImage() }
-func (e *Clinic) postgresImage() string  { return e.cfg().PostgresImage() }
-func (e *Clinic) redisImage() string     { return e.cfg().RedisImage() }
-func (e *Clinic) minioImage() string     { return e.cfg().MinioImage() }
-func (e *Clinic) caddyImage() string     { return e.cfg().CaddyImage() }
-func (e *Clinic) backupImage() string    { return e.cfg().BackupImage() }
-func (e *Clinic) wafCaddyImage() string  { return e.cfg().WafCaddyImage() }
-func (e *Clinic) backupPassword() string { return e.cfg().BackupPassword() }
-func (e *Clinic) beDir() string          { return e.cfg().BeDir() }
-func (e *Clinic) feDir() string          { return e.cfg().FeDir() }
-func (e *Clinic) mdnsName() string       { return e.cfg().MDNSName() }
-func (e *Clinic) adminPassword() string  { return e.cfg().AdminPassword() }
-func (e *Clinic) backupDir() string      { return e.cfg().BackupDir() }
+func (e *Clinic) mdnsName() string {
+	if e.MDNSName != "" {
+		return e.MDNSName
+	}
+	return "care"
+}
 
-// MDNSName is the bare host label to advertise/resolve (e.g. "care").
-func (e *Clinic) MDNSName() string { return e.cfg().MDNSName() }
+func (e *Clinic) backupDir() string {
+	if e.BackupDir != "" {
+		return e.BackupDir
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "Desktop", "care-db-backups")
+}
 
-// MDNSMode selects how http://<name>.local is made resolvable.
-func (e *Clinic) MDNSMode() string { return e.cfg().MDNSMode() }
+// Label is the bare host label to advertise, without ".local" (e.g. "care").
+func (e *Clinic) Label() string { return e.mdnsName() }
 
 // Builder binds an image builder to this engine's settings and runner.
 func (e *Clinic) Builder() *compose.Builder {
-	return compose.NewBuilder(e.Runner(), e.cfg(), e.Log)
+	return compose.NewBuilder(e.Runner(), e.InstallDir, e.Pins, e.Log)
 }

@@ -91,8 +91,8 @@ and don't `curl` it without `?ok=1` (you'll save the redirect HTML and get
 - It must be a host **every device** can resolve: `https://care.local` (default)
   or `https://<server-ip>`. Files are served through Caddy on the same origin as the
   app — so no extra port is involved.
-- Check `care status` shows `minio running` (Caddy proxies to it).
-- After changing it in `backend.env`, run `care start`.
+- Check the panel shows `minio running` (Caddy proxies to it).
+- After changing it in `backend.env`, use **Save & apply** in the app.
 
 > If previews fail with a *camera/scanner* error rather than a network error, the page
 > isn't a secure context — confirm you're on `https://` and the cert is trusted (above).
@@ -101,7 +101,7 @@ and don't `curl` it without `?ok=1` (you'll save the redirect HTML and get
 
 ## "Install & Start" ran but the app isn't reachable
 
-- Run `care status` (or check the panel). All services should be `running`.
+- Check the panel. All services should be `running`.
 - If `backend` keeps restarting, the database may still be initializing — wait a
   minute and `care restart`. Migrations retry automatically for ~100s on first start.
 - Check the log pane (or `docker compose -p care-desktop logs backend`) for the error.
@@ -111,7 +111,7 @@ and don't `curl` it without `?ok=1` (you'll save the redirect HTML and get
 ## First setup fails partway (network / build error)
 
 - Setup needs **internet** to clone the repos and pull base images. Confirm connectivity.
-- Re-run **Install & Start** (or `care setup`) — it's safe to repeat: existing clones
+- Re-run **Install & Start** — it's safe to repeat: existing clones
   and images are reused, and the secret/admin steps are idempotent.
 - On Windows, **Try again** first tears down leftover containers and wipes the
   half-staged install dir, so the retry starts clean.
@@ -165,5 +165,5 @@ docker rmi care:clinic care_fe:clinic                    # force a rebuild next 
 # remove saved app state (macOS path shown):
 rm -rf ~/Library/Application\ Support/care-desktop
 ```
-Then launch the app (or `care setup`) for a fresh install. **This deletes all data —
+Then launch the app for a fresh install. **This deletes all data —
 only do it intentionally.**

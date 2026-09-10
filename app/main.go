@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"os"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -18,9 +19,13 @@ var assets embed.FS
 var installFS embed.FS
 
 func main() {
-	app := NewApp(installFS)
+	app, err := NewApp(installFS)
+	if err != nil {
+		println("error:", err.Error())
+		os.Exit(1)
+	}
 
-	err := wails.Run(&options.App{
+	err = wails.Run(&options.App{
 		Title:     "CARE Desktop",
 		Width:     1180,
 		Height:    900,

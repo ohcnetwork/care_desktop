@@ -26,7 +26,6 @@ is required.
 | Install on **Linux** | [install-linux.md](install-linux.md) |
 | Understand how it all fits together | [architecture.md](architecture.md) |
 | Change a setting (every env variable explained) | [configuration.md](configuration.md) |
-| Use the terminal commands | [cli.md](cli.md) |
 | Back up / restore data | [backups.md](backups.md) |
 | Fix a problem | [troubleshooting.md](troubleshooting.md) |
 | Build the app from source (developers) | [building.md](building.md) |

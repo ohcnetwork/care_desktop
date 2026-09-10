@@ -31,8 +31,15 @@ jobs:
       - name: Build (host)
         run: go build ./...
 
-      - name: Build CLI
-        run: go build ./cmd/care
+      # internal/ must stay free of Wails so the engine is testable and portable.
+      # The CLI used to prove this by compiling; assert it directly instead.
+      - name: internal/ must not import Wails
+        run: |
+          if grep -rq "wailsapp/wails" internal/; then
+            echo "internal/ must not import Wails - keep UI concerns in app/*.go"
+            grep -rn "wailsapp/wails" internal/
+            exit 1
+          fi
 
       - name: Cross-compile
         run: |

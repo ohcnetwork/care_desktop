@@ -1,7 +1,7 @@
 # Building from source (developers)
 
 CARE Desktop's control app is a [Wails](https://wails.io) (Go + web) project in
-`app/`. One codebase produces the desktop app **and** the `care` CLI, sharing the
+`app/`. The Wails GUI is a thin layer over the engine, sharing the
 packages under `app/internal/`.
 
 For *what the code does*, see [architecture.md](architecture.md). This page is about
@@ -13,7 +13,7 @@ For *what the code does*, see [architecture.md](architecture.md). This page is a
 
 | Tool | Version | Notes |
 |---|---|---|
-| **Go** | 1.23+ | the engine, CLI, and Wails backend |
+| **Go** | 1.23+ | the engine and Wails backend |
 | **Node** | 20+ | builds the web UI (Vite) |
 | **Wails CLI** | v2 | `go install github.com/wailsapp/wails/v2/cmd/wails@latest` |
 | **C toolchain** | — | macOS: Xcode CLT · Linux: `build-essential` + WebKitGTK dev libs · Windows: MSVC build tools |
@@ -33,7 +33,6 @@ app/
   app.go             the bound struct (window.go.main.App.*) + lifecycle
   app_*.go           one file per group of bindings (config, status, actions,
                      backup, uninstall, env, plugins, UI)
-  cmd/care/          the CLI — the thing that keeps the packages below Wails-free
   frontend/          web UI (TS + Vite); scripts/stage-install.mjs stages the install dir
 
   internal/
@@ -52,14 +51,13 @@ app/
       trust/         the local root CA in the OS trust store
       hosts/         the loopback entry in /etc/hosts
       mdns/          advertising and resolving <name>.local
-      hostname/      save and restore the machine name ("rename" mode)
       netfix/        Windows network profile and firewall rules
       reboot/        is a restart pending, and perform it
       autostart/     launch-at-login
 ```
 
-Nothing under `internal/` imports Wails. `cmd/care` is what enforces that: if a
-Wails import creeps in, the CLI stops building.
+Nothing under `internal/` imports Wails, so the engine stays testable and portable.
+CI asserts this directly (a `grep` step), because nothing else would catch it.
 
 `deployments/` (`docker-compose.yml`, `*.env`, `Caddyfile`, `minio/`, `scripts/`,
 `setup/`) is the **install dir** — the single source of truth. The frontend build
@@ -92,15 +90,6 @@ and packages the app. The install dir ends up embedded in the binary.
 
 ---
 
-## Build just the CLI
-```bash
-cd app
-go build -o care ./cmd/care
-```
-No Wails/Node needed for the CLI — it's pure Go + stdlib.
-
----
-
 ## Checks
 There are no tests right now — the old suite was removed during the restructure
 and will be rewritten against the new packages.
@@ -110,7 +99,7 @@ What CI runs on every push (`.github/workflows/ci.yml`):
 ```bash
 cd app
 go build ./...                       # host
-go build ./cmd/care                  # the CLI — keeps internal/ Wails-free
+grep -rq wailsapp/wails internal/    # must fail — keeps internal/ Wails-free
 GOOS=windows go build ./...          # cross-compile
 GOOS=darwin  go build ./...
 go vet ./...
@@ -139,7 +128,7 @@ What it does:
    (`DATABASE_URL` is unchanged), so the seeded rows land in the postgres volume and
    **persist** across restarts.
 
-Prerequisites: the stack must be **up** first (`care start` or the desktop app). The
+Prerequisites: the stack must be **up** first (start it from the desktop app). The
 script addresses the stack by compose project name, so it runs from any directory.
 
 > **Dev/demo only.** Don't run it against a real clinic's data. If you reseed often,
@@ -192,4 +181,4 @@ release — use it to test packaging changes without cutting a tag.
 
 By default the engine builds `ohcnetwork/care` and `ohcnetwork/care_fe` at branch
 `develop`. To ship a reproducible release, set `CARE_BE_REF` / `CARE_FE_REF` (and the
-image tags) in `versions.env` — see [configuration.md](configuration.md#versionsenv).
+image tags) in `deployments/.env` — see [configuration.md](configuration.md#env).

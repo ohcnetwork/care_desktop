@@ -31,7 +31,7 @@ func (e *Clinic) forceRemoveProject() {
 
 // looksLikeSourceRepo guards against deleting the developer's git checkout when the
 // install dir points at the repo root (e.g. `care uninstall` from the source tree). A
-// managed install dir - unpacked config plus the care/care_fe clones - has none of these.
+// managed install dir - unpacked config - has none of these.
 func looksLikeSourceRepo(dir string) bool {
 	for _, marker := range []string{".git", "app", "docs"} {
 		if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {

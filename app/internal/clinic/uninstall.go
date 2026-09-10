@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ohcnetwork/care_desktop/app/internal/sys/hostname"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/hosts"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/netfix"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/trust"
@@ -14,7 +13,7 @@ import (
 // the private network, and the data volumes are always removed; the rest is opt-in.
 type UninstallOptions struct {
 	RemoveImages     bool // also delete the built + base Docker images (re-downloaded next install)
-	RemoveInstallDir bool // also delete the install dir (unpacked config + the care/care_fe clones)
+	RemoveInstallDir bool // also delete the install dir (unpacked config)
 	RemoveBackups    bool // also delete the backup folder - DESTROYS the recovery data
 }
 
@@ -25,9 +24,6 @@ func (e *Clinic) Uninstall(opts UninstallOptions) error {
 	// 0. Grab the root CA before teardown - it lives in the caddy-data volume that
 	//    `compose down -v` destroys, so capture it now to untrust it at the end.
 	rootPEM := e.caddyRootPEM()
-	// Same reason: the machine's original name is recorded in the install dir, which
-	// step 4 may delete.
-	prevHostname := hostname.Previous(e.InstallDir)
 
 	// 1. containers + private network + data volumes. Needs the compose file, so
 	//    do this first, while the install dir still exists.
@@ -57,14 +53,6 @@ func (e *Clinic) Uninstall(opts UninstallOptions) error {
 		e.pruneBuildCache()
 	}
 
-	// 3. the git clones - always safe to delete, and the biggest downloads.
-	for _, dir := range []string{e.beDir(), e.feDir()} {
-		if _, err := os.Stat(dir); err == nil {
-			e.logln("Removing " + dir)
-			_ = os.RemoveAll(dir)
-		}
-	}
-
 	// 4. the install dir (unpacked config). Guarded: never delete a source checkout -
 	//    the CLI's install dir can be the repo root itself.
 	if opts.RemoveInstallDir {
@@ -91,9 +79,6 @@ func (e *Clinic) Uninstall(opts UninstallOptions) error {
 		failed = append(failed, s)
 	}
 	if s := hosts.Remove(e.Log, e.Confirm, e.host()); s != "" { // drop the care.local hosts line we added
-		failed = append(failed, s)
-	}
-	if s := hostname.Restore(e.Runner(), e.Log, e.InstallDir, e.mdnsName(), prevHostname); s != "" { // undo a "rename"-mode install
 		failed = append(failed, s)
 	}
 	netfix.Undo(e.Log) // Windows: revert profile to Public + drop the rules Fix added

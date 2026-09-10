@@ -12,10 +12,9 @@ A single Go codebase (`app/`) ships in two forms that share one **engine**:
 
 - **Desktop app** (Wails) — a native window with an installer wizard and a control
   panel. For non-technical staff.
-- **`care` CLI** — the same actions from a terminal. For developers/servers.
 
 The **engine** (`app/internal/`) is plain Go that shells out to `docker` and
-`git`. It has no GUI dependency, so the app and CLI can never drift. It replaced
+`git`. It has no GUI dependency, which keeps it testable and portable. It replaced
 the old `care.sh` bash script entirely — there is **no shell dependency** on any OS.
 
 What the engine does:
@@ -200,7 +199,7 @@ still outstanding and runs it in a **single elevated call behind a single
 confirmation**. Each step is tried unprivileged first and drops out if it succeeds
 (or was already done), so the prompt lists only what genuinely needs admin, and a
 repeat `start` asks for nothing at all. The approval is a **native dialog** in the
-app and a `y/N` prompt in the CLI; elevation is `osascript` (macOS), `RunAs`/UAC
+app; elevation is `osascript` (macOS), `RunAs`/UAC
 (Windows), or `pkexec` (Linux). It's best-effort throughout and never fails `start`:
 by that point the clinic is already serving every other device.
 

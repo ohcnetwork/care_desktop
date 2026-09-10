@@ -14,7 +14,7 @@ the clinic. Other devices install nothing; they open `https://care.local`.
 | A 64-bit Linux (Ubuntu/Debian/Fedora, etc.) | the server OS | — |
 | **Docker Engine** + **docker compose v2**, running | runs the whole stack | [docs.docker.com/engine/install](https://docs.docker.com/engine/install/) — install Docker Engine + the Compose plugin |
 | **git** | downloads + builds CARE once | `sudo apt install git` / `sudo dnf install git` |
-| **Avahi** | advertises `care.local` | `sudo apt install avahi-daemon` / `sudo dnf install avahi` (the CLI/app sets this up too) |
+| **Avahi** | not required — the app advertises `care.local` itself | |
 | **WebKitGTK** (only for the desktop app) | renders the app window | the `.deb` in step 3 pulls it in; otherwise `sudo apt install libgtk-3-0 libwebkit2gtk-4.0-37` |
 
 > Add your user to the `docker` group so you don't need `sudo` for Docker:
@@ -41,7 +41,6 @@ hostname        # should print: care
 
 > The desktop installer **checks** this (step 3) and shows these instructions if it
 > isn't set. A GUI can't prompt for sudo, so run the commands above once in a terminal
-> (or run the CLI `care setup`, which does it for you with sudo).
 
 ---
 
@@ -59,13 +58,7 @@ hostname        # should print: care
 > ships only WebKitGTK 4.1 (Ubuntu 24.04+), apt refuses it — build from source there
 > ([building.md](building.md)).
 
-**Option B — Command line:** build the `care` CLI ([building.md](building.md)) or run
-it directly, then see [cli.md](cli.md):
-```bash
-cd care-desktop
-# go run needs the repo root; CARE_DESKTOP_DIR points the CLI at the stack
-CARE_DESKTOP_DIR=./deployments go run ./app/cmd/care setup     # then: ... start
-```
+**Option B — build from source:** see [building.md](building.md).
 
 ---
 
@@ -107,16 +100,16 @@ if a warning persists.
 
 ---
 
-## Run it headless (no desktop)
+## Start CARE on boot
 
-On a server with no GUI, skip the desktop app entirely and use the CLI:
+The containers are declared `restart: unless-stopped`, so the stack returns
+whenever Docker starts. Enable Docker at boot:
+
 ```bash
-cd care-desktop
-go run ./app/cmd/care setup
-go run ./app/cmd/care start
+sudo systemctl enable docker
 ```
-To start CARE on boot, the containers already have `restart: unless-stopped`, so once
-Docker starts at boot the stack returns. (Enable Docker at boot:
-`sudo systemctl enable docker`.)
 
-See [cli.md](cli.md) for all commands and [troubleshooting.md](troubleshooting.md) for fixes.
+The desktop app must be running for `care.local` to resolve — it advertises the
+name on the LAN. Devices can always reach the clinic by IP.
+
+See [troubleshooting.md](troubleshooting.md) for fixes.

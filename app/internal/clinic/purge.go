@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/autostart"
-	"github.com/ohcnetwork/care_desktop/app/internal/sys/hostname"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/hosts"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/netfix"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/trust"
@@ -14,9 +13,6 @@ import (
 // Project is the compose project name every container, volume, and network of an
 // install is labelled with.
 func (e *Clinic) Project() string { return composeProject }
-
-// CloneDirs are the source checkouts an install downloads.
-func (e *Clinic) CloneDirs() []string { return []string{e.beDir(), e.feDir()} }
 
 // Images is every image tag an install builds or pulls.
 func (e *Clinic) Images() []string { return e.uninstallImages() }
@@ -44,7 +40,6 @@ func (e *Clinic) Purge() error {
 	// that is about to be destroyed, and the machine's original name is recorded
 	// inside the install dir this deletes.
 	rootPEM := e.caddyRootPEM()
-	prevHostname := hostname.Previous(e.InstallDir)
 
 	if _, err := os.Stat(filepath.Join(e.InstallDir, "docker-compose.yml")); err == nil {
 		e.logln("Removing containers, network, and data volumes...")
@@ -60,13 +55,6 @@ func (e *Clinic) Purge() error {
 	}
 	e.pruneBuildCache()
 
-	for _, dir := range e.CloneDirs() {
-		if _, err := os.Stat(dir); err == nil {
-			e.logln("Removing " + dir)
-			_ = os.RemoveAll(dir)
-		}
-	}
-
 	if looksLikeSourceRepo(e.InstallDir) {
 		e.logln("Install dir looks like a source checkout - left in place: " + e.InstallDir)
 	} else if _, err := os.Stat(e.InstallDir); err == nil {
@@ -79,9 +67,6 @@ func (e *Clinic) Purge() error {
 		failed = append(failed, s)
 	}
 	if s := hosts.Remove(e.Log, e.Confirm, e.host()); s != "" {
-		failed = append(failed, s)
-	}
-	if s := hostname.Restore(e.Runner(), e.Log, e.InstallDir, e.mdnsName(), prevHostname); s != "" {
 		failed = append(failed, s)
 	}
 	netfix.Undo(e.Log)

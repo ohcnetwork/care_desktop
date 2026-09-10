@@ -6,9 +6,9 @@ directly. On an installed clinic the same files live in the app's install dir.
 
 | File | Applied by | When it takes effect |
 |---|---|---|
-| [`backend.env`](#backendenv) | `care start` | container recreated, re-reads the file — **no image rebuild** |
+| [`backend.env`](#backendenv) | **Save & apply** | container recreated, re-reads the file — **no image rebuild** |
 | [`frontend.env`](#frontendenv) | `care rebuild-frontend` | **image rebuilt** (Vite bakes values at build time) |
-| [`versions.env`](#versionsenv) | `care setup` / rebuild | controls which versions are built |
+| [`.env`](#env) | Install & Start / rebuild | release pins: which images + refs are used |
 
 > **Key difference:** backend settings are read at container start, so changing them
 > is cheap. Frontend settings are *frozen into the JavaScript at build time*, so
@@ -22,7 +22,7 @@ in a file) — e.g. the backup folder and the admin password.
 ## `backend.env`
 
 The single source of truth for the **backend + both celery services**. Edit a
-value, then `care start`.
+value, then **Save & apply**.
 
 ### Django settings module
 | Variable | Default | Meaning |
@@ -51,7 +51,7 @@ value, then `care start`.
 ### Django core
 | Variable | Default | Meaning |
 |---|---|---|
-| `DJANGO_SECRET_KEY` | *auto-generated* | Cryptographic key. **`care setup` replaces the `CHANGE_ME` placeholder with a random key on first run.** Keep it secret; changing it logs everyone out. |
+| `DJANGO_SECRET_KEY` | *auto-generated* | Cryptographic key. **Setup replaces the `CHANGE_ME` placeholder with a random key on first run.** Keep it secret; changing it logs everyone out. |
 | `DJANGO_DEBUG` | `False` | Never enable on a box holding patient data. |
 | `DJANGO_ALLOWED_HOSTS` | `["*"]` | Which hostnames the backend answers to. `*` is fine on a private LAN. |
 | `DJANGO_ADMIN_URL` | `admin` | Path of the Django admin (`/admin`). |
@@ -155,18 +155,33 @@ Baked into the frontend image at **build** time. Edit, then `care rebuild-fronte
 
 ---
 
-## `versions.env`
+## `.env`
 
-Controls **which versions** of the backend and frontend are built. The engine reads
-it; `docker-compose.yml` reads the exported image tags.
+The **single source of truth** for every image and source ref the clinic runs.
 
-Currently a TODO placeholder — the engine clones `ohcnetwork/care` and
-`ohcnetwork/care_fe` at branch **`develop`** and builds them locally as
-`care:clinic` and `care_fe:clinic`.
+Compose auto-loads this file from the project directory, and the app embeds a copy
+so pins resolve before an install dir exists. There are deliberately **no fallback
+values** anywhere else — not in `docker-compose.yml`, not in Go. A missing pin makes
+the stack refuse to start with a message naming the variable, rather than quietly
+running a different image. (That is not hypothetical: `BACKEND_IMAGE` previously had
+three definitions, and Compose's fallback pointed at `ghcr.io/ohcnetwork/care:latest`
+— an unpinned image from the internet — for anyone running `docker compose` by hand.)
 
-To **pin a reproducible release**, set any of:
+Every value is **required**. The app loads this file once at startup, checks that
+all twelve pins are present, and refuses to start otherwise — naming the missing
+ones. Compose does the same with `${VAR:?}`. Both sides parse it with the same
+library (`compose-spec/compose-go/dotenv`, the one Compose itself uses), so quoting
+and escaping can never diverge between them.
 
-| Variable | Default | Meaning |
+Third-party images are tracked manually. Check upstream release notes before
+bumping one — a Postgres major is a one-way door, because the `postgres-data`
+volume is not forward compatible and there is no downgrade path.
+
+**Clinic settings do not belong here.** Compose interpolates this file, so every
+value in it is visible project-wide. Passwords and hostnames live in `backend.env` /
+`frontend.env`, which are mounted into containers instead.
+
+| Variable | Current | Meaning |
 |---|---|---|
 | `BACKEND_IMAGE` | `care:clinic` | The built backend image tag. |
 | `FRONTEND_IMAGE` | `care_fe:clinic` | The built frontend image tag. |
@@ -194,7 +209,7 @@ Change it when a second CARE clinic already runs on the same WiFi. Two installs
 advertising the same name clash over mDNS, so give one of them its own, for example
 `care.local` and `caretest.local`.
 
-`care setup` rewrites the address everywhere it appears, in one pass:
+Setup rewrites the address everywhere it appears, in one pass:
 
 | File | What changes |
 |---|---|
@@ -218,19 +233,24 @@ numbers and hyphens.
 
 ---
 
-## Engine variables
+## Operator choices
 
-Not stored in a file — set by the desktop app (from the wizard) or as environment
-variables when using the CLI.
+Not stored in a settings file and **not readable from the environment**. They are
+typed fields on the engine (`clinic.Clinic`), set by the wizard for the run that
+needs them, so a password can never arrive from a stray shell variable or from
+`.env` (which Compose interpolates into every service). The two passwords are never
+written to `config.json` either — only a bcrypt hash of the admin one, to gate
+Advanced settings.
 
-| Variable | Set by | Meaning |
+| Value | Chosen in | Meaning |
 |---|---|---|
-| `BACKUP_DIR` | installer "Backup location" | Where daily backups go. Default `~/Desktop/care-db-backups`. |
-| `CARE_ADMIN_PASSWORD` | installer "Admin password" | Password for the first `admin` user. Default `admin`. |
-| `CARE_MDNS_NAME` | installer "Clinic address" | The host label, without `.local`. See [Clinic address](#clinic-address). |
-| `CARE_NO_MDNS` | `1` from the GUI | Skip the engine's own hostname-rename (the GUI verifies `care.local` as a step instead). |
-| `CARE_DESKTOP_DIR` | CLI override | Point the CLI at a specific install dir folder (default: current directory). |
-| `CARE_BE_DIR` / `CARE_FE_DIR` | advanced | Where the source clones live (default `<install dir>/care`, `<install dir>/care_fe`). |
+| Backup location | installer folder picker | Where daily backups go. Default `~/Desktop/care-db-backups`. |
+| Admin password | installer "Admin password" | Password for the first `admin` user. **No default** — without it the superuser is not created. |
+| Backup password | installer "Backup password" | Encrypts backups. Empty means backups are written in plaintext. |
+| Clinic address | installer "Clinic address" | The host label, without `.local`. See [Clinic address](#clinic-address). |
+
+`CARE_DESKTOP_DIR` is the one real environment variable left: it points the app at a
+specific install dir instead of the default per-user one. Development only.
 
 ---
 
@@ -238,9 +258,9 @@ variables when using the CLI.
 
 | You changed… | Run |
 |---|---|
-| Any value in `backend.env` | `care start` (or **Save & apply** in the app) |
-| Any value in `frontend.env` | `care rebuild-frontend` (or **Save & rebuild** in the app) |
-| A version in `versions.env` | `care rebuild-backend` and/or `care rebuild-frontend` |
-| `clinic_settings.py` (bind-mounted, e.g. `USE_SMS`) | `care start` — it's read at container start |
+| Any value in `backend.env` | **Save & apply** in the app |
+| Any value in `frontend.env` | **Save & rebuild** in the app |
+| A version in `.env` | **Rebuild backend** / **Rebuild frontend** in Advanced settings |
+| `clinic_settings.py` (bind-mounted, e.g. `USE_SMS`) | **Save & apply** — it's read at container start |
 
 Nothing else needs editing — no files inside the images, no core CARE code.

@@ -16,7 +16,7 @@ func (a *App) ListBackups() ([]backup.Backup, error) {
 	if _, err := os.Stat(filepath.Join(a.installDir(), "docker-compose.yml")); err != nil {
 		return nil, nil // not set up yet - no backups to offer
 	}
-	return a.engine(nil).Backups().ListBackups()
+	return a.engine().Backups().ListBackups()
 }
 
 // RestoreBackup restores async. For an encrypted backup, "" passphrase falls back to
@@ -31,7 +31,7 @@ func (a *App) RestoreBackup(dbDump, filesArchive, passphrase string, remember bo
 	if passphrase != "" && remember {
 		_ = backup.StorePassword(passphrase)
 	}
-	e := a.engine(nil)
+	e := a.engine()
 	a.run(func() error { return e.Backups().Restore(dbDump, filesArchive, passphrase) }, false, "restore")
 	return nil
 }

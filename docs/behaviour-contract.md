@@ -27,13 +27,15 @@ The hostname must be written to `frontend.env` before the image is built.
 *Violation:* a frontend image that points at the wrong API URL. Invisible until
 a browser loads it, and unfixable without a rebuild.
 
-### S2 — the backup and Caddy images build before the git clones · COST
+### S2 — the source is cloned into a temporary directory, per build · (correctness)
 
-`buildBackup` and `buildCaddy` use the install dir as their build context. Once
-`care` and `care_fe` are cloned into it, that context is hundreds of MB, and all
-of it gets shipped to the Docker daemon on every build.
+A clone kept beside the install is only ever reused, never refreshed, so the built
+image silently stays pinned to whichever ref was current the first time and ignores
+every later change to `CARE_BE_REF` / `CARE_FE_REF`. `clone` makes a fresh shallow
+checkout and removes it afterwards. It also keeps the install dir small, which is
+the build context for the backup and Caddy images.
 
-*Violation:* every build sends the full source tree to the daemon.
+*Violation:* a release that bumps a source ref keeps building the old code.
 
 ### S3 — `genSecret` replaces `DJANGO_SECRET_KEY=CHANGE_ME` exactly once · SECURITY
 
@@ -188,12 +190,7 @@ memory first so it can be untrusted at the end.
 
 *Violation:* a trusted root certificate permanently stranded in the system store.
 
-### U2 — the previous hostname is read before the install dir is deleted · (cleanup correctness)
-
-`.previous-hostname` is stored in the install dir because the engine has no other
-state store (the CLI has no config file). Step 4 may delete that dir.
-
-### U3 — `forceRemoveProject` is nested inside the "compose file exists" check · DATA
+### U2 — `forceRemoveProject` is nested inside the "compose file exists" check · DATA
 
 It matches on the **compose project label**, not on this install dir. Called
 unguarded, it deletes the containers and data volumes of *any* CARE install on
@@ -203,27 +200,27 @@ the machine.
 dangerous rule here — and the guard looks removable, which is what makes it
 dangerous.
 
-### U4 — never delete a source checkout · (developer safety)
+### U3 — never delete a source checkout · (developer safety)
 
 `looksLikeSourceRepo` checks for `.git` / `app` / `docs` markers **and walks up
-the tree** for a `.git` ancestor, because the CLI's install dir can be the repo
+the tree** for a `.git` ancestor, because a developer's install dir can be the repo
 root itself.
 
 *Violation:* `RemoveAll` on a developer's working tree.
 
-### U5 — the image list is derived, never hardcoded · (regression)
+### U4 — the image list is derived, never hardcoded · (regression)
 
 `uninstallImages()` builds its list from the same accessors that tagged the
 images. Hardcoding it is what made `--images` silently match nothing once
-`versions.env` started pinning real versions.
+`.env` started pinning real versions.
 
-### U6 — build-cache pruning happens only under `RemoveImages` · COST
+### U5 — build-cache pruning happens only under `RemoveImages` · COST
 
 The cache is machine-wide and carries no project label, so there is no way to
 remove only ours. Tens of GB — larger than the images. Gated behind the option
 that already means "take the downloads with it".
 
-### U7 — every step is best-effort; the run ends with an honest report · (trust)
+### U6 — every step is best-effort; the run ends with an honest report · (trust)
 
 One failing step must not abort the rest, so a half-finished install can still be
 cleaned up. The close-out names what could not be reverted (hosts line, trusted
@@ -252,16 +249,16 @@ They are the recovery data; removing them to "tidy up" is indefensible, and the
 operator has no way to get them back. This also keeps the post-purge rescan
 honest — a trace that is deliberately never removed could never report clean.
 
-### P3 — `Purge` calls `forceRemoveProject` **unguarded**, diverging from U3 · DATA
+### P3 — `Purge` calls `forceRemoveProject` **unguarded**, diverging from U2 · DATA
 
-U3 guards that call because `Uninstall` runs against an install this app owns,
+U2 guards that call because `Uninstall` runs against an install this app owns,
 where the install dir is the authority on what to remove. Purge runs from the
 first-run wizard, before this app owns anything: there is no compose file to
 guard on, and removing whatever still carries the project label is the entire
 point. The two callers have opposite requirements, which is why this is a
 separate function rather than a flag on `Uninstall`.
 
-*What keeps it safe:* P4 below, plus U4 — `Purge` honours `looksLikeSourceRepo`.
+*What keeps it safe:* P4 below, plus U3 — `Purge` honours `looksLikeSourceRepo`.
 
 ### P4 — purge refuses once `setup_done` is true · DATA
 
@@ -278,25 +275,15 @@ scan whenever any check action finishes, which covers the Docker install case.
 
 ---
 
-## 6. Machine hostname (rename mode only)
+## 6. Name resolution
 
-Default mode is `advertise`, which uses the in-app pure-Go mDNS responder and
-touches no machine names. These apply only to `rename` mode.
+### H1 — `care.local` is advertised, never assigned · (reversibility)
 
-### H1 — `savePreviousHostname` never overwrites an existing record · (reversibility)
+The app answers mDNS itself with a pure-Go responder for as long as it is open. It
+does not rename the machine, install Avahi, or edit any OS-level hostname, so there
+is nothing to undo at uninstall and no sudo prompt during setup.
 
-A second install would otherwise save CARE's own name over the operator's
-original, making the rename permanent.
-
-### H2 — `restoreHostname` reverts only if the current name is still ours · (reversibility)
-
-If the machine has since been renamed to something else, that was a deliberate
-choice and not ours to undo.
-
-### H3 — a failed rename hands over the exact command · (usability)
-
-The rename needs sudo, which a windowed app has no terminal for. The failure path
-prints the literal command rather than reporting success.
+*Violation:* an uninstall leaves the clinic's name on the operator's computer.
 
 ---
 
@@ -305,7 +292,7 @@ prints the literal command rather than reporting success.
 ### X1 — `composeProject` is `care-desktop` · DATA
 
 Volumes are named `<project>_<volume>` (e.g. `care-desktop_minio-data`), and the
-label-based teardown in U3 keys off it. Changing this string orphans every
+label-based teardown in U2 keys off it. Changing this string orphans every
 existing volume on every existing install.
 
 ### X2 — line splitting must tolerate CRLF · BREAKS
@@ -321,7 +308,7 @@ and must use `path`. Host paths must use `filepath`.
 
 ### X4 — the engine carries no Wails dependency · (architecture)
 
-The orchestration layer is shared by the GUI and the `cmd/care` CLI. Logging and
+The orchestration layer is UI-agnostic and never imports Wails. Logging and
 confirmation are **injected**. This is the best decision in the existing codebase
 and must survive: it is what makes the backend testable and scriptable.
 

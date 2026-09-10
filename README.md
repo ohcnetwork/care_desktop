@@ -5,7 +5,7 @@ a small clinic — offline, on the local WiFi, at `https://care.local`.**
 
 Backend + frontend + database + file storage, all on a single server, reachable by
 every phone/laptop on the same WiFi. No internet after setup, no cloud, no accounts.
-Drive it with a small **desktop app** (a few clicks) or the **`care` CLI**.
+Drive it with a small **desktop app** — a few clicks, no terminal.
 
 Traffic is served over **HTTPS** with a self-signed certificate from a built-in local
 CA (browsers need a real `https://` origin for the camera/scanner and secure cookies —
@@ -26,7 +26,7 @@ Full docs are in **[`docs/`](docs/README.md)**:
 |---|---|
 | 🍎 [Install on macOS](docs/install-macos.md) | 🪟 [Install on Windows](docs/install-windows.md) |
 | 🐧 [Install on Linux](docs/install-linux.md) | ⚙️ [Configuration — every env var](docs/configuration.md) |
-| 🏗️ [Architecture — how it works](docs/architecture.md) | 💻 [The `care` CLI](docs/cli.md) |
+| 🏗️ [Architecture — how it works](docs/architecture.md) | 🔧 [Configuration reference](docs/configuration.md) |
 | 💾 [Backups & restore](docs/backups.md) | 🔧 [Troubleshooting](docs/troubleshooting.md) |
 | 🛠️ [Building from source](docs/building.md) | |
 
@@ -63,22 +63,17 @@ it trusts the clinic's local CA **once**:
 > Uninstalling from the app also **removes the certificate from the server machine**.
 > Other devices keep their copy — remove it from their trust store manually if needed.
 
-Prefer a terminal? See the [CLI guide](docs/cli.md):
-```bash
-cd care-desktop && care setup && care start
-```
-
 ---
 
 ## What's in this repo
 
 | Path | What |
 |---|---|
-| `app/` | the Go app — Wails desktop GUI + the `care` engine/CLI |
+| `app/` | the Go app — Wails desktop GUI + the clinic engine |
 | `deployments/` | **the clinic stack** — everything below, staged into the app and embedded at build time |
 | `deployments/docker-compose.yml` | the stack: db, redis, minio, backend, celery×2, frontend, caddy, backup |
 | `deployments/backend.env` / `frontend.env` | all clinic settings ([reference](docs/configuration.md)) |
-| `deployments/versions.env` | which CARE versions to build |
+| `deployments/.env` | **release pins** — every image + source ref, the single source of truth ([reference](docs/configuration.md#env)) |
 | `deployments/clinic_settings.py` | Django settings for the LAN — production settings served over `https://`, self-signed cert |
 | `deployments/Caddyfile` | the reverse proxy: `https://care.local` (one origin), `:80` redirect, and the cert-trust bootstrap |
 | `deployments/setup/` | the `https://care.local/setup` install page that hands the local CA to new devices |
@@ -105,7 +100,7 @@ It installs `faker` into the backend container (ephemeral) and runs CARE's
 `manage.py load_fixtures` under the deployment settings with `DEBUG=True`. The seeded
 data lands in the postgres volume, so it **persists** across restarts (only the
 ephemeral `faker` install is lost when the container is recreated). Start the stack
-first (`care start` or the app), then run the script. See
+first (start it from the app), then run the script. See
 [building.md](docs/building.md#loading-sample-data-dev) for details.
 
 > This is a **development/demo** tool — don't seed fixtures onto a real clinic's data.

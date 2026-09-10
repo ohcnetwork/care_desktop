@@ -78,18 +78,16 @@ func (a *App) ensureInstallDir() (string, error) {
 	return dest, err
 }
 
-// engine builds an Engine bound to the install dir, streaming logs to the UI.
-func (a *App) engine(extra map[string]string) *clinic.Clinic {
-	env := map[string]string{}
-	if cfg := a.loadConfig(); cfg.BackupDir != "" {
-		env["BACKUP_DIR"] = cfg.BackupDir
-	}
-	for k, v := range extra {
-		env[k] = v
-	}
+// engine builds an Engine bound to the install dir, streaming logs to the UI. It
+// carries the operator's saved choices; the setup run additionally sets the two
+// passwords, which are never persisted here.
+func (a *App) engine() *clinic.Clinic {
+	cfg := a.loadConfig()
 	return &clinic.Clinic{
 		InstallDir: a.installDir(),
-		Env:        env,
+		MDNSName:   strings.TrimSuffix(strings.TrimSpace(cfg.MDNSName), ".local"),
+		BackupDir:  cfg.BackupDir,
+		Pins:       a.pins,
 		Log:        func(s string) { wruntime.EventsEmit(a.ctx, "care-log", s) },
 		Confirm: func(title, message string) bool {
 			sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{

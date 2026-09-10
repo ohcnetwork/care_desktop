@@ -29,7 +29,7 @@ Both are needed for a full restore — the database alone won't bring back an X-
 
 - **Default:** `~/Desktop/care-db-backups/`
 - **Chosen:** whatever folder you picked in the installer's "Backup location" step
-  (or `BACKUP_DIR` for the CLI).
+
 
 **Retention:** controlled by `DB_BACKUP_RETENTION_PERIOD` in `backend.env` (default
 **14** days). Older `care-*.dump` and `files-*.tar.gz` are pruned automatically.
@@ -84,27 +84,6 @@ it includes files, and whether it's *encrypted*), click **Restore**, and confirm
 Encrypted backups need no password prompt — the one you set at installation is read
 from this computer's keychain automatically. The app restarts itself when it's done.
 
-### From the CLI
-
-```bash
-care list-backups                      # newest first; copy the dump name
-care restore care-YYYYMMDD-HHMMSS.dump  # DB + same-timestamp files, if present
-```
-
-For an **encrypted** backup (`.enc`), supply the backup password via the environment:
-
-```bash
-CARE_BACKUP_PASSWORD='your-backup-password' care restore care-YYYYMMDD-HHMMSS.dump.enc
-```
-
-- The matching `files-<timestamp>.tar.gz` is **paired automatically** by timestamp.
-  To restore a different pair (or DB only), pass the files archive explicitly (or a
-  dump that has none, like a manual `care-manual-*.dump`):
-  ```bash
-  care restore care-20260701-020000.dump files-20260701-020000.tar.gz
-  ```
-- Both the app and the CLI restore the same way — set up with one, restore with the other.
-
 > Match the **database** dump and the **files** archive from the **same timestamp**
 > for a consistent restore (the automatic pairing does this for you).
 
@@ -114,7 +93,7 @@ CARE_BACKUP_PASSWORD='your-backup-password' care restore care-YYYYMMDD-HHMMSS.du
 The built-in restore does exactly this. Stop the app first so nothing is writing:
 
 ```bash
-care stop && docker compose -p care-desktop up -d db
+docker compose -p care-desktop stop && docker compose -p care-desktop up -d db
 
 docker compose -p care-desktop exec -T db psql -U postgres -c "DROP DATABASE IF EXISTS care;"
 docker compose -p care-desktop exec -T db psql -U postgres -c "CREATE DATABASE care;"
@@ -127,7 +106,7 @@ docker run --rm \
   -v ~/Desktop/care-db-backups:/backup \
   alpine sh -c 'cd /data && tar -xzf /backup/files-YYYYMMDD-HHMMSS.tar.gz'
 
-care start
+docker compose -p care-desktop up -d
 ```
 
 </details>
@@ -140,8 +119,8 @@ care start
    If your backups are encrypted, that folder already contains `backup-key.pem.enc` —
    keep it there, and make sure you know the backup password.
 2. On the new server: install CARE Desktop (it builds a fresh, empty stack), and point its
-   backup folder at the USB (installer step 5, or `BACKUP_DIR` for the CLI).
-3. Restore that backup — **Restore from a backup** in the app, or `care restore <dump>`.
+   backup folder at the USB (installer step 5).
+3. Restore that backup — **Restore from a backup** in the app.
    (Restore stops and restarts the stack itself.) For encrypted backups you'll enter the
    backup password; the key travels with the folder, so no other file from the old machine
    is needed.

@@ -13,8 +13,8 @@ func (e *Clinic) Backups() *backup.Store {
 	s := &backup.Store{
 		Dir:        e.InstallDir,
 		BackupDir:  e.backupDir(),
-		Passphrase: e.backupPassword(),
-		Image:      e.backupImage(),
+		Passphrase: e.BackupPassword,
+		Image:      e.Pins.BackupImage,
 		Host:       e.host(),
 		Log:        e.Log,
 		Migrate:    e.migrate,

@@ -23,13 +23,12 @@ import (
 // Scanning never elevates and never changes anything, so it is safe to call at
 // any time; anything visible only to root is reported absent instead.
 func (a *App) ScanResidue() residue.Report {
-	e := a.engine(nil)
+	e := a.engine()
 	return residue.Scan(residue.Options{
 		Runner:       e.Runner(),
 		Project:      e.Project(),
 		InstallDir:   e.InstallDir,
 		ConfigPath:   a.configPath(),
-		CloneDirs:    e.CloneDirs(),
 		Images:       e.Images(),
 		StoredSecret: backup.HasPassword(),
 	})
@@ -74,7 +73,7 @@ func (a *App) PurgeResidue() error {
 	}
 
 	wruntime.EventsEmit(a.ctx, "care-log", "Removing the earlier CARE Desktop from this computer...")
-	if err := a.engine(nil).Purge(); err != nil {
+	if err := a.engine().Purge(); err != nil {
 		return err
 	}
 	// The keychain entry is the app's, not the engine's - the engine has no

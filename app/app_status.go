@@ -8,7 +8,6 @@ import (
 
 	"github.com/ohcnetwork/care_desktop/app/internal/health"
 	"github.com/ohcnetwork/care_desktop/app/internal/prereq"
-	"github.com/ohcnetwork/care_desktop/app/internal/settings"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/mdns"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/netfix"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/reboot"
@@ -30,19 +29,19 @@ func (a *App) GetState() AppState {
 	return AppState{
 		SetupDone: cfg.SetupDone,
 		MDNSName:  cfg.MDNSName,
-		Docker:    prereq.DockerCheck(a.engine(nil).Runner()),
+		Docker:    prereq.DockerCheck(a.engine().Runner()),
 	}
 }
 
-func (a *App) DockerStatus() prereq.Status { return prereq.DockerCheck(a.engine(nil).Runner()) }
-func (a *App) GitStatus() prereq.Status    { return prereq.GitCheck(a.engine(nil).Runner()) }
-func (a *App) CareHealth() health.Health   { return health.Ping(a.engine(nil).Host()) }
+func (a *App) DockerStatus() prereq.Status { return prereq.DockerCheck(a.engine().Runner()) }
+func (a *App) GitStatus() prereq.Status    { return prereq.GitCheck(a.engine().Runner()) }
+func (a *App) CareHealth() health.Health   { return health.Ping(a.engine().Host()) }
 
 // NetworkStatus flags a Public Windows profile (blocks LAN discovery of care.local).
-func (a *App) NetworkStatus() netfix.Status { return netfix.Check(a.engine(nil).Runner()) }
+func (a *App) NetworkStatus() netfix.Status { return netfix.Check(a.engine().Runner()) }
 
 // FixNetwork sets the network Private and opens the clinic's ports (elevated).
-func (a *App) FixNetwork() error { return netfix.Fix(a.engine(nil).Log) }
+func (a *App) FixNetwork() error { return netfix.Fix(a.engine().Log) }
 
 // DockerPlan / GitPlan tell the wizard which button to put on a failing
 // prerequisite row - install it, start it, or just open the download page.
@@ -58,7 +57,7 @@ func (a *App) OpenDocker() error    { return a.provisioner().OpenDocker() }
 
 // provisioner streams its progress through care-log, like the install does.
 func (a *App) provisioner() *prereq.Provisioner {
-	e := a.engine(nil)
+	e := a.engine()
 	return prereq.NewProvisioner(e.Runner(), e.InstallDir, e.Log, e.Confirm)
 }
 
@@ -82,7 +81,7 @@ func (a *App) RestartNow() error {
 // ValidatePassword lets the wizard check the admin password live as the user types.
 // Returns "" when acceptable, otherwise a human-readable reason to show under the field.
 func (a *App) ValidatePassword(pw string) string {
-	if err := settings.ValidatePassword(pw); err != nil {
+	if err := ValidatePassword(pw); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -168,6 +167,6 @@ func (a *App) MDNSStatus() mdns.NameStatus {
 		full.Message = a.loadConfig().MDNSName + " is being advertised by this app"
 		return full
 	}
-	e := a.engine(nil)
-	return mdns.Check(mdns.Label(e.MDNSName()), e.MDNSMode())
+	e := a.engine()
+	return mdns.Check(mdns.Label(e.Label()))
 }

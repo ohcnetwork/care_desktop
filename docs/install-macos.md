@@ -61,7 +61,7 @@ scutil --get LocalHostName     # should print: care
 > The `.dmg` is universal — one download for both Apple Silicon and Intel.
 
 **Option B — Command line** (for developers): see [building.md](building.md) to build
-the `care` CLI, then jump to [cli.md](cli.md).
+the app from source — see [building.md](building.md).
 
 ---
 
@@ -115,5 +115,5 @@ if a device still shows a warning.
 - Tick **Start at login** so CARE comes up automatically after a reboot.
 - Closing the window leaves CARE **running** (it's the Docker stack, not the window).
 
-See [cli.md](cli.md) for the terminal equivalents, [configuration.md](configuration.md)
+See [configuration.md](configuration.md)
 to change settings, and [troubleshooting.md](troubleshooting.md) if something's off.

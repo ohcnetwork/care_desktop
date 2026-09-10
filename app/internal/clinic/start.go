@@ -27,7 +27,6 @@ func (e *Clinic) Start() error {
 	if err := e.Backups().EnsureKeysDir(); err != nil { // ./keys bind-mount source (empty = plaintext)
 		return err
 	}
-	e.ensureMDNS()
 	e.warnDomainDrift()
 	e.logln("Starting CARE...")
 	// Migrate with a SINGLE migrator: bring up the api backend (its start.sh does

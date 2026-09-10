@@ -16,7 +16,7 @@ import (
 // app's own state - autostart entry and saved config - and signals the UI to
 // reset to first-run via an "uninstalled" event.
 func (a *App) RunUninstall(removeImages, removeBackups bool) error {
-	e := a.engine(nil)
+	e := a.engine()
 	go func() {
 		_ = e.Uninstall(clinic.UninstallOptions{
 			RemoveImages:     removeImages,

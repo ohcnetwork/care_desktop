@@ -10,7 +10,6 @@ import (
 	"github.com/ohcnetwork/care_desktop/app/internal/backup"
 	"github.com/ohcnetwork/care_desktop/app/internal/clinic"
 	"github.com/ohcnetwork/care_desktop/app/internal/health"
-	"github.com/ohcnetwork/care_desktop/app/internal/settings"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/crypto/bcrypt"
@@ -95,7 +94,7 @@ func (a *App) notifyInstalled(mdnsName string) {
 // names actionFunc recognises is the whitelist; there is no second list to keep
 // in step with it.
 func (a *App) CareAction(action string) error {
-	fn := actionFunc(a.engine(nil), action)
+	fn := actionFunc(a.engine(), action)
 	if fn == nil {
 		return errors.New("action not allowed: " + action)
 	}
@@ -128,11 +127,11 @@ func actionFunc(e *clinic.Clinic, action string) func() error {
 // Empty backupPassword = encryption off; rememberBackup saves it to the keychain.
 // A seed with no facility name means the clinic details screen was skipped.
 func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberBackup bool, installDir, backupDir string) error {
-	if err := settings.ValidatePassword(adminPassword); err != nil {
+	if err := ValidatePassword(adminPassword); err != nil {
 		return err
 	}
 	if backupPassword != "" {
-		if err := settings.ValidatePassword(backupPassword); err != nil {
+		if err := ValidatePassword(backupPassword); err != nil {
 			return err
 		}
 	}
@@ -179,15 +178,10 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 		}
 	}
 
-	env := map[string]string{
-		"CARE_MDNS_NAME":      host,
-		"CARE_ADMIN_PASSWORD": adminPassword,
-		"CARE_NO_MDNS":        "1", // naming is a verified wizard step; don't retry sudo here
-	}
-	if backupPassword != "" {
-		env["CARE_BACKUP_PASSWORD"] = backupPassword
-	}
-	e := a.engine(env)
+	e := a.engine()
+	e.MDNSName = host
+	e.AdminPassword = adminPassword
+	e.BackupPassword = backupPassword
 	a.run(func() error {
 		// Check port 80 before the ~10-min build, so a conflict fails immediately
 		// instead of after the wait (Start re-checks in case it's taken meanwhile).
@@ -213,7 +207,7 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 // broke the install - a read-only drive, say - survived into every retry and
 // failed it again, with no way to clear it from the wizard.
 func (a *App) CleanupFailedInstall() error {
-	a.engine(nil).TeardownProject()
+	a.engine().TeardownProject()
 
 	var firstErr error
 	remove := func(target string) {
@@ -256,4 +250,4 @@ func careAppDataName(name string) bool {
 	return strings.HasPrefix(n, "care")
 }
 
-func (a *App) CareStatus() (string, error) { return a.engine(nil).Status() }
+func (a *App) CareStatus() (string, error) { return a.engine().Status() }

@@ -27,13 +27,20 @@ func (e *Clinic) migrate() error {
 }
 
 // createAdmin makes the "admin" superuser with the password chosen during setup.
-// Idempotent: on an existing
-// install createsuperuser exits 1 with "username already taken", which is the
-// normal case - we report it plainly. Output is captured (not streamed) so the
-// raw "CommandError ... exit status 1" never leaks into the log.
+// Idempotent: on an existing install createsuperuser exits 1 with "username already
+// taken", which is the normal case - we report it plainly. Output is captured (not
+// streamed) so the raw "CommandError ... exit status 1" never leaks into the log.
+//
+// Start calls this every time, but only the setup run carries the chosen password.
+// Without one we skip rather than fall back to something guessable: a setup that
+// failed after the database came up would otherwise leave a clinic reachable with a
+// default login.
 func (e *Clinic) createAdmin() {
+	if e.AdminPassword == "" {
+		return
+	}
 	cmd := newCmd("docker", "compose", "exec", "-T",
-		"-e", "DJANGO_SUPERUSER_PASSWORD="+e.adminPassword(),
+		"-e", "DJANGO_SUPERUSER_PASSWORD="+e.AdminPassword,
 		"backend", "python", "manage.py", "createsuperuser", "--noinput",
 		"--username", "admin", "--email", "admin@care.local")
 	cmd.Env = e.baseEnv()
