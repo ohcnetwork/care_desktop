@@ -43,6 +43,14 @@ func NewApp(installFS fs.FS) (*App, error) {
 	return &App{installFS: installFS, pins: pins}, nil
 }
 
+// logln streams one line to the UI's log pane. Nil-ctx safe, because bindings can
+// be called before Wails has started the runtime (and from tests).
+func (a *App) logln(msg string) {
+	if a.ctx != nil {
+		wruntime.EventsEmit(a.ctx, "care-log", msg)
+	}
+}
+
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	// Advertise care.local right away (host process; no rename, no sudo). Doing it

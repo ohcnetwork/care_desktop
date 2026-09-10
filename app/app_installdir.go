@@ -88,7 +88,7 @@ func (a *App) engine() *clinic.Clinic {
 		MDNSName:   strings.TrimSuffix(strings.TrimSpace(cfg.MDNSName), ".local"),
 		BackupDir:  cfg.BackupDir,
 		Pins:       a.pins,
-		Log:        func(s string) { wruntime.EventsEmit(a.ctx, "care-log", s) },
+		Log:        a.logln,
 		Confirm: func(title, message string) bool {
 			sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
 				Type:          wruntime.QuestionDialog,

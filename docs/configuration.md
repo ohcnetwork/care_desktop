@@ -244,7 +244,7 @@ Advanced settings.
 
 | Value | Chosen in | Meaning |
 |---|---|---|
-| Backup location | installer folder picker | Where daily backups go. Default `~/Desktop/care-db-backups`. |
+| Backup location | installer folder picker, or **Backups → Change** in the app | Where daily backups go. Default `~/Desktop/care-db-backups`. Changing it later moves *future* backups only and copies the recovery key across; existing backups stay put. |
 | Admin password | installer "Admin password" | Password for the first `admin` user. **No default** — without it the superuser is not created. |
 | Backup password | installer "Backup password" | **Required.** Every backup is encrypted with it; there is no plaintext option, so setup will not complete without one. |
 | Clinic address | installer "Clinic address" | The host label, without `.local`. See [Clinic address](#clinic-address). |

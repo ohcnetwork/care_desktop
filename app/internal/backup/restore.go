@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ohcnetwork/care_desktop/app/internal/health"
+	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 )
 
 // composeProject is the compose `name:` - volumes are named "<project>_<volume>".
@@ -112,11 +113,25 @@ func backupLabel(ts string, manual, withFiles, encrypted bool) string {
 // volume is overwritten. App services are stopped during the swap and brought
 // back up afterward. Mirrors the manual steps in docs/backups.md.
 func (s *Store) Restore(dbDump, filesArchive, passphrase string) error {
-	dbDump = filepath.Base(dbDump) // tolerate a pasted path; we only ever read from the backup dir
+	return s.RestoreFrom(s.BackupDir, dbDump, filesArchive, passphrase)
+}
+
+// RestoreFrom is Restore against an arbitrary folder - a backup carried from
+// another computer on a USB stick, say. srcDir is mounted at /backups for the
+// duration, so every path in the scripts below is unchanged and, crucially, the
+// key lookup finds THAT folder's backup-key.pem.enc rather than this machine's.
+// A backup from another clinic was sealed with a different keypair, so using the
+// local key would fail; copying the foreign key into the local backup folder
+// would break every local backup instead. Mounting sidesteps both.
+func (s *Store) RestoreFrom(srcDir, dbDump, filesArchive, passphrase string) error {
+	if srcDir == "" {
+		srcDir = s.BackupDir
+	}
+	dbDump = filepath.Base(dbDump) // tolerate a pasted path; only the name is used
 	if !safeName.MatchString(dbDump) || !strings.HasPrefix(dbDump, "care-") {
 		return fmt.Errorf("not a database dump: %q", dbDump)
 	}
-	if err := s.mustExist(dbDump); err != nil {
+	if err := s.mustExist(srcDir, dbDump); err != nil {
 		return err
 	}
 	if filesArchive != "" {
@@ -124,7 +139,7 @@ func (s *Store) Restore(dbDump, filesArchive, passphrase string) error {
 		if !safeName.MatchString(filesArchive) || !strings.HasPrefix(filesArchive, "files-") {
 			return fmt.Errorf("not a files archive: %q", filesArchive)
 		}
-		if err := s.mustExist(filesArchive); err != nil {
+		if err := s.mustExist(srcDir, filesArchive); err != nil {
 			return err
 		}
 	}
@@ -135,7 +150,7 @@ func (s *Store) Restore(dbDump, filesArchive, passphrase string) error {
 		if passphrase == "" {
 			return fmt.Errorf("this backup is encrypted - the backup password is required to restore it")
 		}
-		if s.privateKeyLocation() == "" {
+		if s.keyFor(srcDir) == "" {
 			return fmt.Errorf("backup encryption key not found - restore on the original computer, or copy %s into the backup folder next to the dumps", s.encKeyName())
 		}
 	}
@@ -153,11 +168,11 @@ func (s *Store) Restore(dbDump, filesArchive, passphrase string) error {
 	if err := s.dc("up", "-d", "db", "backup"); err != nil {
 		return err
 	}
-	if err := s.restoreDB(dbDump, passphrase); err != nil {
+	if err := s.restoreDB(srcDir, dbDump, passphrase); err != nil {
 		return err
 	}
 	if filesArchive != "" {
-		if err := s.restoreFiles(filesArchive, passphrase); err != nil {
+		if err := s.restoreFiles(srcDir, filesArchive, passphrase); err != nil {
 			return err
 		}
 	}
@@ -185,17 +200,30 @@ func (s *Store) Restore(dbDump, filesArchive, passphrase string) error {
 	return nil
 }
 
-func (s *Store) mustExist(name string) error {
-	if _, err := os.Stat(filepath.Join(s.BackupDir, name)); err != nil {
-		return fmt.Errorf("backup not found in %s: %s", s.BackupDir, name)
+func (s *Store) mustExist(dir, name string) error {
+	if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+		return fmt.Errorf("backup not found in %s: %s", dir, name)
 	}
 	return nil
+}
+
+// keyFor reports where the private key for a backup in dir can be found: beside
+// the backup first (a folder carried from another machine is self-contained),
+// then this install's own keys/. Empty means neither has one.
+func (s *Store) keyFor(dir string) string {
+	if p := filepath.Join(dir, s.encKeyName()); proc.FileExists(p) {
+		return p
+	}
+	if proc.FileExists(s.encKeyPath()) {
+		return s.encKeyPath()
+	}
+	return ""
 }
 
 // restoreDB drops + re-creates the DB and pg_restores, inside the backup container.
 // dump is validated by safeName, so embedding it is safe. A .enc dump is decrypted
 // to a tmpfile first - before the drop, so a wrong password fails harmlessly.
-func (s *Store) restoreDB(dump, passphrase string) error {
+func (s *Store) restoreDB(srcDir, dump, passphrase string) error {
 	s.waitForDB()
 	s.logln("Restoring database from " + dump + " ...")
 	encrypted := strings.HasSuffix(dump, ".enc")
@@ -224,13 +252,33 @@ psql -h "$H" -U "$U" -d postgres -v ON_ERROR_STOP=1 \
 dropdb -h "$H" -U "$U" --if-exists "$DB"
 createdb -h "$H" -U "$U" "$DB"
 pg_restore -h "$H" -U "$U" -d "$DB" --no-owner --no-privileges "$RESTORE_FILE"`
-	args := []string{"exec", "-T"}
+	// Same script either way; only where /backups points differs.
+	if srcDir == s.BackupDir {
+		args := []string{"exec", "-T"}
+		if encrypted {
+			// passphrase briefly visible in host argv - acceptable on a single-op box.
+			args = append(args, "-e", "BACKUP_PASS="+passphrase)
+		}
+		args = append(args, "backup", "sh", "-c", script)
+		if err := s.dc(args...); err != nil {
+			return fmt.Errorf("database restore failed: %w", err)
+		}
+		return nil
+	}
+	// Imported from elsewhere: the running sidecar's /backups is the local folder
+	// and its mounts are fixed at create time, so use a throwaway container with
+	// the source folder mounted there instead. --env-file gives it the same
+	// POSTGRES_* the sidecar gets from compose.
+	args := []string{"run", "--rm", "--network", composeProject,
+		"--env-file", filepath.Join(s.Dir, "backend.env")}
 	if encrypted {
-		// passphrase briefly visible in host argv - acceptable on a single-op box.
 		args = append(args, "-e", "BACKUP_PASS="+passphrase)
 	}
-	args = append(args, "backup", "sh", "-c", script)
-	if err := s.dc(args...); err != nil {
+	args = append(args,
+		"-v", srcDir+":/backups:ro",
+		"-v", s.keysDir()+":/keys:ro",
+		s.Image, "sh", "-c", script)
+	if err := s.run.Run("docker", args...); err != nil {
 		return fmt.Errorf("database restore failed: %w", err)
 	}
 	return nil
@@ -253,7 +301,7 @@ func (s *Store) waitForDB() {
 // container to mount it read-write. minio is stopped first so nothing is mid-write;
 // the caller's `up -d` restarts it. Uses the backup image (postgres + openssl, and
 // its busybox has tar+gzip) so decrypt + extract both work fully offline.
-func (s *Store) restoreFiles(archive, passphrase string) error {
+func (s *Store) restoreFiles(srcDir, archive, passphrase string) error {
 	s.logln("Restoring uploaded files from " + archive + " ...")
 	_ = s.dc("stop", "minio")
 	vol := composeProject + "_minio-data"
@@ -286,7 +334,7 @@ tar xzf "$ARCHIVE" -C /minio-data`
 	}
 	args = append(args,
 		"-v", vol+":/minio-data",
-		"-v", s.BackupDir+":/backups:ro",
+		"-v", srcDir+":/backups:ro",
 		"-v", s.keysDir()+":/keys:ro",
 		s.Image, "sh", "-c", script)
 	if err := s.run.Run("docker", args...); err != nil {

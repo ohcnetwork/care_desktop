@@ -8,6 +8,7 @@ import type {
   DockerStatus,
   FrontendPlugin,
   Health,
+  ImportedBackup,
   NameStatus,
   NetworkStatus,
   ResidueReport,
@@ -59,6 +60,15 @@ declare global {
           ReadFrontendPlugins(): Promise<FrontendPlugin[]>;
           SaveFrontendPlugins(plugins: FrontendPlugin[]): Promise<void>;
           ListBackups(): Promise<Backup[]>;
+          GetBackupDir(): Promise<string>;
+          SetBackupDir(dir: string): Promise<string>;
+          ChooseBackupFile(): Promise<string>;
+          InspectBackupFile(path: string): Promise<ImportedBackup>;
+          RestoreFromFile(
+            path: string,
+            passphrase: string,
+            remember: boolean,
+          ): Promise<void>;
           RestoreBackup(
             dbDump: string,
             filesArchive: string,

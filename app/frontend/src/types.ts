@@ -47,6 +47,17 @@ export type Backup = {
   size_bytes: number;
 };
 
+/** A backup file the operator picked from outside the clinic's backup folder. */
+export type ImportedBackup = {
+  path: string;
+  dir: string;
+  db_dump: string;
+  files_archive: string;
+  label: string;
+  encrypted: boolean;
+  has_key: boolean;
+};
+
 export type CarePlugin = {
   name: string;
   package_name: string;

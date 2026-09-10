@@ -125,3 +125,16 @@ func copyFile(src, dst string) error {
 	}
 	return os.WriteFile(dst, b, 0o600)
 }
+
+// CopyRecoveryKey puts the password-protected private key beside the backups, so
+// the folder is self-contained and restores on a different computer. Called after
+// the backup folder changes; generation does the same thing for the first folder.
+func (s *Store) CopyRecoveryKey() error {
+	if !proc.FileExists(s.encKeyPath()) {
+		return fmt.Errorf("no recovery key at %s", s.encKeyPath())
+	}
+	if err := os.MkdirAll(s.BackupDir, 0o755); err != nil {
+		return err
+	}
+	return copyFile(s.encKeyPath(), filepath.Join(s.BackupDir, s.encKeyName()))
+}
