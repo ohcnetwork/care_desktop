@@ -92,7 +92,7 @@ type CareStore = {
   reloadBackups: () => Promise<void>;
   runAction: (action: string) => Promise<void>;
   setAutostart: (on: boolean) => Promise<void>;
-  restore: (backup: Backup) => Promise<void>;
+  restore: (backup: Backup, passphrase?: string) => Promise<void>;
   uninstall: (removeImages: boolean, removeBackups: boolean) => Promise<void>;
   log: (line: string) => void;
 };
@@ -245,7 +245,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
   );
 
   const restore = useCallback(
-    async (backup: Backup) => {
+    async (backup: Backup, passphrase = "") => {
       if (busyRef.current) return;
       setBusy(true, "Restoring");
       log(
@@ -253,7 +253,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
       );
       toast("Restore started — data will be replaced");
       try {
-        await bridge.RestoreBackup(backup.db_dump, backup.files_archive, "", false);
+        await bridge.RestoreBackup(backup.db_dump, backup.files_archive, passphrase, false);
       } catch (e) {
         log(`error: ${errorText(e)}`);
         setBusy(false);
@@ -352,7 +352,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
   }, [setFlow, setRun]);
 
   const retryInstall = useCallback(async () => {
-    // Windows: wipe the half-staged kit so the retry re-stages clean. No-op elsewhere.
+    // Windows: wipe the half-staged install files so the retry re-stages clean. No-op elsewhere.
     try {
       await bridge.CleanupFailedInstall();
     } catch (e) {

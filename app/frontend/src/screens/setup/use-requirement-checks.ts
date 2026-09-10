@@ -4,7 +4,7 @@ import { bridge } from "@/lib/bridge";
 import type { ToolPlan } from "@/types";
 
 export type CheckTone = "wait" | "ok" | "bad";
-export type CheckId = "docker" | "git" | "mdns" | "network";
+export type CheckId = "residue" | "docker" | "git" | "mdns" | "network";
 
 /**
  * What the operator can press on a failing row. The wizard is used by people who
@@ -57,10 +57,44 @@ function actionFor(plan: ToolPlan, install: () => Promise<void>): CheckAction | 
  * different ways, and a row can only carry one button.
  */
 export function useRequirementChecks(host: string) {
+  const [residue, setResidue] = useState<Result>(WAITING);
   const [docker, setDocker] = useState<Result>(WAITING);
   const [git, setGit] = useState<Result>(WAITING);
   const [mdns, setMdns] = useState<Result>(WAITING);
   const [network, setNetwork] = useState<Result | null>(null);
+
+  /**
+   * Leftovers from an earlier CARE Desktop. This is a hard blocker rather than a
+   * warning: an old data volume still carrying the label gets re-attached by
+   * compose, so the "new" clinic comes up holding the previous one's patients.
+   *
+   * Docker-side traces are invisible while Docker is down, so this is
+   * deliberately re-run as part of recheckAll - once Docker goes green the scan
+   * sees the containers, volumes, and images it could not see before.
+   */
+  const checkResidue = useCallback(async (): Promise<Result> => {
+    setResidue(WAITING);
+    let result: Result;
+    try {
+      const report = await bridge.ScanResidue();
+      result = report.clean
+        ? { state: "ok", how: "" }
+        : {
+            state: "bad",
+            how: `Found ${report.traces.map((t) => t.label.toLowerCase()).join(", ")}. These must be removed before a new clinic can be set up.`,
+            action: {
+              label: "Remove old installation",
+              detail:
+                "Deletes the earlier installation's clinic data, images, and settings from this computer. Backups are kept.",
+              run: () => bridge.PurgeResidue(),
+            },
+          };
+    } catch (e) {
+      result = { state: "bad", how: String(e) };
+    }
+    setResidue(result);
+    return result;
+  }, []);
 
   const checkDocker = useCallback(async (): Promise<Result> => {
     setDocker(WAITING);
@@ -152,14 +186,15 @@ export function useRequirementChecks(host: string) {
   }, []);
 
   const recheckAll = useCallback(async (): Promise<CheckTone> => {
-    const [d, g, m, n] = await Promise.all([
+    const [r, d, g, m, n] = await Promise.all([
+      checkResidue(),
       checkDocker(),
       checkGit(),
       checkMDNS(),
       checkNetwork(),
     ]);
-    return summarise(n ? [d, g, m, n] : [d, g, m]);
-  }, [checkDocker, checkGit, checkMDNS, checkNetwork]);
+    return summarise(n ? [r, d, g, m, n] : [r, d, g, m]);
+  }, [checkResidue, checkDocker, checkGit, checkMDNS, checkNetwork]);
 
   useEffect(() => {
     void recheckAll();
@@ -167,6 +202,12 @@ export function useRequirementChecks(host: string) {
 
   const checks = useMemo<Check[]>(() => {
     const list: Check[] = [
+      {
+        id: "residue",
+        title: "A clean computer",
+        detail: "Nothing left from an earlier CARE Desktop",
+        ...residue,
+      },
       {
         id: "docker",
         title: "Docker",
@@ -195,11 +236,11 @@ export function useRequirementChecks(host: string) {
       });
     }
     return list;
-  }, [docker, git, host, mdns, network]);
+  }, [docker, git, host, mdns, network, residue]);
 
   const overall = useMemo(
-    () => summarise(network ? [docker, git, mdns, network] : [docker, git, mdns]),
-    [docker, git, mdns, network],
+    () => summarise(network ? [residue, docker, git, mdns, network] : [residue, docker, git, mdns]),
+    [docker, git, mdns, network, residue],
   );
 
   return { checks, overall, recheckAll, checkMDNS };

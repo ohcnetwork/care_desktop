@@ -11,14 +11,14 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// kitFS holds the deployment kit (compose + env + mounted configs), unpacked to a
-// writable dir on first run. Staged into ./kit by the frontend build step.
+// installFS holds the deployment install dir (compose + env + mounted configs), unpacked to a
+// writable dir on first run. Staged into ./install dir by the frontend build step.
 //
-//go:embed all:kit
-var kitFS embed.FS
+//go:embed all:install
+var installFS embed.FS
 
 func main() {
-	app := NewApp(kitFS)
+	app := NewApp(installFS)
 
 	err := wails.Run(&options.App{
 		Title:     "CARE Desktop",

@@ -16,6 +16,7 @@ export function BackupsTab() {
   const { backups, busy, runAction, reloadBackups, restore } = useCare();
   const [showInfo, setShowInfo] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [passphrase, setPassphrase] = useState("");
 
   return (
     <div className="flex flex-col gap-3">
@@ -80,25 +81,43 @@ export function BackupsTab() {
                   <Badge variant={backup.manual ? "plainOk" : "plain"} size="sm">
                     {backup.manual ? "Manual" : "Automatic"}
                   </Badge>
-                  <Button disabled={busy} onClick={() => setConfirming(backup.db_dump)}>
+                  <Button disabled={busy} onClick={() => {
+                      setPassphrase("");
+                      setConfirming(backup.db_dump);
+                    }}>
                     Restore
                   </Button>
                 </div>
                 {confirming === backup.db_dump ? (
-                  <div className="flex items-center gap-3 border-t border-danger-bg bg-danger-tint px-4 py-[13px] text-[12.5px] text-danger-ink">
-                    <span className="flex-1">
-                      Replace current data with this copy? This cannot be undone.
-                    </span>
-                    <Button onClick={() => setConfirming(null)}>Cancel</Button>
-                    <Button
-                      variant="destructive"
-                      onClick={() => {
-                        setConfirming(null);
-                        void restore(backup);
-                      }}
-                    >
-                      Yes, restore
-                    </Button>
+                  <div className="flex flex-col gap-3 border-t border-danger-bg bg-danger-tint px-4 py-[13px] text-[12.5px] text-danger-ink">
+                    {backup.encrypted ? (
+                      <label className="flex items-center gap-3">
+                        <span className="flex-none">Backup password</span>
+                        <input
+                          autoFocus
+                          type="password"
+                          value={passphrase}
+                          onChange={(e) => setPassphrase(e.target.value)}
+                          placeholder="Leave blank to use the saved password"
+                          className="min-w-0 flex-1 rounded-sm border border-danger-bg bg-white px-2 py-1 font-mono text-[12.5px] text-ink"
+                        />
+                      </label>
+                    ) : null}
+                    <div className="flex items-center gap-3">
+                      <span className="flex-1">
+                        Replace current data with this copy? This cannot be undone.
+                      </span>
+                      <Button onClick={() => setConfirming(null)}>Cancel</Button>
+                      <Button
+                        variant="destructive"
+                        onClick={() => {
+                          setConfirming(null);
+                          void restore(backup, passphrase);
+                        }}
+                      >
+                        Yes, restore
+                      </Button>
+                    </div>
                   </div>
                 ) : null}
               </Fragment>

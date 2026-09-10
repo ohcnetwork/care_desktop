@@ -5,12 +5,12 @@ import type {
   AppState,
   Backup,
   CarePlugin,
-  ClinicApp,
   DockerStatus,
   FrontendPlugin,
   Health,
   NameStatus,
   NetworkStatus,
+  ResidueReport,
   RestartPlan,
   ToolPlan,
 } from "./types";
@@ -31,6 +31,8 @@ declare global {
           InstallDocker(): Promise<void>;
           InstallGit(): Promise<void>;
           OpenDocker(): Promise<void>;
+          ScanResidue(): Promise<ResidueReport>;
+          PurgeResidue(): Promise<void>;
           RestartPlan(): Promise<RestartPlan>;
           RestartNow(): Promise<void>;
           CareHealth(): Promise<Health>;
@@ -54,21 +56,15 @@ declare global {
           WriteEnv(name: string, content: string): Promise<void>;
           ReadPlugins(): Promise<CarePlugin[]>;
           SavePlugins(plugins: CarePlugin[]): Promise<void>;
-          ListApps(): Promise<ClinicApp[]>;
-          SetAppEnabled(slug: string, enabled: boolean): Promise<void>;
           ReadFrontendPlugins(): Promise<FrontendPlugin[]>;
           SaveFrontendPlugins(plugins: FrontendPlugin[]): Promise<void>;
           ListBackups(): Promise<Backup[]>;
-          ConfirmRestore(filesIncluded: boolean): Promise<boolean>;
-          BackupEncryptionEnabled(): Promise<boolean>;
-          HasStoredBackupPassword(): Promise<boolean>;
           RestoreBackup(
             dbDump: string,
             filesArchive: string,
             passphrase: string,
             remember: boolean,
           ): Promise<void>;
-          ConfirmUninstall(removeBackups: boolean): Promise<boolean>;
           RunUninstall(removeImages: boolean, removeBackups: boolean): Promise<void>;
           OpenURL(url: string): Promise<void>;
           ChooseFolder(title: string): Promise<string>;

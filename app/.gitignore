@@ -2,8 +2,8 @@
 build/bin/
 # staged at build time from the repo-root kit (source of truth lives at ../) —
 # only the placeholder is tracked, so //go:embed compiles on a clean checkout.
-kit/*
-!kit/.gitkeep
+install/*
+!install/.gitkeep
 # frontend
 frontend/node_modules/
 frontend/dist/*

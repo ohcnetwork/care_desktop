@@ -1,4 +1,4 @@
-module care-desktop/app
+module github.com/ohcnetwork/care_desktop/app
 
 go 1.26
 

@@ -32,6 +32,12 @@ export type ToolPlan = {
 };
 export type AppState = { setup_done: boolean; mdns_name: string; docker: DockerStatus };
 
+/** One thing an earlier CARE Desktop left on this computer. */
+export type ResidueTrace = { id: string; label: string; detail: string };
+
+/** What ScanResidue found. `clean` is what the wizard gates on. */
+export type ResidueReport = { clean: boolean; traces: ResidueTrace[] };
+
 export type Backup = {
   db_dump: string;
   files_archive: string;
@@ -49,18 +55,6 @@ export type CarePlugin = {
 };
 
 export type FrontendPlugin = { slug: string; meta: Record<string, unknown> };
-
-export type ClinicApp = {
-  slug: string;
-  name: string;
-  description: string;
-  enabled: boolean;
-  managed: boolean;
-  ready: boolean;
-  url: string;
-  warning: string;
-  needs_backend_plug: string;
-};
 
 /** Which of the two .env files / plugin sets an editor is pointed at. */
 export type Section = "backend" | "frontend";

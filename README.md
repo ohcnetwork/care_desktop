@@ -75,19 +75,21 @@ cd care-desktop && care setup && care start
 | Path | What |
 |---|---|
 | `app/` | the Go app — Wails desktop GUI + the `care` engine/CLI |
-| `docker-compose.yml` | the stack: db, redis, minio, backend, celery×2, frontend, caddy, backup |
-| `backend.env` / `frontend.env` | all clinic settings ([reference](docs/configuration.md)) |
-| `versions.env` | which CARE versions to build |
-| `clinic_settings.py` | Django settings for the LAN — production settings served over `https://`, self-signed cert |
-| `Caddyfile` | the reverse proxy: `https://care.local` (one origin), `:80` redirect, and the cert-trust bootstrap |
-| `setup/` | the `https://care.local/setup` install page that hands the local CA to new devices |
-| `load_test_fixtures.sh` | dev-only: seed the running backend with CARE's sample data ([see below](#loading-sample-data-for-testing)) |
-| `minio/`, `scripts/` | MinIO bucket setup + the daily backup loop (run inside containers) |
+| `deployments/` | **the clinic stack** — everything below, staged into the app and embedded at build time |
+| `deployments/docker-compose.yml` | the stack: db, redis, minio, backend, celery×2, frontend, caddy, backup |
+| `deployments/backend.env` / `frontend.env` | all clinic settings ([reference](docs/configuration.md)) |
+| `deployments/versions.env` | which CARE versions to build |
+| `deployments/clinic_settings.py` | Django settings for the LAN — production settings served over `https://`, self-signed cert |
+| `deployments/Caddyfile` | the reverse proxy: `https://care.local` (one origin), `:80` redirect, and the cert-trust bootstrap |
+| `deployments/setup/` | the `https://care.local/setup` install page that hands the local CA to new devices |
+| `deployments/minio/`, `deployments/scripts/` | MinIO bucket setup + the daily backup loop (run inside containers) |
 | `packaging/` | the `.deb` recipe + Linux desktop entry ([building.md](docs/building.md)) |
+| `scripts/` | dev-only helpers you run yourself, e.g. seeding sample data ([see below](#loading-sample-data-for-testing)) |
 | `docs/` | all documentation |
 
-The repo-root files are the **single source of truth**; the app embeds them at build
-time. The core CARE app is **never modified**.
+`deployments/` is the **single source of truth**; the build stages it into
+`app/install/` (gitignored) so the binary can embed it. Edit it here, never
+there. The core CARE app is **never modified**.
 
 ---
 
@@ -96,7 +98,7 @@ time. The core CARE app is **never modified**.
 To try the clinic with realistic data, seed CARE's fixtures into the **running** stack:
 
 ```bash
-./load_test_fixtures.sh
+./scripts/load_test_fixtures.sh
 ```
 
 It installs `faker` into the backend container (ephemeral) and runs CARE's
@@ -115,6 +117,6 @@ first (`care start` or the app), then run the script. See
 - **Offline-first** — everything stays in the building; no internet needed to use it.
 - **HTTPS on the LAN** — a self-signed cert from a built-in CA; new devices trust it in two taps from `care.local/setup`, and the server trusts itself automatically.
 - **No-terminal option** — the desktop app installs + runs CARE with a few clicks.
-- **Cross-platform** — one Go binary per OS; Windows needs no WSL or bash. On Windows the wizard also checks the network profile and offers a one-click **Fix** (Public→Private + open ports) so other devices can reach the clinic, and stages the kit under the home dir (Docker can't read `%AppData%` bind mounts). See [install-windows.md](docs/install-windows.md#2-make-carelocal-resolvable).
+- **Cross-platform** — one Go binary per OS; Windows needs no WSL or bash. On Windows the wizard also checks the network profile and offers a one-click **Fix** (Public→Private + open ports) so other devices can reach the clinic, and stages the install files under the home dir (Docker can't read `%AppData%` bind mounts). See [install-windows.md](docs/install-windows.md#2-make-carelocal-resolvable).
 - **Data-safe** — daily DB + file backups with **one-click restore**; the app never deletes your volumes.
 - **No core changes** — runs CARE's own images/source, configured from the outside.

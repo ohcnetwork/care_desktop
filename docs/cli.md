@@ -12,11 +12,11 @@ go build -o /usr/local/bin/care ./cmd/care    # or ~/.local/bin on Linux
 Or run without building: `go run ./app/cmd/care <command>` from the repo root.
 
 ## Where it runs
-`care` acts on the **kit** in the **current directory** (the folder with
-`docker-compose.yml`). Override with `CARE_DESKTOP_DIR=/path/to/kit`.
+`care` acts on the **install dir** in the **current directory** (the folder with
+`docker-compose.yml`). Override with `CARE_DESKTOP_DIR=/path/to/install-dir`.
 
 ```bash
-cd care-desktop        # the repo root is a valid kit
+cd care-desktop/deployments    # a valid install dir: it holds docker-compose.yml
 care status
 ```
 
@@ -41,7 +41,7 @@ care status
 
 | Variable | Example | Effect |
 |---|---|---|
-| `CARE_DESKTOP_DIR` | `/srv/care-desktop` | Use a kit folder other than the current dir. |
+| `CARE_DESKTOP_DIR` | `/srv/care-desktop` | Use a folder other than the current dir. |
 | `BACKUP_DIR` | `/mnt/usb/care-backups` | Where backups go (default `~/Desktop/care-db-backups`). |
 | `CARE_ADMIN_PASSWORD` | `s3cret` | Password for the first `admin` user (default `admin`). |
 | `CARE_NO_MDNS` | `1` | Skip the hostname rename (use the server IP instead). |
@@ -89,8 +89,8 @@ care options
   fresh `care backup-now` first if you're unsure.
 - `care uninstall` deletes the data volumes, so it **won't run without `--yes`** —
   without it, it just prints what it would remove. Backups are kept unless you add
-  `--backups`. Run from the repo root, it cleans Docker + the clones but leaves the
-  source checkout itself in place. It does not rename the computer back. It **removes
+  `--backups`. Run against `deployments/`, it cleans Docker + the clones but leaves
+  the source checkout itself in place. It does not rename the computer back. It **removes
   the clinic's CA cert(s) from *this* machine's trust store**: the root captured this
   run (by fingerprint) *and* any left by earlier installs, matched on the
   `CARE Desktop Local CA` common name our own Caddyfile sets, since setup mints a fresh
@@ -100,4 +100,4 @@ care options
 - `care` never passes `-v` to `docker compose`, so **data volumes always survive**
   stop/start/rebuild. The only way to delete data is to remove the volumes yourself.
 - The CLI and the desktop app are interchangeable — you can set up with one and
-  manage with the other (they read the same kit + config).
+  manage with the other (they read the same install dir + config).

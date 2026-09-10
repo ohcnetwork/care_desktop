@@ -114,7 +114,7 @@ and don't `curl` it without `?ok=1` (you'll save the redirect HTML and get
 - Re-run **Install & Start** (or `care setup`) — it's safe to repeat: existing clones
   and images are reused, and the secret/admin steps are idempotent.
 - On Windows, **Try again** first tears down leftover containers and wipes the
-  half-staged kit, so the retry starts clean.
+  half-staged install dir, so the retry starts clean.
 - Low disk space breaks image builds — you need ~10 GB free.
 
 ---
@@ -123,10 +123,10 @@ and don't `curl` it without `?ok=1` (you'll save the redirect HTML and get
 
 Docker Desktop's WSL2 file share can't read files created under `%AppData%` on some
 Windows setups, so the bind-mounted `clinic_settings.py` arrives as an **empty
-directory** and the backend can't start. The app avoids this by staging the kit under
-your **home dir** (`%USERPROFILE%\care-desktop\kit`), which Docker reads live — so a
+directory** and the backend can't start. The app avoids this by staging the install dir under
+your **home dir** (`%USERPROFILE%\care-desktop\install dir`), which Docker reads live — so a
 current install shouldn't hit this. If you see it on an older install, uninstall and
-reinstall so the kit is re-staged to the home dir.
+reinstall so the install dir is re-staged to the home dir.
 
 ---
 

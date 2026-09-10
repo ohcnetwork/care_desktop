@@ -14,7 +14,7 @@ A single Go codebase (`app/`) ships in two forms that share one **engine**:
   panel. For non-technical staff.
 - **`care` CLI** — the same actions from a terminal. For developers/servers.
 
-The **engine** (`app/internal/care/`) is plain Go that shells out to `docker` and
+The **engine** (`app/internal/`) is plain Go that shells out to `docker` and
 `git`. It has no GUI dependency, so the app and CLI can never drift. It replaced
 the old `care.sh` bash script entirely — there is **no shell dependency** on any OS.
 
@@ -33,7 +33,7 @@ What the engine does:
 | `backup-now` | write an immediate database dump |
 | `list-backups` | list the restorable points in the backup folder |
 | `restore` | stop app services → drop + re-create the DB from a chosen dump → (optionally) overwrite the MinIO volume from the matching files archive → bring the stack back up + migrate |
-| `uninstall` | `compose down -v` (containers + network + **data volumes**) → optionally remove images → delete the clones + kit dir → **remove the trusted CA cert from the server's keychain** → optionally delete backups. It also drops the `care.local` hosts line on every OS, and on Windows removes the `CARE Desktop *` firewall rules and reverts the network profile to Public. The app also clears its config + login-item so the next launch is a fresh first-run |
+| `uninstall` | `compose down -v` (containers + network + **data volumes**) → optionally remove images → delete the clones + install dir → **remove the trusted CA cert from the server's keychain** → optionally delete backups. It also drops the `care.local` hosts line on every OS, and on Windows removes the `CARE Desktop *` firewall rules and reverts the network profile to Public. The app also clears its config + login-item so the next launch is a fresh first-run |
 
 ### 2. The runtime layer (Docker containers)
 The actual CARE stack, defined in `docker-compose.yml`. Project name is
@@ -159,7 +159,7 @@ the setup page offers a script that does it in one run. Phones can't execute one
 Android and iOS keep the manual flow only.
 
 The engine renders both scripts on every `start`
-(`app/internal/care/certscript.go`) into the `setup/` directory Caddy serves. Two
+(`app/internal/sys/trust/installer.go`) into the `setup/` directory Caddy serves. Two
 properties matter:
 
 - **The certificate is embedded in the script, not fetched.** A device that doesn't
@@ -182,7 +182,7 @@ profile screen) reads **"CARE Desktop Local CA"** instead of Caddy's default
 `caddy-data` volume re-mints it.
 
 **The server machine trusts its own cert automatically.** At the end of `start`, the
-engine (`app/internal/care/trustca.go`) pulls the root out of the `caddy-data` volume
+engine (`app/internal/sys/trust/trust.go`) pulls the root out of the `caddy-data` volume
 and installs it into the OS trust store — unprivileged first (login keychain / user
 store), which on macOS usually succeeds outright. It's idempotent: if the cert is
 already trusted it does nothing.
@@ -195,7 +195,7 @@ can run before the stack is up (the CA doesn't exist until Caddy mints it into i
 volume), so both land at the end of `start`. Running them separately would mean
 two dialogs and two password prompts to finish one install.
 
-So `ensureLocalAccess` (`app/internal/care/localaccess.go`) collects whatever is
+So `ensureLocalAccess` (`app/internal/clinic/localaccess.go`) collects whatever is
 still outstanding and runs it in a **single elevated call behind a single
 confirmation**. Each step is tried unprivileged first and drops out if it succeeds
 (or was already done), so the prompt lists only what genuinely needs admin, and a
@@ -224,7 +224,7 @@ keep their copy and must remove it manually.
 ## mDNS advertising and self-heal
 
 The `care.local` name is advertised by an **in-process** mDNS responder in the app (Go,
-`app/internal/care/advertise.go`) — not a system daemon — so it works the same on every
+`app/internal/sys/mdns/advertise.go`) — not a system daemon — so it works the same on every
 OS the app runs on. Sleep/wake, WiFi flaps, or an IP change can silently stop it
 answering, which shows up as `DNS_PROBE_FINISHED_NXDOMAIN` on client devices.
 
@@ -246,7 +246,7 @@ That matters because the frontend has `https://care.local` baked in as its API b
 so an unresolvable name means every call fails with `ERR_NAME_NOT_RESOLVED` even if
 you reach the app by IP, and since CARE gates its first paint on an API call the
 page sits on its loading logo. So CARE writes a single hosts-file line,
-`127.0.0.1 care.local` (`app/internal/care/hosts.go`, tagged `# care-desktop`,
+`127.0.0.1 care.local` (`app/internal/sys/hosts/hosts.go`, tagged `# care-desktop`,
 removed on uninstall), on **macOS, Linux, and Windows** alike. It's idempotent: an
 entry that already exists (ours, or one you added) means no write and no prompt.
 That's for the server machine only; other devices still resolve `care.local` via
@@ -254,6 +254,32 @@ the mDNS responder above. No machine is ever renamed.
 
 This needs administrator rights, and so does trusting the CA below, so the two are
 batched into **one approval**, see [below](#one-install-one-approval).
+
+---
+
+## Leftovers from an earlier install
+
+Docker volumes outlive the app that created them. If CARE Desktop was installed
+on this computer before, its `care-desktop_*` volumes are still there, and
+`compose up` re-attaches them by name — so a "fresh" setup comes up holding the
+previous clinic's patients, with nothing in the wizard to say so.
+
+So the wizard's first check is **"A clean computer"**. `internal/residue` looks
+for eleven kinds of trace: containers, volumes, networks, and images carrying the
+project label; the install directory; source clones; `config.json`; the
+`care.local` line in `hosts`; the trusted root CA; firewall rules; the autostart
+entry; and the backup password in the keychain. It reads only — it never elevates
+and never changes anything.
+
+If any are found, the row goes red and offers **Remove old installation**, which
+runs `clinic.Purge` (`internal/clinic/purge.go`) and then re-scans, reporting
+either "this computer is clean" or exactly what could not be removed.
+
+Two things are deliberately not symmetrical with Uninstall, both explained in
+[behaviour-contract.md §5a](behaviour-contract.md): **backups are never touched**,
+and the compose-project removal is **not** guarded on a local compose file — with
+a refusal in Go if `setup_done` is already true, so the purge can never reach an
+install this app owns.
 
 ---
 
@@ -275,22 +301,22 @@ See [configuration.md](configuration.md#versionsenv) for pinning versions.
 | Path (macOS shown) | What |
 |---|---|
 | `~/Library/Application Support/care-desktop/config.json` | the app's saved choices (setup done, install/backup folders) |
-| `~/Library/Application Support/care-desktop/kit/` | the unpacked deployment kit + the `care`/`care_fe` clones |
+| `~/Library/Application Support/care-desktop/install/` | the unpacked deployment files + the `care`/`care_fe` clones |
 | `~/Desktop/care-db-backups/` (default) | daily backups (override in the installer) |
 | Docker named volumes | `postgres-data`, `redis-data`, `minio-data`, `caddy-*` — the actual data |
 
 On Linux the config dir is `~/.config/care-desktop/`; on Windows `config.json` is in
 `%AppData%\care-desktop\`.
 
-> **Windows kit location.** On Windows the **kit** is staged under the home dir
-> (`%USERPROFILE%\care-desktop\kit`), *not* `%AppData%`. Docker Desktop's WSL2 file
+> **Windows install dir location.** On Windows the **install dir** is staged under the home dir
+> (`%USERPROFILE%\care-desktop\install dir`), *not* `%AppData%`. Docker Desktop's WSL2 file
 > share can't reliably read files created under `%AppData%` (both Roaming and Local) —
 > the bind-mounted `clinic_settings.py`/`Caddyfile` then arrive in the container as
 > empty directories and the backend fails with `ModuleNotFoundError`. The home dir is
-> read live, so the kit lives there; only `config.json` (which Docker never reads)
+> read live, so the install dir lives there; only `config.json` (which Docker never reads)
 > stays in `%AppData%`.
 
 > **Patient data lives in the Docker volumes**, not in the install folder. The
-> install folder only holds the kit + source clones. This is why moving/clearing the
+> install folder only holds the install dir + source clones. This is why moving/clearing the
 > install folder never loses data — but you must still back up the volumes (the
 > `backup` container does this automatically).

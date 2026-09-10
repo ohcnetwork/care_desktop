@@ -145,10 +145,10 @@ if a warning persists.
   Docker engine to start at login (Docker Desktop: **Settings → General → Start
   Docker Desktop when you log in**), so the containers come back automatically.
 - Closing the window leaves CARE running.
-- **Where files live:** the kit is staged under your home dir
-  (`%USERPROFILE%\care-desktop\kit`), not `%AppData%` — Docker Desktop can't read
+- **Where files live:** the install dir is staged under your home dir
+  (`%USERPROFILE%\care-desktop\install dir`), not `%AppData%` — Docker Desktop can't read
   `%AppData%` bind mounts reliably (see [architecture.md](architecture.md#where-things-live-on-the-server)).
   Only `config.json` stays in `%AppData%\care-desktop\`.
 - **If setup fails,** the wizard's **Try again** first tears down any leftover
-  containers and wipes the half-staged kit, so the retry starts clean.
+  containers and wipes the half-staged install dir, so the retry starts clean.
 - See [troubleshooting.md](troubleshooting.md) for `care.local` and Docker issues.

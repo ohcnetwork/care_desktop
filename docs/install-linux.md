@@ -63,8 +63,8 @@ hostname        # should print: care
 it directly, then see [cli.md](cli.md):
 ```bash
 cd care-desktop
-go run ./app/cmd/care setup     # then: ... start
-# (run from the repo root so it finds docker-compose.yml)
+# go run needs the repo root; CARE_DESKTOP_DIR points the CLI at the stack
+CARE_DESKTOP_DIR=./deployments go run ./app/cmd/care setup     # then: ... start
 ```
 
 ---

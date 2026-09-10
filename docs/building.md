@@ -2,7 +2,7 @@
 
 CARE Desktop's control app is a [Wails](https://wails.io) (Go + web) project in
 `app/`. One codebase produces the desktop app **and** the `care` CLI, sharing the
-engine in `app/internal/care/`.
+packages under `app/internal/`.
 
 For *what the code does*, see [architecture.md](architecture.md). This page is about
 *building* it.
@@ -29,17 +29,45 @@ sudo apt install libgtk-3-dev libwebkit2gtk-4.0-dev build-essential
 
 ```
 app/
-  main.go            Wails entry — embeds frontend/dist + kit
-  app.go             JS-facing bridge (window.go.main.App.*)
-  autostart.go       launch-at-login per OS
-  internal/care/     the engine (pure Go; no Wails import)
-  cmd/care/          the CLI
-  frontend/          web UI (TS + Vite); scripts/stage-kit.mjs stages the kit
+  main.go            Wails entry — embeds frontend/dist + install dir
+  app.go             the bound struct (window.go.main.App.*) + lifecycle
+  app_*.go           one file per group of bindings (config, status, actions,
+                     backup, uninstall, env, plugins, UI)
+  cmd/care/          the CLI — the thing that keeps the packages below Wails-free
+  frontend/          web UI (TS + Vite); scripts/stage-install.mjs stages the install dir
+
+  internal/
+    clinic/          the actions: one file per thing an operator can do
+                     (start, stop, rebuild, setup, uninstall, backup, ...)
+    compose/         builds the container images and clones their sources
+    backup/          list / encrypt / restore dumps and file archives
+    plugins/         backend + frontend plugin lists in the env files
+    prereq/          detect and install Docker and Git
+    health/          is the clinic answering? are its ports free?
+    settings/        config resolution ladder + password policy
+
+    sys/             thin OS wrappers, one package per concern
+      proc/          every process spawn goes through here
+      elevate/       one-approval privileged steps (sudo / UAC / osascript)
+      trust/         the local root CA in the OS trust store
+      hosts/         the loopback entry in /etc/hosts
+      mdns/          advertising and resolving <name>.local
+      hostname/      save and restore the machine name ("rename" mode)
+      netfix/        Windows network profile and firewall rules
+      reboot/        is a restart pending, and perform it
+      autostart/     launch-at-login
 ```
 
-The repo-root files (`docker-compose.yml`, `*.env`, `Caddyfile`, `minio/`,
-`scripts/`) are the **kit** — the single source of truth. The frontend build copies
-them into `app/kit/` (gitignored) so Go can `//go:embed` them. Don't edit `app/kit/`.
+Nothing under `internal/` imports Wails. `cmd/care` is what enforces that: if a
+Wails import creeps in, the CLI stops building.
+
+`deployments/` (`docker-compose.yml`, `*.env`, `Caddyfile`, `minio/`, `scripts/`,
+`setup/`) is the **install dir** — the single source of truth. The frontend build
+copies it into `app/install/` (gitignored) so Go can `//go:embed` it. Don't edit
+`app/install/`: it is wiped and re-staged on every build.
+
+The staging script reads the directory rather than a hardcoded list, so adding a
+file to `deployments/` is enough to get it shipped.
 
 ---
 
@@ -59,8 +87,8 @@ cd app
 wails build                       # current OS → build/bin/CARE Desktop(.app/.exe/binary)
 wails build -platform darwin/universal   # mac universal (Intel + Apple Silicon)
 ```
-`wails build` runs the frontend build first (which stages the kit), then compiles Go
-and packages the app. The kit ends up embedded in the binary.
+`wails build` runs the frontend build first (which stages the install dir), then compiles Go
+and packages the app. The install dir ends up embedded in the binary.
 
 ---
 
@@ -73,17 +101,21 @@ No Wails/Node needed for the CLI — it's pure Go + stdlib.
 
 ---
 
-## Tests
-```bash
-cd app
-go test ./internal/care/
-```
-Covers the secret generator (idempotent, strong), the config-resolution ladder, and
-real `docker compose` wiring (brings up db+redis, tears them down; skips if Docker is
-absent). See [architecture.md](architecture.md) for the engine design.
+## Checks
+There are no tests right now — the old suite was removed during the restructure
+and will be rewritten against the new packages.
+
+What CI runs on every push (`.github/workflows/ci.yml`):
 
 ```bash
-go vet ./...        # static checks
+cd app
+go build ./...                       # host
+go build ./cmd/care                  # the CLI — keeps internal/ Wails-free
+GOOS=windows go build ./...          # cross-compile
+GOOS=darwin  go build ./...
+go vet ./...
+gofmt -l .                           # must print nothing
+golangci-lint run                    # config in app/.golangci.yml
 ```
 
 ---
@@ -91,10 +123,10 @@ go vet ./...        # static checks
 ## Loading sample data (dev)
 
 To exercise the app with realistic content, seed CARE's fixtures into the **running**
-stack with the repo-root script:
+stack:
 
 ```bash
-./load_test_fixtures.sh
+./scripts/load_test_fixtures.sh
 ```
 
 What it does:
@@ -107,8 +139,8 @@ What it does:
    (`DATABASE_URL` is unchanged), so the seeded rows land in the postgres volume and
    **persist** across restarts.
 
-Prerequisites: the stack must be **up** first (`care start` or the desktop app). Run
-the script from the repo root.
+Prerequisites: the stack must be **up** first (`care start` or the desktop app). The
+script addresses the stack by compose project name, so it runs from any directory.
 
 > **Dev/demo only.** Don't run it against a real clinic's data. If you reseed often,
 > bake `faker` into the backend image instead of installing it each time (the script

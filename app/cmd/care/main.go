@@ -5,7 +5,7 @@
 //	     status | backup-now | list-backups | restore <dump> [files.tar.gz] |
 //	     uninstall [--images] [--backups] --yes | mdns [name]
 //
-// The kit dir defaults to the current directory (override with CARE_DESKTOP_DIR).
+// The install dir defaults to the current directory (override with CARE_DESKTOP_DIR).
 package main
 
 import (
@@ -16,7 +16,9 @@ import (
 	"strings"
 	"syscall"
 
-	"care-desktop/app/internal/care"
+	"github.com/ohcnetwork/care_desktop/app/internal/clinic"
+	"github.com/ohcnetwork/care_desktop/app/internal/sys/mdns"
+	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 )
 
 func main() {
@@ -24,15 +26,15 @@ func main() {
 		usage()
 		os.Exit(1)
 	}
-	kit := os.Getenv("CARE_DESKTOP_DIR")
-	if kit == "" {
-		kit, _ = os.Getwd()
+	installDir := os.Getenv("CARE_DESKTOP_DIR")
+	if installDir == "" {
+		installDir, _ = os.Getwd()
 	}
-	care.FixPath()
-	e := &care.Engine{
-		Kit:     kit,
-		Log:     func(s string) { fmt.Println(s) },
-		Confirm: confirmTTY,
+	proc.FixPath()
+	e := &clinic.Clinic{
+		InstallDir: installDir,
+		Log:        func(s string) { fmt.Println(s) },
+		Confirm:    confirmTTY,
 	}
 
 	var err error
@@ -75,8 +77,8 @@ func main() {
 }
 
 // listBackups prints the restorable points, newest first.
-func listBackups(e *care.Engine) error {
-	backups, err := e.ListBackups()
+func listBackups(e *clinic.Clinic) error {
+	backups, err := e.Backups().ListBackups()
 	if err != nil {
 		return err
 	}
@@ -93,14 +95,14 @@ func listBackups(e *care.Engine) error {
 
 // restore replays a backup. The files archive is optional: if omitted, the
 // same-timestamp files-*.tar.gz is paired automatically when one exists.
-func restore(e *care.Engine, args []string) error {
+func restore(e *clinic.Clinic, args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: care restore <care-*.dump> [files-*.tar.gz]")
 	}
 	dump, files := args[0], ""
 	if len(args) >= 2 {
 		files = args[1]
-	} else if backups, err := e.ListBackups(); err == nil {
+	} else if backups, err := e.Backups().ListBackups(); err == nil {
 		for _, b := range backups {
 			if b.DBDump == dump {
 				files = b.FilesArchive
@@ -109,13 +111,13 @@ func restore(e *care.Engine, args []string) error {
 	}
 	// Encrypted backups need the backup password; from the CLI it comes via the
 	// CARE_BACKUP_PASSWORD env var (the GUI reads it from the keychain instead).
-	return e.Restore(dump, files, os.Getenv("CARE_BACKUP_PASSWORD"))
+	return e.Backups().Restore(dump, files, os.Getenv("CARE_BACKUP_PASSWORD"))
 }
 
 // uninstall tears the install down. It removes the containers and ALL data
 // volumes, so it refuses to run without an explicit --yes (there's no prompt).
-func uninstall(e *care.Engine, args []string) error {
-	opts := care.UninstallOptions{RemoveKit: true} // the source-repo guard protects a dev checkout
+func uninstall(e *clinic.Clinic, args []string) error {
+	opts := clinic.UninstallOptions{RemoveInstallDir: true} // the source-repo guard protects a dev checkout
 	yes := false
 	for _, a := range args {
 		switch a {
@@ -149,12 +151,12 @@ func uninstall(e *care.Engine, args []string) error {
 // mdnsServe advertises <name>.local on the LAN and blocks until interrupted. For
 // headless servers, run it under systemd so care.local resolves without renaming
 // the host. The desktop app does this on its own while it's open.
-func mdnsServe(e *care.Engine, args []string) error {
+func mdnsServe(e *clinic.Clinic, args []string) error {
 	name := e.MDNSName()
 	if len(args) >= 1 && args[0] != "" {
 		name = args[0]
 	}
-	adv, err := care.Advertise(name)
+	adv, err := mdns.Advertise(name)
 	if err != nil {
 		return err
 	}
