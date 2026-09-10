@@ -55,8 +55,6 @@ services:
     image: ${BACKEND_IMAGE:?BACKEND_IMAGE not set - .env is missing from this directory}
     restart: unless-stopped
     env_file: ./backend.env
-    volumes:
-      - ./clinic_settings.py:/settings/clinic_settings.py:ro
     entrypoint: ["bash", "start.sh"]
     depends_on:
       db: {condition: service_healthy}
@@ -66,8 +64,6 @@ services:
     image: ${BACKEND_IMAGE:?BACKEND_IMAGE not set - .env is missing from this directory}
     restart: unless-stopped
     env_file: ./backend.env
-    volumes:
-      - ./clinic_settings.py:/settings/clinic_settings.py:ro
     entrypoint: ["bash", "celery_worker.sh"]
     depends_on:
       db: {condition: service_healthy}
@@ -77,8 +73,6 @@ services:
     image: ${BACKEND_IMAGE:?BACKEND_IMAGE not set - .env is missing from this directory}
     restart: unless-stopped
     env_file: ./backend.env
-    volumes:
-      - ./clinic_settings.py:/settings/clinic_settings.py:ro
     entrypoint: ["bash", "celery_beat.sh"]
     depends_on:
       db: {condition: service_healthy}
@@ -94,8 +88,8 @@ services:
     image: ${CADDY_WAF_IMAGE:?CADDY_WAF_IMAGE not set - .env is missing from this directory}   # caddy + Coraza WAF, built by `care setup`
     restart: unless-stopped
     ports:
-      - "80:80"               # redirects to https://care.local/
-      - "443:443"             # the clinic app: https://care.local/ (self-signed internal cert)
+      - "80:80"
+      - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./setup:/setup:ro

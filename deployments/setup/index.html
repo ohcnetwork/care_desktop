@@ -105,7 +105,7 @@
       <h1>Trust this clinic's server</h1>
       <button class="why-btn" id="why-btn" title="Why this is needed" aria-expanded="false">i</button>
     </div>
-    <p class="lede">Install the certificate once to open <b>https://care.local</b> without warnings.</p>
+    <p class="lede">Install the certificate once to open <b>https://example.local</b> without warnings.</p>
     <div class="why" id="why" hidden>The clinic server uses its own security certificate. Installing it lets this device confirm the server is genuine. It gives no access to your device and works fully offline. Use a Chrome based browser (Chrome, Edge, Brave), or Safari on iPhone and iPad.</div>
 
     <div id="picker">
@@ -182,32 +182,32 @@ var GUIDES = {
     "Open the downloaded `root.crt` and click *Install Certificate*.",
     "Choose *Local Machine*, then approve the admin prompt.",
     "Place it in *Trusted Root Certification Authorities*, then finish.",
-    "Reopen your browser and visit *https://care.local*."
+    "Reopen your browser and visit *https://example.local*."
   ] },
   macos: { label: "macOS", steps: [
     "Tap *Download certificate* below.",
     "Double click `root.crt`, then add it to the *System* keychain.",
     "Open *CARE Desktop Local CA*, set trust to *Always Trust*.",
-    "Reopen your browser and visit *https://care.local*."
+    "Reopen your browser and visit *https://example.local*."
   ], code: "sudo security add-trusted-cert -d -r trustRoot \\\n  -k /Library/Keychains/System.keychain ~/Downloads/root.crt" },
   linux: { label: "Linux", steps: [
     "Tap *Download certificate* below.",
     "Run the commands for your distribution.",
-    "Restart your browser and visit *https://care.local*."
+    "Restart your browser and visit *https://example.local*."
   ], code: "# Debian / Ubuntu\nsudo cp ~/Downloads/root.crt /usr/local/share/ca-certificates/care-root.crt\nsudo update-ca-certificates\n\n# Fedora / RHEL\nsudo cp ~/Downloads/root.crt /etc/pki/ca-trust/source/anchors/care-root.crt\nsudo update-ca-trust" },
   android: { label: "Android", steps: [
     "Tap *Download certificate* below.",
     "Open *Settings*, then *Security*.",
     "Go to *Encryption & credentials*, then *Install a certificate*, then *CA certificate*.",
     "Tap *Install anyway*, then pick `root.crt`.",
-    "Open *https://care.local* in Chrome."
+    "Open *https://example.local* in Chrome."
   ] },
   ios: { label: "iPhone / iPad", steps: [
     "Tap *Download certificate* below, using *Safari*.",
     "Open *Settings*, then *Profile Downloaded*, then *Install*.",
     "Go to *General*, *About*, *Certificate Trust Settings*.",
     "Turn *on* the switch for *CARE Desktop Local CA*.",
-    "Open *https://care.local*."
+    "Open *https://example.local*."
   ] }
 };
 
