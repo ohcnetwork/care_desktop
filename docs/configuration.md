@@ -124,7 +124,7 @@ Not set by default — listed here because the defaults behave differently offli
 ### Backups
 | Variable | Default | Meaning |
 |---|---|---|
-| `DB_BACKUP_RETENTION_PERIOD` | `14` | Days of backups to keep; older ones are pruned. See [backups.md](backups.md). |
+| `DB_BACKUP_RETENTION_PERIOD` | `14` | Whole days of backups to keep; older ones are deleted. **`0` keeps every backup forever**, as does leaving it unset. Must be a whole number — a negative or decimal value is passed straight to `find -mtime`, which treats it as a set nobody intended and deletes accordingly. See [backups.md](backups.md). |
 
 ---
 
@@ -246,7 +246,7 @@ Advanced settings.
 |---|---|---|
 | Backup location | installer folder picker | Where daily backups go. Default `~/Desktop/care-db-backups`. |
 | Admin password | installer "Admin password" | Password for the first `admin` user. **No default** — without it the superuser is not created. |
-| Backup password | installer "Backup password" | Encrypts backups. Empty means backups are written in plaintext. |
+| Backup password | installer "Backup password" | **Required.** Every backup is encrypted with it; there is no plaintext option, so setup will not complete without one. |
 | Clinic address | installer "Clinic address" | The host label, without `.local`. See [Clinic address](#clinic-address). |
 
 `CARE_DESKTOP_DIR` is the one real environment variable left: it points the app at a

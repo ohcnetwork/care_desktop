@@ -37,7 +37,8 @@ func (s *Store) privateKeyLocation() string {
 	return ""
 }
 
-// ensureKeysDir keeps the ./keys:/keys bind-mount source present (empty = plaintext).
+// ensureKeysDir keeps the ./keys:/keys bind-mount source present. Docker creates a
+// missing bind source as a root-owned directory the containers cannot read.
 // EnsureKeysDir creates the keys directory.
 func (s *Store) EnsureKeysDir() error {
 	return os.MkdirAll(s.keysDir(), 0o755)
@@ -49,7 +50,7 @@ func (s *Store) EnsureKeysDir() error {
 // refuse if encrypted backups exist (a new key would strand them).
 func (s *Store) GenBackupKeypair(passphrase string) error {
 	if passphrase == "" {
-		return nil // encryption disabled
+		return fmt.Errorf("a backup password is required - every backup is encrypted, and without one none can be written")
 	}
 	if err := s.EnsureKeysDir(); err != nil {
 		return err

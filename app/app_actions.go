@@ -124,16 +124,18 @@ func actionFunc(e *clinic.Clinic, action string) func() error {
 }
 
 // RunSetup persists the wizard's choices, unpacks the install dir, then runs setup+start.
-// Empty backupPassword = encryption off; rememberBackup saves it to the keychain.
-// A seed with no facility name means the clinic details screen was skipped.
+// rememberBackup saves the backup password to the keychain.
+//
+// Both passwords are required. Every backup is encrypted, so a blank backup
+// password is not "encryption off" any more - it is an install that cannot write
+// a backup at all. Rejected here rather than minutes later inside
+// GenBackupKeypair, so the operator is told at the form they are still looking at.
 func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberBackup bool, installDir, backupDir string) error {
 	if err := ValidatePassword(adminPassword); err != nil {
 		return err
 	}
-	if backupPassword != "" {
-		if err := ValidatePassword(backupPassword); err != nil {
-			return err
-		}
+	if err := ValidatePassword(backupPassword); err != nil {
+		return err
 	}
 
 	mdns := strings.TrimSpace(mdnsName)

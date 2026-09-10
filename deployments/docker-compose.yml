@@ -79,13 +79,13 @@ services:
       redis: {condition: service_healthy}
 
   frontend:
-    image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE not set - .env is missing from this directory}   # built by `care setup` / `care rebuild-frontend`
+    image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE not set - .env is missing from this directory}
     restart: unless-stopped
     depends_on:
       - backend
 
   caddy:
-    image: ${CADDY_WAF_IMAGE:?CADDY_WAF_IMAGE not set - .env is missing from this directory}   # caddy + Coraza WAF, built by `care setup`
+    image: ${CADDY_WAF_IMAGE:?CADDY_WAF_IMAGE not set - .env is missing from this directory}
     restart: unless-stopped
     ports:
       - "80:80"

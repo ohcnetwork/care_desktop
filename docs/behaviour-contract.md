@@ -82,7 +82,9 @@ It retries 20× at 5s, then returns an error. It must not be best-effort.
 ### R3 — `ensureKeysDir` runs before `up` · BREAKS
 
 `./keys` is a bind-mount source. Docker creates missing bind sources as
-root-owned directories. An empty dir is the valid "encryption off" state.
+root-owned directories. It must exist before `up`, and by the time the sidecar
+starts it must contain `backup-cert.pem` — encryption is not optional (K4), so an
+empty `keys/` now stops the backup container rather than meaning "plaintext".
 
 *Violation:* a root-owned path the containers cannot read.
 
@@ -156,6 +158,23 @@ leaving no database at all.
 Decryption happens first inside the container script, with a `trap` to remove the
 tmpfile. A wrong key therefore fails while the live database is still intact.
 
+### B3a — the replacement is verified before anything is destroyed · DATA
+
+Both halves of a restore validate before the destructive step, not after:
+
+```
+dump    → decrypt → pg_restore --list → dropdb/createdb → pg_restore
+archive → decrypt → tar -tzf          → rm -rf volume   → tar xzf
+```
+
+Decrypting only proves the password was right, not that the file is intact. The
+files half used to clear `/minio-data` *first* and decrypt afterwards, so a wrong
+password or a damaged archive erased every upload in the clinic with nothing left
+to put back. Verified against a seeded volume: with the check first the data
+survives a corrupt archive, without it the volume comes out empty.
+
+*Violation:* a failed restore that also destroyed what it was replacing.
+
 ### B4 — app services stop before the swap · DATA
 
 `stop backend celery-worker celery-beat` releases DB connections and halts
@@ -178,6 +197,49 @@ long-lived process the ability to erase uploads.
 
 The dump is older than the running code, so it always has pending migrations —
 the exact condition that triggers the celery-beat race. See R1.
+
+---
+
+## 4a. Backup (the sidecar)
+
+### K1 — pruning runs only after a complete, verified set · DATA
+
+`run_backup` is strictly sequential — database, then files, then prune — and any
+failure returns before the prune. A backup that fails can cost disk; it must
+never cost a known-good backup.
+
+The subtle case: a *missing* `/minio-data` mount is a failure, not an empty
+backup. Treating it as success would let a database-only set count as complete
+and prune the last complete one.
+
+*Violation:* an incomplete recovery point replacing a complete one — a database
+that references X-rays no longer in any backup.
+
+### K2 — never a pipeline · DATA
+
+`pg_dump | openssl` reports *openssl's* exit status, so a failed dump is recorded
+as a successful backup. POSIX `sh` does not guarantee `set -o pipefail` (busybox
+ash happens to support it; dash does not). Dump to a file, verify, seal, rename.
+
+### K3 — verify before it counts, while still plaintext · DATA
+
+`pg_restore --list` on the dump and `tar -tzf` on the archive. It must happen
+*before* sealing: the sidecar holds the public cert and a password-locked private
+key with no passphrase, so it cannot open what it writes. Verifying the ciphertext
+would mean putting the backup passphrase in a long-lived container and giving it
+the ability to read every backup it has ever produced.
+
+### K4 — every backup is encrypted, including manual ones · SECURITY
+
+There is no plaintext path. A missing cert stops the sidecar; `GenBackupKeypair`
+rejects an empty passphrase; `RunSetup` requires the backup password. Clinic
+backups end up on USB sticks and in synced cloud folders.
+
+### K5 — write to a temp name in the backup dir, then rename · DATA
+
+Same filesystem, so the rename is atomic and a crash cannot leave a half-written
+file under a name the app offers as restorable. The temp name is dot-prefixed so
+it matches neither the prune globs nor `ListBackups`.
 
 ---
 

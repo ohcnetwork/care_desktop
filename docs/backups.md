@@ -12,16 +12,20 @@ startup), writes **two files** with a timestamp:
 
 | File | Contents |
 |---|---|
-| `care-<timestamp>.dump` | the full PostgreSQL database (patient records, users, everything) — `pg_dump -Fc` |
-| `files-<timestamp>.tar.gz` | the uploaded files from MinIO (X-rays, documents, logos) |
+| `care-<timestamp>.dump.enc` | the full PostgreSQL database (patient records, users, everything) — `pg_dump -Fc`, encrypted |
+| `files-<timestamp>.tar.gz.enc` | the uploaded files from MinIO (X-rays, documents, logos), encrypted |
 
 Both are needed for a full restore — the database alone won't bring back an X-ray.
 
-> When backup encryption is on (see below), these are written as `care-<timestamp>.dump.enc`
-> and `files-<timestamp>.tar.gz.enc` — same contents, sealed.
+**The two are written as a set, and a set is all-or-nothing.** Each is verified before
+it counts (`pg_restore --list` for the dump, `tar -tzf` for the archive), and old
+backups are deleted **only after a complete, verified set has landed**. If either half
+fails, nothing is pruned — a failed backup can cost disk, but it can never cost a
+known-good backup.
 
-> On-demand: click **Backup now** in the app, or run `care backup-now`. That writes
-> an immediate `care-manual-<timestamp>.dump`.
+> On-demand: click **Backup now** in the app. That writes an immediate
+> `care-manual-<timestamp>.dump.enc` — encrypted and verified like the daily one,
+> but database-only, so it is not a complete set.
 
 ---
 
@@ -34,6 +38,17 @@ Both are needed for a full restore — the database alone won't bring back an X-
 **Retention:** controlled by `DB_BACKUP_RETENTION_PERIOD` in `backend.env` (default
 **14** days). Older `care-*.dump` and `files-*.tar.gz` are pruned automatically.
 
+- **`0` means keep everything** — nothing is ever deleted. Watch the disk if you set this.
+- Only whole numbers are accepted. A negative or decimal value is rejected and
+  **nothing is pruned**, with a warning on every backup cycle — losing backups to a
+  typo is worse than keeping too many.
+- Pruning is by age, not by count: there is no "always keep the last N". If the
+  sidecar is stopped for longer than the window, the next run prunes everything
+  past it in one pass.
+- **Manual backups are pruned too.** `care-manual-*.dump` matches the same rule, so a
+  "Backup now" taken before something risky is not kept indefinitely.
+- The recovery key `backup-key.pem.enc` is never pruned.
+
 > ⚠️ **Put backups on a separate drive.** Point the backup folder at a **USB or
 > external drive** (or copy it there regularly). If the server's disk dies, backups
 > on that same disk die with it. The backup *and* the data being on one disk is not a
@@ -43,11 +58,17 @@ Both are needed for a full restore — the database alone won't bring back an X-
 
 ## Encryption
 
-At installation you set a **backup password**. From it, CARE generates an encryption
-keypair: the daily `backup` container holds only the *public* half, so it can seal
-every dump but can never open one. Backups are written as `*.enc` and are unreadable
-without the password — safe to keep on a USB stick, or on a Desktop that a cloud
-service (iCloud/OneDrive) happens to sync.
+**Every backup is encrypted.** There is no plaintext option and no way to switch it
+off — a clinic's backups end up on a Desktop, get copied to USB sticks and synced into
+cloud folders, and unreadable-without-the-password is the only acceptable state for
+them to be in out there.
+
+At installation you set a **backup password**, which is therefore required: setup will
+not complete without one. From it, CARE generates an encryption keypair. The daily
+`backup` container holds only the *public* half, so it can seal every dump but can
+never open one — not even the ones it just wrote. Backups are written as `*.enc`.
+
+This applies to **Backup now** as well, not just the daily run.
 
 - **The password can't be recovered.** There is no reset and no back door — that's
   what makes the encryption real. If it's lost, every encrypted backup is lost with
@@ -62,8 +83,9 @@ service (iCloud/OneDrive) happens to sync.
   restored on a *different* computer. There you run the installer, enter the same
   backup password in its backup section, and restore — the key travels with the folder.
 
-> Backups made **before** you had encryption stay plaintext and keep restoring
-> normally — the app handles a folder that mixes both.
+> Backups made by an **older version**, before encryption was mandatory, may be
+> plaintext. They keep restoring normally — the app handles a folder that mixes both.
+> Only newly written backups are affected by the rule above.
 
 ---
 
@@ -72,6 +94,12 @@ service (iCloud/OneDrive) happens to sync.
 Restore is **built in** — you don't run the SQL by hand. It stops the app services,
 drops + re-creates the database from the dump, restores the uploaded files (when the
 backup has them), then brings CARE back up and migrates.
+
+Nothing destructive happens until the replacement is known to be good: the dump is
+decrypted and checked with `pg_restore --list` *before* the database is dropped, and
+the files archive is decrypted and checked with `tar -tzf` *before* the MinIO volume is
+cleared. A wrong password or a damaged file therefore fails with your data still
+intact.
 
 > ⚠️ **Restoring replaces the current data and can't be undone.** Take a fresh
 > **Backup now** first if you're unsure.

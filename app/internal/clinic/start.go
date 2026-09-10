@@ -24,7 +24,7 @@ func (e *Clinic) Start() error {
 	if err := e.Builder().EnsureCaddyImage(); err != nil {
 		return err
 	}
-	if err := e.Backups().EnsureKeysDir(); err != nil { // ./keys bind-mount source (empty = plaintext)
+	if err := e.Backups().EnsureKeysDir(); err != nil { // ./keys bind-mount source (rule R3)
 		return err
 	}
 	e.warnDomainDrift()
@@ -34,14 +34,20 @@ func (e *Clinic) Start() error {
 	// celery-beat's entrypoint also runs `migrate`, so starting everything at once
 	// races two migrators and fails with "column ... already exists" whenever
 	// migrations are pending. See migrate() below.
-	if err := e.dc("up", "-d", "db", "redis", "backend"); err != nil {
+	// --wait blocks until these are *healthy*, not merely created, so migrate
+	// below runs against a database and an app server that are actually ready.
+	if err := e.dc("up", "-d", "--wait", "--wait-timeout", "300", "db", "redis", "backend"); err != nil {
 		return err
 	}
 	e.logln("Applying database migrations...")
 	if err := e.migrate(); err != nil {
 		return err
 	}
-	if err := e.dc("up", "-d"); err != nil {
+	// --wait is what turns "containers created" into "every service reports
+	// healthy". Without it the panel can show Running while minio, celery or the
+	// backup sidecar are dead - none of them sit on the /ping/ path that
+	// health.Wait probes. See docker-compose.yml: all nine now have a healthcheck.
+	if err := e.dc("up", "-d", "--wait", "--wait-timeout", "300"); err != nil {
 		return err
 	}
 	e.createAdmin()

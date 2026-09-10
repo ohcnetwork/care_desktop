@@ -26,7 +26,7 @@ type Clinic struct {
 	// .env into every service, so a password there would be visible stack-wide.
 	MDNSName       string // clinic address label, without ".local" (default "care")
 	AdminPassword  string // CARE superuser password; empty means don't create one
-	BackupPassword string // encrypts backups; empty means write them in plaintext
+	BackupPassword string // encrypts backups; required - there is no plaintext path
 	BackupDir      string // where backups are written (default ~/Desktop/care-db-backups)
 
 	// Pins are the release pins (images, source refs), loaded and validated once

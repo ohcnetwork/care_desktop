@@ -146,6 +146,10 @@ func (s *Store) Restore(dbDump, filesArchive, passphrase string) error {
 	_ = s.dc("stop", "backend", "celery-worker", "celery-beat")
 	// The restore runs inside the backup container (has /backups + pg tools);
 	// make sure it and the database are up.
+	// No --wait here on purpose: this only needs the containers running so the
+	// exec below can attach. Waiting for the backup sidecar's heartbeat
+	// healthcheck would add a minute for readiness the restore never uses, and
+	// restoreDB does its own waitForDB.
 	if err := s.dc("up", "-d", "db", "backup"); err != nil {
 		return err
 	}
@@ -162,14 +166,14 @@ func (s *Store) Restore(dbDump, filesArchive, passphrase string) error {
 	// code, then start the rest. Starting everything at once would race two
 	// migrators on the dump's pending migrations ("column ... already exists").
 	s.logln("Applying database migrations...")
-	if err := s.dc("up", "-d", "db", "redis", "backend"); err != nil {
+	if err := s.dc("up", "-d", "--wait", "--wait-timeout", "300", "db", "redis", "backend"); err != nil {
 		return err
 	}
 	if err := s.Migrate(); err != nil {
 		return err
 	}
 	s.logln("Bringing CARE back up...")
-	if err := s.dc("up", "-d"); err != nil {
+	if err := s.dc("up", "-d", "--wait", "--wait-timeout", "300"); err != nil {
 		return err
 	}
 	s.logln("Waiting for CARE to become healthy...")
@@ -209,6 +213,12 @@ openssl cms -decrypt -binary -inform DER -in "` + src + `" -out "$RESTORE_FILE" 
 export PGPASSWORD="$POSTGRES_PASSWORD"
 DB="${POSTGRES_DB:-care}"; H="${POSTGRES_HOST:-db}"; U="${POSTGRES_USER:-postgres}"
 ` + prep + `
+# Validate the archive BEFORE dropping anything. Decrypting proves the password
+# was right, not that the dump is intact; without this a corrupt-but-decryptable
+# file gets as far as dropdb+createdb and then fails, leaving an empty database
+# where a working clinic used to be. scripts/backup.sh runs the same check before
+# it writes, so a dump that fails here was damaged in storage or in transit.
+pg_restore --list "$RESTORE_FILE" >/dev/null
 psql -h "$H" -U "$U" -d postgres -v ON_ERROR_STOP=1 \
   -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$DB' AND pid<>pg_backend_pid();"
 dropdb -h "$H" -U "$U" --if-exists "$DB"
@@ -249,19 +259,27 @@ func (s *Store) restoreFiles(archive, passphrase string) error {
 	vol := composeProject + "_minio-data"
 	encrypted := strings.HasSuffix(archive, ".enc")
 	src := "/backups/" + archive
-	extract := `tar xzf "` + src + `" -C /minio-data`
+	// Resolve the archive to a readable plaintext path first; decryption happens
+	// here, not after the volume has been cleared.
+	prep := `ARCHIVE="` + src + `"`
 	if encrypted {
-		extract = `KEY=/backups/` + s.encKeyName() + `
+		prep = `KEY=/backups/` + s.encKeyName() + `
 [ -f "$KEY" ] || KEY=/keys/` + s.encKeyName() + `
-openssl cms -decrypt -binary -inform DER -in "` + src + `" -out /tmp/files.tar.gz -inkey "$KEY" -passin env:BACKUP_PASS
-tar xzf /tmp/files.tar.gz -C /minio-data
-rm -f /tmp/files.tar.gz`
+ARCHIVE=/tmp/files.tar.gz
+trap 'rm -f "$ARCHIVE"' EXIT
+openssl cms -decrypt -binary -inform DER -in "` + src + `" -out "$ARCHIVE" -inkey "$KEY" -passin env:BACKUP_PASS`
 	}
-	// clear the volume (incl. dotfiles) then extract the archive into it.
+	// Decrypt and verify BEFORE clearing the volume. The previous order wiped
+	// /minio-data first and only then tried to decrypt and extract, so a wrong
+	// password or a corrupt archive destroyed every uploaded file in the clinic
+	// with nothing left to put back. Same rule as the database side (B2/B3):
+	// nothing destructive runs until the replacement is known to be good.
 	script := `set -e
+` + prep + `
+tar -tzf "$ARCHIVE" >/dev/null
 cd /minio-data
 rm -rf ./* ./.[!.]* ./..?* 2>/dev/null || true
-` + extract
+tar xzf "$ARCHIVE" -C /minio-data`
 	args := []string{"run", "--rm"}
 	if encrypted {
 		args = append(args, "-e", "BACKUP_PASS="+passphrase)
