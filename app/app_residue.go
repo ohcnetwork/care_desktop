@@ -72,7 +72,7 @@ func (a *App) PurgeResidue() error {
 		return nil
 	}
 
-	wruntime.EventsEmit(a.ctx, "care-log", "Removing the earlier CARE Desktop from this computer...")
+	a.logln("Removing the earlier CARE Desktop from this computer...")
 	if err := a.engine().Purge(); err != nil {
 		return err
 	}

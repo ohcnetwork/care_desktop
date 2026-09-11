@@ -33,13 +33,13 @@ func (a *App) run(fn func() error, markSetup bool, label string) {
 				code = 1
 				a.log.Writef("PANIC in %s: %v\n%s", label, r, debug.Stack())
 				detail := fmt.Sprintf("CARE hit an internal error during %s: %v", label, r)
-				wruntime.EventsEmit(a.ctx, "care-log", "error: "+detail)
+				a.logln("error: " + detail)
 				a.notifyActionFailed(label, detail)
 				wruntime.EventsEmit(a.ctx, "care-done", code)
 			}
 		}()
 		if err := fn(); err != nil {
-			wruntime.EventsEmit(a.ctx, "care-log", "error: "+err.Error())
+			a.logln("error: " + err.Error())
 			code = 1
 			// The installer shows a failed screen; the panel has none, so a failed
 			// action (e.g. Start when port 80 is taken) would otherwise be invisible
@@ -192,7 +192,7 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 	// Best-effort: a keychain failure shouldn't abort the install.
 	if backupPassword != "" && rememberBackup {
 		if err := backup.StorePassword(backupPassword); err != nil {
-			wruntime.EventsEmit(a.ctx, "care-log", "note: couldn't save the backup password to the keychain ("+err.Error()+")")
+			a.logln("note: couldn't save the backup password to the keychain (" + err.Error() + ")")
 		}
 	}
 
@@ -232,9 +232,7 @@ func (a *App) CleanupFailedInstall() error {
 		if target == "" {
 			return
 		}
-		if a.ctx != nil {
-			wruntime.EventsEmit(a.ctx, "care-log", "cleanup: removing "+target)
-		}
+		a.logln("cleanup: removing " + target)
 		if err := os.RemoveAll(target); err != nil && firstErr == nil {
 			firstErr = err
 		}

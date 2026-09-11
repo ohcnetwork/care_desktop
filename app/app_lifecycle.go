@@ -74,10 +74,7 @@ func (a *App) askBeforeQuit() string {
 	if !a.clinicRunning() {
 		return ""
 	}
-	name := a.loadConfig().MDNSName
-	if name == "" {
-		name = "care.local"
-	}
+	name := a.loadConfig().MDNSName // loadConfig guarantees this is set
 	sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
 		Type:  wruntime.QuestionDialog,
 		Title: "Quit CARE Desktop?",

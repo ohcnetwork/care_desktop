@@ -39,14 +39,6 @@ func NewApp(installFS fs.FS, log *applog.Logger) (*App, error) {
 	return &App{installFS: installFS, pins: pins, log: log}, nil
 }
 
-// logln is the single sink for everything the app streams - every line of docker
-// and git output, every failed action. It writes to both destinations because
-// they answer different questions: the event drives the live UI (and the setup
-// progress bar, which regex-matches these lines), while the file is what is left
-// to read afterwards, since the UI keeps only 300 lines and discards them on exit.
-//
-// Nil-ctx safe, because bindings can be called before Wails has started the
-// runtime (and from tests); the file sink is nil-safe for the same reason.
 func (a *App) logln(msg string) {
 	a.log.Write(msg)
 	if a.ctx != nil {
@@ -69,8 +61,6 @@ func (a *App) startAdvertise() {
 	a.adv = adv
 }
 
-// restartAdvertise re-advertises with the current config (after the name changes,
-// or the LAN IP changes).
 func (a *App) restartAdvertise() {
 	a.advMu.Lock()
 	a.adv.Stop()
@@ -79,16 +69,12 @@ func (a *App) restartAdvertise() {
 	a.startAdvertise()
 }
 
-// advRunning reports whether we're actively answering <name>.local.
 func (a *App) advRunning() bool {
 	a.advMu.Lock()
 	defer a.advMu.Unlock()
 	return a.adv != nil
 }
 
-// watchAdvertise re-advertises when the host's LAN IP changes (e.g. DHCP renew)
-// or when care.local stops resolving (responder silently died - sleep/wake,
-// network flap, mDNSResponder dropped our record). Cheap: a lookup every 30s.
 func (a *App) watchAdvertise() {
 	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
@@ -102,11 +88,6 @@ func (a *App) watchAdvertise() {
 			adv := a.adv
 			a.advMu.Unlock()
 			if adv == nil {
-				// Advertising never got off the ground - on a clinic machine that
-				// autostarts, almost always because the app was up before WiFi
-				// associated, so lanIPv4s() had no address to announce. Retrying is
-				// the whole point of a watchdog; skipping here left the name down
-				// until someone restarted the app by hand.
 				a.startAdvertise()
 				continue
 			}
@@ -115,8 +96,6 @@ func (a *App) watchAdvertise() {
 				a.restartAdvertise()
 				continue
 			}
-			// ponytail: debounce two misses so one flaky lookup doesn't churn
-			// the responder; a genuinely dead responder never recovers on its own.
 			if adv.Resolves() {
 				misses = 0
 				continue

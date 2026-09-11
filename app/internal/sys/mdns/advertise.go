@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -104,6 +106,35 @@ func (a *Advertiser) stopped() bool {
 	return a.server == nil
 }
 
+// NameStatus reports whether this machine is reachable as <name>.local, with a
+// per-OS "how" the wizard shows when it isn't.
+type NameStatus struct {
+	OK      bool   `json:"ok"`
+	Message string `json:"message"`
+	How     string `json:"how"`
+}
+
+// Check verifies that <name>.local actually resolves right now - a real
+// functional test (does the LAN answer?), uniform across OSes. It's gated in the
+// installer because the frontend is baked to http://care.local. The app answers
+// this itself via Advertise, so status goes green as soon as its responder is up.
+// name is the bare label (e.g. "care").
+func Check(name string) NameStatus {
+	full := name + ".local"
+	if _, err := net.LookupHost(full); err == nil {
+		return NameStatus{OK: true, Message: full + " resolves"}
+	}
+	how := "Open (and keep open) the CARE Desktop app - it advertises " + full +
+		" on the LAN while running. Then re-check."
+	if runtime.GOOS == "windows" {
+		how += "\nOn Windows, also allow inbound UDP 5353 (PowerShell as Admin):\n" +
+			"  Set-NetConnectionProfile -NetworkCategory Private\n" +
+			"  New-NetFirewallRule -DisplayName \"mDNS\" -Direction Inbound -Protocol UDP -LocalPort 5353 -Action Allow -Profile Private"
+	}
+	how += "\nStill failing? Use a static IP (see the install docs)."
+	return NameStatus{OK: false, Message: full + " isn't resolving yet", How: how}
+}
+
 // newMDNSServer builds the responder. The hostName ("<name>.local.") is the record
 // a browser's "care.local" A-query matches (verified in hashicorp/mdns zone.go).
 func newMDNSServer(name string, ips []net.IP) (*hmdns.Server, error) {
@@ -129,6 +160,23 @@ func Label(name string) string {
 	name = strings.ToLower(strings.Trim(strings.TrimSpace(name), "."))
 	name = strings.TrimSuffix(name, ".local")
 	return strings.Trim(name, ".")
+}
+
+var labelRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`)
+
+// ValidateLabel checks a user-supplied name. The installer calls it as the
+// user types.
+func ValidateLabel(name string) error {
+	label := strings.ToLower(Label(name))
+	switch {
+	case label == "":
+		return fmt.Errorf("enter a name, for example care")
+	case len(label) > 63:
+		return fmt.Errorf("name is too long (63 characters at most)")
+	case !labelRe.MatchString(label):
+		return fmt.Errorf("use lowercase letters, numbers and hyphens only, for example care-test")
+	}
+	return nil
 }
 
 // lanIPv4s returns this host's usable IPv4 addresses (interfaces that are up and not

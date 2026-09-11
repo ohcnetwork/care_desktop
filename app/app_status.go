@@ -12,7 +12,6 @@ import (
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/netfix"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/reboot"
 
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -71,9 +70,8 @@ func (a *App) RestartPlan() reboot.Plan { return reboot.Check() }
 // and no sign of the half-done setup that caused it.
 func (a *App) RestartNow() error {
 	if err := a.SetAutostart(true); err != nil {
-		wruntime.EventsEmit(a.ctx, "care-log",
-			"note: couldn't set CARE Desktop to open after the restart ("+err.Error()+
-				") - open it yourself once the computer is back")
+		a.logln("note: couldn't set CARE Desktop to open after the restart (" + err.Error() +
+			") - open it yourself once the computer is back")
 	}
 	return reboot.Now()
 }
