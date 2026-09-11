@@ -5,14 +5,5 @@
 .idea/
 .vscode/
 
-# Source clones — when the CLI `care setup` runs against deployments/, the engine
-# clones the backend/frontend beside the compose file (CARE_BE_DIR/CARE_FE_DIR
-# default to <install dir>/care*). Anchored so they never match app/internal/.
-/deployments/care/
-/deployments/care_fe/
-
 # Default backup dir if BACKUP_DIR is unset and compose runs from there.
 /deployments/db-backups/
-
-# Python bytecode (deployments/scripts/ runs inside the backend container)
-__pycache__/
