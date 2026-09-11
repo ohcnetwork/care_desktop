@@ -72,14 +72,28 @@ func (b *Builder) EnsureBackendImage() error {
 	return b.ensure(b.set.BackendImage, b.set.BeRef, "backend", b.BuildBackend)
 }
 
+// emptyBuildContext is the context for Dockerfiles that COPY nothing
+func emptyBuildContext() (dir string, cleanup func(), err error) {
+	dir, err = os.MkdirTemp("", "care-buildctx-")
+	if err != nil {
+		return "", nil, err
+	}
+	return dir, func() { _ = os.RemoveAll(dir) }, nil
+}
+
 // BuildBackup builds the Postgres+openssl backup image.
 func (b *Builder) BuildBackup() error {
 	b.logln("Building the backup image (" + b.set.BackupImage + ")...")
 	df := filepath.Join(b.dir, "backup.Dockerfile")
+	buildCtx, cleanup, err := emptyBuildContext()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	return b.run.Run("docker", "build", "-f", df,
 		"--build-arg", "POSTGRES_IMAGE="+b.set.PostgresImage,
 		"--label", builtFromLabel+"="+b.set.PostgresImage,
-		"-t", b.set.BackupImage, b.dir)
+		"-t", b.set.BackupImage, buildCtx)
 }
 
 func (b *Builder) EnsureBackupImage() error {
@@ -90,11 +104,16 @@ func (b *Builder) EnsureBackupImage() error {
 func (b *Builder) BuildCaddy() error {
 	b.logln("Building the Caddy + WAF image (" + b.set.CaddyWafImage + ")... (compiles Caddy; a few minutes)")
 	df := filepath.Join(b.dir, "caddy.Dockerfile")
+	buildCtx, cleanup, err := emptyBuildContext()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	return b.run.Run("docker", "build", "-f", df,
 		"--build-arg", "CADDY_IMAGE="+b.set.CaddyImage,
 		"--build-arg", "CORAZA_VERSION="+b.set.CorazaVersion,
 		"--label", builtFromLabel+"="+b.caddyBuiltFrom(),
-		"-t", b.set.CaddyWafImage, b.dir)
+		"-t", b.set.CaddyWafImage, buildCtx)
 }
 
 func (b *Builder) caddyBuiltFrom() string {
