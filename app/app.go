@@ -51,27 +51,6 @@ func (a *App) logln(msg string) {
 	}
 }
 
-func (a *App) startup(ctx context.Context) {
-	a.ctx = ctx
-	// Advertise care.local right away (host process; no rename, no sudo). Doing it
-	// before setup means the installer's step-3 check goes green immediately, and
-	// leaving it up while the app runs keeps the clinic reachable by name.
-	a.advStop = make(chan struct{})
-	a.startAdvertise()
-	go a.watchAdvertise()
-}
-
-// shutdown stops the responder when the app quits (wired via Wails OnShutdown).
-func (a *App) shutdown(context.Context) {
-	if a.advStop != nil {
-		close(a.advStop)
-	}
-	a.advMu.Lock()
-	a.adv.Stop()
-	a.adv = nil
-	a.advMu.Unlock()
-}
-
 // startAdvertise brings up the mDNS responder for the configured name.
 // Best-effort: a failure is logged, never fatal.
 func (a *App) startAdvertise() {

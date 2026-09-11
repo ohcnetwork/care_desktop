@@ -290,16 +290,23 @@ export function CareProvider({ children }: { children: ReactNode }) {
     await reloadBackups();
     await refresh();
     await syncAutostart();
+    // Bring the clinic back up on any launch, not just an autostart one: the app
+    // quitting is what takes care.local off the network, so opening it again is
+    // the operator's way of putting the clinic back. Gated on health, never
+    // unconditional — restarting a stack that is already serving would drop the
+    // clinic for a minute in the middle of a consultation.
     try {
-      if (await bridge.WasAutostartLaunched()) {
-        const health = await bridge.CareHealth();
-        if (!health.active && !busyRef.current) {
-          log("\nLaunched at startup — starting CARE...");
-          await runAction("start");
-        }
+      const health = await bridge.CareHealth();
+      if (!health.active && !busyRef.current) {
+        log(
+          (await bridge.WasAutostartLaunched())
+            ? "\nLaunched at startup — starting CARE..."
+            : "\nCARE isn't running — starting it...",
+        );
+        await runAction("start");
       }
     } catch {
-      /* not launched by the OS, or the host can't tell — nothing to do */
+      /* can't tell whether it's up — leave it to the operator */
     }
   }, [log, refresh, reloadBackups, runAction, syncAutostart]);
 
