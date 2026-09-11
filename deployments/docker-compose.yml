@@ -115,8 +115,8 @@ services:
     env_file: ./backend.env
     volumes:
       - ./scripts/backup.sh:/backup.sh:ro
-      - ${BACKUP_DIR:-./db-backups}:/backups     # the app points this at your Desktop/chosen folder
-      - ./keys:/keys:ro                          # backup-cert.pem (encrypt) + backup-key.pem.enc (restore); absent = plaintext
+      - ${BACKUP_DIR:-./db-backups}:/backups
+      - ./keys:/keys:ro
       - minio-data:/minio-data:ro
     entrypoint: ["/bin/sh", "/backup.sh"]
     depends_on:

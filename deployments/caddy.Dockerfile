@@ -1,4 +1,4 @@
-ARG CADDY_IMAGE=caddy:2.11.4
+ARG CADDY_IMAGE
 
 FROM ${CADDY_IMAGE}-builder AS build
 
