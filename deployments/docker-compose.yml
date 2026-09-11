@@ -87,6 +87,13 @@ services:
   caddy:
     image: ${CADDY_WAF_IMAGE:?CADDY_WAF_IMAGE not set - .env is missing from this directory}
     restart: unless-stopped
+    environment:
+      CORAZA_MODE: ${CORAZA_MODE:-Off}
+    command:
+      - /bin/sh
+      - -c
+      - printf 'SecRuleEngine %s\n' "$$CORAZA_MODE" > /etc/caddy/waf-mode.conf &&
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     ports:
       - "80:80"
       - "443:443"

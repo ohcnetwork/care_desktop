@@ -35,6 +35,7 @@ type Pins struct {
 	RedisImage    string
 	MinioImage    string
 	CaddyImage    string // upstream base; the caddy service runs CaddyWafImage
+	CorazaVersion string // WAF module ref compiled into CaddyWafImage
 
 	BackupImage   string
 	CaddyWafImage string // CaddyImage with the Coraza WAF compiled in
@@ -62,6 +63,7 @@ func (p *Pins) fields() []struct {
 		{"REDIS_IMAGE", &p.RedisImage},
 		{"MINIO_IMAGE", &p.MinioImage},
 		{"CADDY_IMAGE", &p.CaddyImage},
+		{"CORAZA_VERSION", &p.CorazaVersion},
 		{"BACKUP_IMAGE", &p.BackupImage},
 		{"CADDY_WAF_IMAGE", &p.CaddyWafImage},
 		{"BACKEND_IMAGE", &p.BackendImage},

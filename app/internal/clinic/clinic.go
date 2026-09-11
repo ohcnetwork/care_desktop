@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/compose-spec/compose-go/v2/dotenv"
 	"github.com/ohcnetwork/care_desktop/app/internal/compose"
@@ -69,6 +70,7 @@ func (e *Clinic) baseEnv() []string {
 	creds := e.minioCreds()
 	set("MINIO_ACCESS_KEY", creds[0])
 	set("MINIO_SECRET_KEY", creds[1])
+	set("CORAZA_MODE", e.corazaMode())
 	set("BACKUP_DIR", e.backupDir())
 	return env
 }
@@ -78,14 +80,7 @@ func (e *Clinic) baseEnv() []string {
 // when no container will be started anyway).
 func (e *Clinic) minioCreds() [2]string {
 	out := [2]string{"minioadmin", "minioadmin"}
-	b, err := os.ReadFile(filepath.Join(e.InstallDir, "backend.env"))
-	if err != nil {
-		return out
-	}
-	env, err := dotenv.Parse(bytes.NewReader(b))
-	if err != nil {
-		return out
-	}
+	env := e.backendEnv()
 	if v := env["MINIO_ACCESS_KEY"]; v != "" {
 		out[0] = v
 	}
@@ -93,6 +88,32 @@ func (e *Clinic) minioCreds() [2]string {
 		out[1] = v
 	}
 	return out
+}
+
+func (e *Clinic) backendEnv() map[string]string {
+	b, err := os.ReadFile(filepath.Join(e.InstallDir, "backend.env"))
+	if err != nil {
+		return nil
+	}
+	env, err := dotenv.Parse(bytes.NewReader(b))
+	if err != nil {
+		return nil
+	}
+	return env
+}
+
+func (e *Clinic) corazaMode() string {
+	v := strings.TrimSpace(e.backendEnv()["CORAZA_MODE"])
+	switch strings.ToLower(v) {
+	case "on":
+		return "On"
+	case "detectiononly":
+		return "DetectionOnly"
+	case "", "off":
+		return "Off"
+	}
+	e.logln("CORAZA_MODE=" + v + " is not On, DetectionOnly or Off - using Off")
+	return "Off"
 }
 
 // workdir returns the install dir only if it exists - before setup it doesn't, and a

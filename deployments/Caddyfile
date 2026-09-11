@@ -65,8 +65,8 @@
 	# never reach a clinic. This is the only reason there is no clinic_settings.py.
 	header -Strict-Transport-Security
 
-	# WAF on /api only (buckets excluded - uploads false-positive).
-	# SecRuleEngine: Off (inert) -> DetectionOnly (log) -> On (block); restart to apply.
+	# WAF on /api only
+	# Off (inert) | DetectionOnly (evaluate + log, never block) | On (block with 403).
 	handle /api/* {
 		coraza_waf {
 			load_owasp_crs
@@ -74,7 +74,7 @@
 				Include @coraza.conf-recommended
 				Include @crs-setup.conf.example
 				Include @owasp_crs/*.conf
-				SecRuleEngine Off
+				Include /etc/caddy/waf-mode.conf
 			`
 		}
 		reverse_proxy backend:9000

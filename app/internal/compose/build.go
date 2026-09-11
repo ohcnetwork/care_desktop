@@ -92,12 +92,17 @@ func (b *Builder) BuildCaddy() error {
 	df := filepath.Join(b.dir, "caddy.Dockerfile")
 	return b.run.Run("docker", "build", "-f", df,
 		"--build-arg", "CADDY_IMAGE="+b.set.CaddyImage,
-		"--label", builtFromLabel+"="+b.set.CaddyImage,
+		"--build-arg", "CORAZA_VERSION="+b.set.CorazaVersion,
+		"--label", builtFromLabel+"="+b.caddyBuiltFrom(),
 		"-t", b.set.CaddyWafImage, b.dir)
 }
 
+func (b *Builder) caddyBuiltFrom() string {
+	return b.set.CaddyImage + "+coraza@" + b.set.CorazaVersion
+}
+
 func (b *Builder) EnsureCaddyImage() error {
-	return b.ensure(b.set.CaddyWafImage, b.set.CaddyImage, "caddy", b.BuildCaddy)
+	return b.ensure(b.set.CaddyWafImage, b.caddyBuiltFrom(), "caddy", b.BuildCaddy)
 }
 
 func (b *Builder) BuildFrontend() error {
