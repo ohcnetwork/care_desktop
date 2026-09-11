@@ -132,9 +132,6 @@ func AugmentedPath() string {
 	return strings.Join(parts, sep)
 }
 
-// FixPath widens the process PATH so binary lookups succeed. exec.Command
-// resolves against the process PATH, not a command's Env, so this must run once
-// at startup before anything else spawns a process.
 func FixPath() {
 	var parts []string
 	if sp := loginShellPath(); sp != "" {

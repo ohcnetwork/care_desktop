@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	hmdns "github.com/hashicorp/mdns"
@@ -19,8 +20,13 @@ import (
 // hostname it needs no sudo and changes nothing on the box; it only resolves while
 // running (which is fine: the app serves nothing when it's down anyway).
 type Advertiser struct {
-	name   string
-	ips    []net.IP
+	name string
+	ips  []net.IP // fixed at construction; IPsChanged compares against them
+
+	// The watchdog probes an Advertiser from its own goroutine while the UI can
+	// Stop the same one (a name change in Settings, or quitting mid-probe), so
+	// server is the one field two goroutines touch.
+	mu     sync.Mutex
 	server *hmdns.Server
 }
 
@@ -48,7 +54,12 @@ func (a *Advertiser) Name() string { return a.name }
 
 // Stop shuts the responder down (idempotent, nil-safe).
 func (a *Advertiser) Stop() {
-	if a == nil || a.server == nil {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.server == nil {
 		return
 	}
 	_ = a.server.Shutdown()
@@ -73,9 +84,11 @@ func (a *Advertiser) IPsChanged() bool {
 // only with nss-mdns). Where it can't resolve .local it just reports false and
 // the caller re-advertises - cheap and harmless. Debounce lives in the caller.
 func (a *Advertiser) Resolves() bool {
-	if a == nil || a.server == nil {
+	if a == nil || a.stopped() {
 		return false
 	}
+	// Deliberately not holding the lock across the lookup: it can take the full
+	// two seconds, and Stop must not block on a quit waiting for a DNS timeout.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	addrs, err := net.DefaultResolver.LookupHost(ctx, a.name+".local")
@@ -83,6 +96,12 @@ func (a *Advertiser) Resolves() bool {
 		return false
 	}
 	return true
+}
+
+func (a *Advertiser) stopped() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.server == nil
 }
 
 // newMDNSServer builds the responder. The hostName ("<name>.local.") is the record

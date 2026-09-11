@@ -8,30 +8,26 @@ import (
 	"time"
 
 	"github.com/ohcnetwork/care_desktop/app/internal/release"
+	"github.com/ohcnetwork/care_desktop/app/internal/sys/applog"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/mdns"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// App is the Wails bridge: every exported method is callable from the web UI as
-// window.go.main.App.<Method>. It owns config persistence and drives the engine.
 type App struct {
 	ctx       context.Context
-	installFS fs.FS         // embedded deployment install dir
-	pins      *release.Pins // release pins from the embedded .env
+	installFS fs.FS
+	pins      *release.Pins
+	log       *applog.Logger
 
-	advMu   sync.Mutex       // guards adv
-	adv     *mdns.Advertiser // the running mDNS responder (advertise mode), if any
-	advStop chan struct{}    // closed on shutdown to end the DHCP watcher
+	advMu   sync.Mutex
+	adv     *mdns.Advertiser
+	advStop chan struct{}
 }
 
-// NewApp fails if the embedded .env is missing or incomplete. That is a broken
-// build, not a runtime condition: without pins the app cannot name a single image,
-// so starting up and failing later - halfway through a clinic's setup - would be
-// worse than refusing now.
-func NewApp(installFS fs.FS) (*App, error) {
-	proc.FixPath() // make docker/git findable when launched from Finder/Explorer
+func NewApp(installFS fs.FS, log *applog.Logger) (*App, error) {
+	proc.FixPath()
 	env, err := fs.ReadFile(installFS, "install/"+release.EnvFile)
 	if err != nil {
 		return nil, fmt.Errorf("this build is missing its embedded %s: %w", release.EnvFile, err)
@@ -40,19 +36,24 @@ func NewApp(installFS fs.FS) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &App{installFS: installFS, pins: pins}, nil
+	return &App{installFS: installFS, pins: pins, log: log}, nil
 }
 
-// logln streams one line to the UI's log pane. Nil-ctx safe, because bindings can
-// be called before Wails has started the runtime (and from tests).
+// logln is the single sink for everything the app streams - every line of docker
+// and git output, every failed action. It writes to both destinations because
+// they answer different questions: the event drives the live UI (and the setup
+// progress bar, which regex-matches these lines), while the file is what is left
+// to read afterwards, since the UI keeps only 300 lines and discards them on exit.
+//
+// Nil-ctx safe, because bindings can be called before Wails has started the
+// runtime (and from tests); the file sink is nil-safe for the same reason.
 func (a *App) logln(msg string) {
+	a.log.Write(msg)
 	if a.ctx != nil {
 		wruntime.EventsEmit(a.ctx, "care-log", msg)
 	}
 }
 
-// startAdvertise brings up the mDNS responder for the configured name.
-// Best-effort: a failure is logged, never fatal.
 func (a *App) startAdvertise() {
 	a.advMu.Lock()
 	defer a.advMu.Unlock()
@@ -62,9 +63,7 @@ func (a *App) startAdvertise() {
 	name := a.loadConfig().MDNSName
 	adv, err := mdns.Advertise(name)
 	if err != nil {
-		if a.ctx != nil {
-			wruntime.EventsEmit(a.ctx, "care-log", "mDNS: couldn't advertise "+name+".local ("+err.Error()+")")
-		}
+		a.logln("mDNS: couldn't advertise " + name + ".local (" + err.Error() + ")")
 		return
 	}
 	a.adv = adv
@@ -103,6 +102,12 @@ func (a *App) watchAdvertise() {
 			adv := a.adv
 			a.advMu.Unlock()
 			if adv == nil {
+				// Advertising never got off the ground - on a clinic machine that
+				// autostarts, almost always because the app was up before WiFi
+				// associated, so lanIPv4s() had no address to announce. Retrying is
+				// the whole point of a watchdog; skipping here left the name down
+				// until someone restarted the app by hand.
+				a.startAdvertise()
 				continue
 			}
 			if adv.IPsChanged() {
@@ -119,9 +124,7 @@ func (a *App) watchAdvertise() {
 			misses++
 			if misses >= 2 {
 				misses = 0
-				if a.ctx != nil {
-					wruntime.EventsEmit(a.ctx, "care-log", "mDNS: care.local stopped resolving - re-advertising.")
-				}
+				a.logln("mDNS: " + adv.Name() + ".local stopped resolving - re-advertising.")
 				a.restartAdvertise()
 			}
 		}

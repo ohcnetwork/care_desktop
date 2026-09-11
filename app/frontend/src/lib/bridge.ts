@@ -87,3 +87,18 @@ export function onCareEvent(
     off?.();
   };
 }
+
+/**
+ * Write one line to the host's log file.
+ *
+ * Only for lines that ORIGINATE here. Anything arriving on `care-log` was written
+ * to the file by Go before it was emitted, so sending it back would duplicate
+ * every line of every docker build.
+ */
+export function logToHost(line: string): void {
+  try {
+    window.runtime?.LogPrint(line);
+  } catch {
+    /* the runtime may not be injected yet; a lost log line is never worth throwing over */
+  }
+}

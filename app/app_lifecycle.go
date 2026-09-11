@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ohcnetwork/care_desktop/app/internal/prereq"
+
 	"github.com/wailsapp/wails/v2/pkg/options"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -14,6 +16,9 @@ func (a *App) startup(ctx context.Context) {
 	a.advStop = make(chan struct{})
 	a.startAdvertise()
 	go a.watchAdvertise()
+	// Off the startup path: probing Docker spawns a process and the window should
+	// not wait on it. Completes the log header begun in main.
+	go a.log.Writef("docker: %s", prereq.DockerCheck(a.engine().Runner()).Message)
 }
 
 func (a *App) shutdown(context.Context) {

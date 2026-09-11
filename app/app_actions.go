@@ -2,9 +2,11 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 
 	"github.com/ohcnetwork/care_desktop/app/internal/backup"
@@ -22,6 +24,20 @@ import (
 func (a *App) run(fn func() error, markSetup bool, label string) {
 	go func() {
 		code := 0
+		// Without this a panic anywhere in Setup, Start, Restore or Uninstall takes
+		// the whole process down instantly: no dialog, no care-done, no trace, and
+		// from the operator's side indistinguishable from the app simply vanishing.
+		// Recovering turns the worst failure mode into the best-documented one.
+		defer func() {
+			if r := recover(); r != nil {
+				code = 1
+				a.log.Writef("PANIC in %s: %v\n%s", label, r, debug.Stack())
+				detail := fmt.Sprintf("CARE hit an internal error during %s: %v", label, r)
+				wruntime.EventsEmit(a.ctx, "care-log", "error: "+detail)
+				a.notifyActionFailed(label, detail)
+				wruntime.EventsEmit(a.ctx, "care-done", code)
+			}
+		}()
 		if err := fn(); err != nil {
 			wruntime.EventsEmit(a.ctx, "care-log", "error: "+err.Error())
 			code = 1

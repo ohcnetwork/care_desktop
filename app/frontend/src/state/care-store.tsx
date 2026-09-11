@@ -13,7 +13,7 @@ import {
 } from "react";
 
 import { toast } from "@/components/ui/sonner";
-import { bridge, onCareEvent } from "@/lib/bridge";
+import { bridge, logToHost, onCareEvent } from "@/lib/bridge";
 import { errorText, firstLine } from "@/lib/format";
 import { RUN_STEPS, type RunStep } from "@/lib/run-steps";
 import type { Backup } from "@/types";
@@ -150,23 +150,42 @@ export function CareProvider({ children }: { children: ReactNode }) {
     setStepsDone((prev) => (prev[step] === done ? prev : { ...prev, [step]: done }));
   }, []);
 
-  // Setup lines drive the progress bar; panel lines go to the devtools console.
-  const log = useCallback((line: string) => {
-    if (flowRef.current === "panel") {
-      console.log(line);
-      return;
-    }
-    logRef.current.push(line);
-    if (logRef.current.length > 300) logRef.current.shift();
-    const current = runRef.current;
-    for (let i = 0; i < current.steps.length; i++) {
-      if (!current.steps[i].re.test(line)) continue;
-      if (current.steps[i].pct > current.pct) {
-        setRun({ ...current, stepIdx: i, pct: current.steps[i].pct });
+  const pushLine = useCallback(
+    (line: string) => {
+      logRef.current.push(line);
+      if (logRef.current.length > 300) logRef.current.shift();
+      const current = runRef.current;
+      for (let i = 0; i < current.steps.length; i++) {
+        if (!current.steps[i].re.test(line)) continue;
+        if (current.steps[i].pct > current.pct) {
+          setRun({ ...current, stepIdx: i, pct: current.steps[i].pct });
+        }
+        return;
       }
+    },
+    [setRun],
+  );
+
+  // Lines raised HERE (a failed save, a caught render error) have never been near
+  // Go, so they reach the log file only if we send them. Lines arriving on
+  // care-log are already in it — see logFromHost below.
+  const log = useCallback((line: string) => {
+    logToHost(line);
+    if (flowRef.current === "panel") {
       return;
     }
-  }, [setRun]);
+    pushLine(line);
+  }, [pushLine]);
+
+  // Same buffer and progress-bar handling as log(), minus the write back to the
+  // host: Go already put this line in the file.
+  const logFromHost = useCallback(
+    (line: string) => {
+      if (flowRef.current === "panel") return;
+      pushLine(line);
+    },
+    [pushLine],
+  );
 
   const failInstall = useCallback(() => {
     const tail = logRef.current.slice(-40).join("\n").trim();
@@ -375,7 +394,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
         if (line.startsWith("error:")) {
           lastErrorRef.current = line.slice("error:".length).trim();
         }
-        log(line);
+        logFromHost(line);
       }),
       onCareEvent("care-done", (code: number) => {
         if (flowRef.current !== "panel") {

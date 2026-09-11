@@ -87,6 +87,7 @@ declare global {
     runtime: {
       EventsOn(event: string, cb: (...data: any[]) => void): () => void;
       EventsEmit(event: string, ...data: any[]): void;
+      LogPrint(message: string): void;
     };
   }
 }

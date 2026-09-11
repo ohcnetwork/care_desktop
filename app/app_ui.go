@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"net/url"
 	"os"
 
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/autostart"
@@ -34,6 +36,22 @@ func (a *App) WasAutostartLaunched() bool {
 		}
 	}
 	return false
+}
+
+// LogPath is the diagnostic log this run is writing to, for the panel to show.
+func (a *App) LogPath() string { return a.log.Path() }
+
+// OpenLogFolder reveals the log directory in Finder/Explorer. The file is only
+// useful if the operator can find it without being told a path over the phone.
+func (a *App) OpenLogFolder() error {
+	dir := a.log.Folder()
+	if dir == "" {
+		return errors.New("this run isn't writing a log file - the log folder couldn't be opened for writing")
+	}
+	// url.URL rather than "file://"+dir: the default folder is "CARE Desktop",
+	// and an unescaped space makes the URL a no-op on Windows.
+	wruntime.BrowserOpenURL(a.ctx, (&url.URL{Scheme: "file", Path: dir}).String())
+	return nil
 }
 
 // AutostartEnabled reports whether the app is set to launch at login.

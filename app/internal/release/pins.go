@@ -75,6 +75,28 @@ func (p *Pins) fields() []struct {
 	}
 }
 
+// Summary renders the pins as log lines.
+//
+// It belongs in a log because these come from the .env embedded in each build, so
+// two clinics on different versions of the app are running different CARE source
+// refs and different base images. When a build fails, "which refs was this built
+// from" is the question that follows, and an app version is only a proxy for it.
+//
+// The locally built tags (care:clinic and friends) are the same in every build and
+// are omitted; what varies, and therefore what is worth recording, is what they
+// were built from.
+func (p *Pins) Summary() []string {
+	if p == nil {
+		return nil
+	}
+	return []string{
+		"pins: backend  " + p.BackendImage + " <- " + p.BeRepo + "@" + p.BeRef,
+		"      frontend " + p.FrontendImage + " <- " + p.FeRepo + "@" + p.FeRef,
+		"      base     " + strings.Join([]string{p.PostgresImage, p.RedisImage, p.MinioImage}, " · "),
+		"      proxy    " + p.CaddyImage + " + coraza " + p.CorazaVersion,
+	}
+}
+
 // Load parses .env and fails unless every pin is present, naming all the missing
 // ones at once. It uses the parser Docker Compose itself uses, so quoting,
 // escapes and ${VAR} expansion resolve identically on both sides - a mismatch

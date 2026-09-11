@@ -49,6 +49,12 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # -race because the log sink is written from several goroutines at once,
+      # and the redaction test is the only guard on credentials reaching a file
+      # that gets emailed to support.
+      - name: Test
+        run: go test -race ./...
+
       - name: gofmt
         run: |
           unformatted=$(gofmt -l .)
