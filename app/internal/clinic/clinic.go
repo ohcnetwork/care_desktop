@@ -71,6 +71,11 @@ func (e *Clinic) baseEnv() []string {
 	set("MINIO_ACCESS_KEY", creds[0])
 	set("MINIO_SECRET_KEY", creds[1])
 	set("CORAZA_MODE", e.corazaMode())
+	// No default here: the names are backend.env's to give, and the one fallback
+	// lives in minio/entrypoint.sh.
+	benv := e.backendEnv()
+	set("FILE_UPLOAD_BUCKET", strings.TrimSpace(benv["FILE_UPLOAD_BUCKET"]))
+	set("FACILITY_S3_BUCKET", strings.TrimSpace(benv["FACILITY_S3_BUCKET"]))
 	set("BACKUP_DIR", e.backupDir())
 	return env
 }

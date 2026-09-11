@@ -40,6 +40,8 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      FILE_UPLOAD_BUCKET: ${FILE_UPLOAD_BUCKET:-patient-bucket}
+      FACILITY_S3_BUCKET: ${FACILITY_S3_BUCKET:-facility-bucket}
     volumes:
       - minio-data:/data
       - ./minio/entrypoint.sh:/entrypoint.sh:ro
