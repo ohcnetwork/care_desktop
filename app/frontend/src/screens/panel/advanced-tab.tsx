@@ -1,5 +1,5 @@
-import { Lock } from "lucide-react";
-import { useState } from "react";
+import { FolderOpen, Lock, ScrollText } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { InputBox } from "@/components/input-box";
 import { SectionTitle } from "@/components/section-header";
@@ -15,6 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { bridge } from "@/lib/bridge";
+import { errorText } from "@/lib/format";
 import { useCare } from "@/state/care-store";
 import type { Section } from "@/types";
 import { EnvEditor } from "./env-editor";
@@ -30,6 +31,7 @@ export function AdvancedTab() {
   return (
     <div className="flex flex-col gap-3">
       <RebuildCard />
+      <LogRow />
 
       <Accordion type="multiple">
         <AccordionItem value="config">
@@ -230,5 +232,42 @@ function UninstallPanel() {
         </Button>
       )}
     </>
+  );
+}
+
+/**
+ * Where the diagnostic log is written. Read-only on purpose: the path is fixed to
+ * the platform's convention so that someone helping remotely can name the folder
+ * without first asking where this install put it.
+ */
+function LogRow() {
+  const { log } = useCare();
+  const [path, setPath] = useState("");
+
+  useEffect(() => {
+    void bridge.LogPath().then(setPath, () => setPath(""));
+  }, []);
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-line bg-card px-4 py-3.5 shadow-card">
+      <span className="flex size-[30px] flex-none items-center justify-center rounded-sm bg-brand-bg text-brand-ink">
+        <ScrollText className="size-4" strokeWidth={2} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-xs font-semibold tracking-[0.04em] text-muted-foreground uppercase">
+          Diagnostic log
+        </div>
+        <div className="truncate font-mono text-[13.5px] font-semibold text-ink">
+          {path || "not being written this run"}
+        </div>
+      </div>
+      <Button
+        disabled={!path}
+        onClick={() => void bridge.OpenLogFolder().catch((e) => log(`log folder: ${errorText(e)}`))}
+      >
+        <FolderOpen className="size-4" strokeWidth={2} />
+        Open
+      </Button>
+    </div>
   );
 }

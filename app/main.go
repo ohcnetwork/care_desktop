@@ -29,7 +29,7 @@ var installFS embed.FS
 
 func main() {
 	cfg := loadConfig()
-	appLog = applog.Open(cfg.LogDir)
+	appLog = applog.Open()
 	defer appLog.Close()
 	appLog.OnFatal = func(msg string) { fatal(errors.New(msg)) }
 	appLog.Header(version, cfg.InstallDir, cfg.MDNSName)

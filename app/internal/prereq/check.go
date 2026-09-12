@@ -1,5 +1,3 @@
-// Package prereq detects and installs the tools CARE needs: Docker and Git.
-// See docs/architecture.md.
 package prereq
 
 import (
@@ -9,7 +7,6 @@ import (
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 )
 
-// Status reports whether the Docker daemon is reachable.
 type Status struct {
 	OK      bool   `json:"ok"`
 	Message string `json:"message"`
@@ -43,11 +40,6 @@ func DockerCheck(run proc.Runner) Status {
 	}
 }
 
-// dockerAdvice returns what to say when Docker is absent, and when it is present
-// but not running. The engine is deliberately not pinned on macOS and Linux -
-// Colima, OrbStack, Rancher Desktop and plain Docker Engine all serve. Windows is
-// the exception: the stack is Linux containers bind-mounting host paths, which in
-// practice means Docker Desktop on the WSL 2 backend.
 func dockerAdvice() (missing, stopped string) {
 	switch runtime.GOOS {
 	case "windows":
@@ -62,8 +54,6 @@ func dockerAdvice() (missing, stopped string) {
 	}
 }
 
-// composeAdvice: Desktop-class engines bundle Compose, so a missing plugin there
-// means an old install rather than a missing package.
 func composeAdvice() string {
 	if runtime.GOOS == "linux" {
 		return "Docker is running, but the Compose plugin is missing. Install it: sudo apt install docker-compose-plugin (or the docker-compose-plugin package for your distro)."
@@ -96,9 +86,6 @@ func isNotFound(err error) bool {
 		strings.Contains(err.Error(), "cannot find the file")
 }
 
-// Health reports whether the app answers on :443 (through Caddy -> backend /ping/).
-
-// GitCheck reports whether git is available (needed for the one-time clone+build).
 func GitCheck(run proc.Runner) Status {
 	cmd := proc.Command("git", "--version")
 	cmd.Env = run.Env

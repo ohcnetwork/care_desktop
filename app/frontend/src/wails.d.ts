@@ -78,6 +78,8 @@ declare global {
           RunUninstall(removeImages: boolean, removeBackups: boolean): Promise<void>;
           OpenURL(url: string): Promise<void>;
           ChooseFolder(title: string): Promise<string>;
+          LogPath(): Promise<string>;
+          OpenLogFolder(): Promise<void>;
           WasAutostartLaunched(): Promise<boolean>;
           AutostartEnabled(): Promise<boolean>;
           SetAutostart(on: boolean): Promise<void>;

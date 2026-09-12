@@ -13,12 +13,11 @@ type Config struct {
 	MDNSName    string `json:"mdns_name"`
 	InstallDir  string `json:"install_dir"`
 	BackupDir   string `json:"backup_dir"`
-	LogDir      string `json:"log_dir,omitempty"`       // diagnostic log location; empty means the platform default
 	AdminPwHash string `json:"admin_pw_hash,omitempty"` // bcrypt of the install-time admin password; gates Advanced
 }
 
 // configPath and loadConfig are package-level: main opens the log before NewApp
-// exists, and needs Config.LogDir to do it. Neither ever used the receiver.
+// exists. Neither ever used the receiver.
 func configPath() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
