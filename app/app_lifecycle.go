@@ -16,8 +16,6 @@ func (a *App) startup(ctx context.Context) {
 	a.advStop = make(chan struct{})
 	a.startAdvertise()
 	go a.watchAdvertise()
-	// Off the startup path: probing Docker spawns a process and the window should
-	// not wait on it. Completes the log header begun in main.
 	go a.log.Writef("docker: %s", prereq.DockerCheck(a.engine().Runner()).Message)
 }
 
@@ -68,13 +66,11 @@ func (a *App) beforeClose(context.Context) (prevent bool) {
 	}
 }
 
-// askBeforeQuit returns the operator's choice, or "" when there is nothing to ask
-// about - no install yet, or nothing running to take down.
 func (a *App) askBeforeQuit() string {
 	if !a.clinicRunning() {
 		return ""
 	}
-	name := a.loadConfig().MDNSName // loadConfig guarantees this is set
+	name := a.loadConfig().MDNSName
 	sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
 		Type:  wruntime.QuestionDialog,
 		Title: "Quit CARE Desktop?",
@@ -107,10 +103,6 @@ func (a *App) clinicRunning() bool {
 	return false
 }
 
-// stopForQuit stops the stack on the way out, bounded so a wedged Docker cannot
-// hold the app open. `compose stop` also marks the containers as deliberately
-// stopped, so their restart:unless-stopped policy will not bring them back at the
-// next boot - which is what the operator asked for.
 func (a *App) stopForQuit() {
 	done := make(chan struct{})
 	go func() {
