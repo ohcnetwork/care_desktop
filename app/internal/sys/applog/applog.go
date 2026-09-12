@@ -48,7 +48,6 @@ func openWithDir(dir string) *Logger {
 	return l
 }
 
-// Write appends one line: timestamp, then the message with secrets scrubbed.
 func (l *Logger) Write(line string) {
 	if l == nil {
 		return

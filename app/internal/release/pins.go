@@ -1,18 +1,3 @@
-// Package release holds CARE's release pins: which container images and which
-// source refs an install runs.
-//
-// They live in one file, .env, and have no defaults anywhere - not in Go, not in
-// docker-compose.yml. Every pin must be declared or the app refuses to start. A
-// second place for a version to live is how BACKEND_IMAGE once drifted, with Go
-// running a locally built image while a hand-run `docker compose` pulled an
-// unpinned one off the internet.
-//
-// Operator choices (clinic address, admin password, backup folder) are NOT here.
-// They are fields on clinic.Clinic, passed in for the run that needs them, so a
-// password can never arrive from the environment or from .env - which Compose
-// interpolates into every service.
-//
-// See docs/configuration.md.
 package release
 
 import (
@@ -23,22 +8,17 @@ import (
 	"github.com/compose-spec/compose-go/v2/dotenv"
 )
 
-// EnvFile is the name Compose auto-loads from a project directory. Reading the
-// same file the same way is the point: the app and a hand-run `docker compose`
-// resolve identical images.
 const EnvFile = ".env"
 
-// Pins is a validated set of release pins. Load guarantees every field is set, so
-// callers can use them directly without checking.
 type Pins struct {
 	PostgresImage string
 	RedisImage    string
 	MinioImage    string
-	CaddyImage    string // upstream base; the caddy service runs CaddyWafImage
-	CorazaVersion string // WAF module ref compiled into CaddyWafImage
+	CaddyImage    string
+	CorazaVersion string
 
 	BackupImage   string
-	CaddyWafImage string // CaddyImage with the Coraza WAF compiled in
+	CaddyWafImage string
 	BackendImage  string
 	FrontendImage string
 
@@ -48,10 +28,7 @@ type Pins struct {
 	FeRef  string
 }
 
-// fields maps each .env key to the field it fills. It is the only place a pin is
-// listed: Load both validates and populates from it, so adding a pin cannot leave
-// half the work done.
-func (p *Pins) fields() []struct {
+func (p *Pins) envPinMap() []struct {
 	key string
 	dst *string
 } {
@@ -76,15 +53,6 @@ func (p *Pins) fields() []struct {
 }
 
 // Summary renders the pins as log lines.
-//
-// It belongs in a log because these come from the .env embedded in each build, so
-// two clinics on different versions of the app are running different CARE source
-// refs and different base images. When a build fails, "which refs was this built
-// from" is the question that follows, and an app version is only a proxy for it.
-//
-// The locally built tags (care:clinic and friends) are the same in every build and
-// are omitted; what varies, and therefore what is worth recording, is what they
-// were built from.
 func (p *Pins) Summary() []string {
 	if p == nil {
 		return nil
@@ -97,11 +65,6 @@ func (p *Pins) Summary() []string {
 	}
 }
 
-// Load parses .env and fails unless every pin is present, naming all the missing
-// ones at once. It uses the parser Docker Compose itself uses, so quoting,
-// escapes and ${VAR} expansion resolve identically on both sides - a mismatch
-// there once left MinIO and the backend disagreeing about a password by two
-// quote characters.
 func Load(env []byte) (*Pins, error) {
 	values, err := dotenv.Parse(bytes.NewReader(env))
 	if err != nil {
@@ -109,7 +72,7 @@ func Load(env []byte) (*Pins, error) {
 	}
 	var p Pins
 	var missing []string
-	for _, f := range p.fields() {
+	for _, f := range p.envPinMap() {
 		v := strings.TrimSpace(values[f.key])
 		if v == "" {
 			missing = append(missing, f.key)
