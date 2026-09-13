@@ -30,7 +30,12 @@ export type ToolPlan = {
   needs_admin: boolean;
   url: string;
 };
-export type AppState = { setup_done: boolean; mdns_name: string; docker: DockerStatus };
+export type AppState = {
+  version: string;
+  setup_done: boolean;
+  mdns_name: string;
+  docker: DockerStatus;
+};
 
 /** One thing an earlier CARE Desktop left on this computer. */
 export type ResidueTrace = { id: string; label: string; detail: string };

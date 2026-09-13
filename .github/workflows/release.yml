@@ -71,14 +71,12 @@ jobs:
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
-      # -X main.version is the only way the tag reaches the running binary: it is
-      # the first line of every log file, and a log without a version cannot be
-      # matched to a build.
+      # No -ldflags version: CARE_DESKTOP_VERSION in deployments/.env is the single
+      # source, embedded with the pins it describes. wails.json is stamped from the
+      # tag above only because Info.plist and NSIS need it in their own metadata.
       - name: Build
         working-directory: app
-        run: >
-          wails build -platform ${{ matrix.platform }} -clean ${{ matrix.extra }}
-          -ldflags "-X main.version=${{ steps.v.outputs.version }}"
+        run: wails build -platform ${{ matrix.platform }} -clean ${{ matrix.extra }}
 
       - name: Import signing certificate
         if: matrix.name == 'macos' && env.SIGN_MACOS == 'true'

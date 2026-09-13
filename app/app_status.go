@@ -18,6 +18,7 @@ import (
 // --- state the installer/panel read on load ---------------------------------
 
 type AppState struct {
+	Version   string        `json:"version"`
 	SetupDone bool          `json:"setup_done"`
 	MDNSName  string        `json:"mdns_name"`
 	Docker    prereq.Status `json:"docker"`
@@ -26,6 +27,7 @@ type AppState struct {
 func (a *App) GetState() AppState {
 	cfg := a.loadConfig()
 	return AppState{
+		Version:   a.pins.AppVersion,
 		SetupDone: cfg.SetupDone,
 		MDNSName:  cfg.MDNSName,
 		Docker:    prereq.DockerCheck(a.engine().Runner()),

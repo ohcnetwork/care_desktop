@@ -32,13 +32,13 @@ func main() {
 	appLog = applog.Open()
 	defer appLog.Close()
 	appLog.OnFatal = func(msg string) { fatal(errors.New(msg)) }
-	appLog.Header(version, cfg.InstallDir, cfg.MDNSName)
 
 	app, err := NewApp(installFS, appLog)
 	if err != nil {
 		fatal(err)
 	}
 
+	appLog.Header(app.pins.AppVersion, cfg.InstallDir, cfg.MDNSName)
 	for _, line := range app.pins.Summary() {
 		appLog.Write(line)
 	}

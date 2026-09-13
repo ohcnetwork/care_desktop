@@ -86,6 +86,7 @@ type CareStore = {
   busy: boolean;
   busyLabel: string;
   system: SystemState;
+  version: string;
   backups: Backup[];
   autostart: boolean;
   refresh: () => Promise<void>;
@@ -116,6 +117,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
   const [busy, setBusyState] = useState(false);
   const [busyLabel, setBusyLabel] = useState("");
   const [system, setSystem] = useState<SystemState>("unknown");
+  const [version, setVersion] = useState("");
   const [backups, setBackups] = useState<Backup[]>([]);
   const [autostart, setAutostartState] = useState(false);
 
@@ -439,6 +441,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
     void (async () => {
       try {
         const state = await bridge.GetState();
+        setVersion(state.version);
         setMdnsName(state.mdns_name || "care.local");
         if (state.setup_done) {
           setFlow("panel");
@@ -476,6 +479,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
       busy,
       busyLabel,
       system,
+      version,
       backups,
       autostart,
       refresh,
@@ -489,7 +493,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
     [
       ready, flow, mdnsName, openStep, stepsDone, setStepDone,
       run, startInstall, retryInstall, restartSetup, openPanel,
-      tab, busy, busyLabel, system, backups, autostart, refresh, reloadBackups,
+      tab, busy, busyLabel, system, version, backups, autostart, refresh, reloadBackups,
       runAction, setAutostart, restore, uninstall, log,
     ],
   );

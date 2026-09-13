@@ -11,6 +11,8 @@ import (
 const EnvFile = ".env"
 
 type Pins struct {
+	AppVersion string
+
 	PostgresImage string
 	RedisImage    string
 	MinioImage    string
@@ -36,6 +38,7 @@ func (p *Pins) envPinMap() []struct {
 		key string
 		dst *string
 	}{
+		{"CARE_DESKTOP_VERSION", &p.AppVersion},
 		{"POSTGRES_IMAGE", &p.PostgresImage},
 		{"REDIS_IMAGE", &p.RedisImage},
 		{"MINIO_IMAGE", &p.MinioImage},

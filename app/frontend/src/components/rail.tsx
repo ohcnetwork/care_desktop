@@ -18,7 +18,8 @@ const PANEL_TABS: { id: PanelTab; label: string }[] = [
 ];
 
 export const Rail = memo(function Rail() {
-  const { flow, openStep, stepsDone, tab, setTab, busy, busyLabel, system } = useCare();
+  const { flow, openStep, stepsDone, tab, setTab, busy, busyLabel, system, version } =
+    useCare();
   const inPanel = flow === "panel";
   // Everything past the setup form is "install and start" as far as the rail
   // is concerned — clinic details, the run itself and the failure screen.
@@ -33,7 +34,12 @@ export const Rail = memo(function Rail() {
           className="block h-[52px] w-auto brightness-0 invert"
         />
         <div>
-          <div className="text-base leading-tight font-bold text-white">CARE Desktop</div>
+          <div className="flex items-baseline gap-2">
+            <div className="text-base leading-tight font-bold text-white">CARE Desktop</div>
+            {version ? (
+              <span className="font-mono text-[11px] text-brand-pale/70">{version}</span>
+            ) : null}
+          </div>
           <div className="text-[12.5px] text-brand-pale">
             {inPanel ? "Control panel" : "First-time setup"}
           </div>
