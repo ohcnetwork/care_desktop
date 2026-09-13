@@ -149,7 +149,7 @@ export function useRequirementChecks(host: string) {
       const status = await bridge.MDNSStatus();
       result = {
         state: status.ok ? "ok" : "bad",
-        how: status.ok ? "" : status.how || status.message,
+        how: status.ok ? "" : status.message,
       };
     } catch (e) {
       result = { state: "bad", how: String(e) };

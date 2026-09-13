@@ -160,11 +160,11 @@ func (a *App) VerifyAdminPassword(pw string) bool {
 // mode), since that's exactly what makes care.local resolve. Otherwise it falls back
 // to the engine's resolution test + mode-specific guidance.
 func (a *App) MDNSStatus() mdns.NameStatus {
+	name := a.loadConfig().MDNSName
 	if a.advRunning() {
-		full := mdns.NameStatus{OK: true}
-		full.Message = a.loadConfig().MDNSName + " is being advertised by this app"
-		return full
+		return mdns.NameStatus{OK: true, Message: name + " is being advertised by this app"}
 	}
-	e := a.engine()
-	return mdns.Check(mdns.Label(e.Label()))
+	// Nothing to test and nothing to advise: this process is the only thing that
+	// answers the name, so if its responder is down the answer is simply no.
+	return mdns.NameStatus{OK: false, Message: "Not advertising " + name}
 }

@@ -2,7 +2,7 @@
 // with wailsjs/go/models.ts, which Wails regenerates from the Go structs.
 
 export type DockerStatus = { ok: boolean; message: string };
-export type NameStatus = { ok: boolean; message: string; how: string };
+export type NameStatus = { ok: boolean; message: string };
 export type NetworkStatus = {
   applicable: boolean;
   ok: boolean;
