@@ -145,15 +145,12 @@ func (a *App) SetMDNSName(name string) error {
 	return nil
 }
 
-// VerifyAdminPassword gates the Advanced screen. It checks against the bcrypt hash
-// stored at setup. Legacy installs (set up before the hash existed) have none, so
-// any non-empty entry passes - a speed bump, not verification.
+// VerifyAdminPassword gates the Advanced screen against the bcrypt hash stored at
+// setup. Setup refuses to finish without one, so a completed install always has a
+// hash; a config that has lost it is corrupt and a matter for support, not
+// something to branch on here. bcrypt rejects an empty or malformed hash anyway.
 func (a *App) VerifyAdminPassword(pw string) bool {
-	h := a.loadConfig().AdminPwHash
-	if h == "" {
-		return strings.TrimSpace(pw) != ""
-	}
-	return bcrypt.CompareHashAndPassword([]byte(h), []byte(pw)) == nil
+	return bcrypt.CompareHashAndPassword([]byte(a.loadConfig().AdminPwHash), []byte(pw)) == nil
 }
 
 // MDNSStatus is green whenever this app is actively advertising the name (advertise

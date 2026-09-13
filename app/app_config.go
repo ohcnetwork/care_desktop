@@ -6,18 +6,14 @@ import (
 	"path/filepath"
 )
 
-// --- persisted config -------------------------------------------------------
-
 type Config struct {
 	SetupDone   bool   `json:"setup_done"`
 	MDNSName    string `json:"mdns_name"`
 	InstallDir  string `json:"install_dir"`
 	BackupDir   string `json:"backup_dir"`
-	AdminPwHash string `json:"admin_pw_hash,omitempty"` // bcrypt of the install-time admin password; gates Advanced
+	AdminPwHash string `json:"admin_pw_hash"`
 }
 
-// configPath and loadConfig are package-level: main opens the log before NewApp
-// exists. Neither ever used the receiver.
 func configPath() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -48,9 +44,6 @@ func (a *App) saveConfig(cfg Config) error {
 	return os.WriteFile(configPath(), b, 0o644)
 }
 
-// forgetConfig deletes the saved settings, so the next launch starts the wizard
-// from scratch. Used by the purge; there is nothing worth keeping from an
-// install whose data volumes have just been removed.
 func (a *App) forgetConfig() {
 	_ = os.Remove(configPath())
 }

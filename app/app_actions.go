@@ -162,9 +162,13 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 
 	cfg := a.loadConfig()
 	cfg.MDNSName = mdns
-	if h, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost); err == nil {
-		cfg.AdminPwHash = string(h) // so Advanced can be gated behind the admin password, offline
+	// Gates the Advanced tab, offline. Failing here has to abort the install: with
+	// no hash stored there is nothing to check a password against later.
+	h, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("couldn't secure the admin password: %w", err)
 	}
+	cfg.AdminPwHash = string(h)
 	if strings.TrimSpace(installDir) != "" {
 		cfg.InstallDir = filepath.Join(strings.TrimSpace(installDir), "CARE Desktop")
 	}
