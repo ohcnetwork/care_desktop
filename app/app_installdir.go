@@ -12,12 +12,7 @@ import (
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// --- install dir location + first-run unpack ----------------------------------------
-
 func (a *App) installDir() string {
-	if d := os.Getenv("CARE_DESKTOP_DIR"); d != "" {
-		return d
-	}
 	if cfg := a.loadConfig(); cfg.InstallDir != "" {
 		return cfg.InstallDir
 	}
@@ -26,22 +21,19 @@ func (a *App) installDir() string {
 		base, _ = os.UserHomeDir()
 	}
 	if runtime.GOOS == "windows" {
-		// Docker Desktop can't read files under %AppData% live on Windows, so install dir bind
-		// mounts arrive as empty dirs; stage under the home dir, which it reads live.
-		// (config.json stays in %AppData% - Docker never reads it.)
 		if home, herr := os.UserHomeDir(); herr == nil {
 			base = home
 		}
 	}
-	return filepath.Join(base, "care-desktop", "install")
+	return filepath.Join(base, appDirName, installSubdir)
 }
 
-// installUserFiles are preserved on an install-dir refresh; everything else is app-owned.
+const installSubdir = "install"
+
 var installUserFiles = map[string]bool{"backend.env": true, "frontend.env": true}
 
-// ensureInstallDir syncs the embedded install dir on every setup (not just the first) so an updated
-// app delivers new/changed files to an existing install, keeping edited env files.
-// Fixes the stale-install dir failure where setup can't find a newly added install dir file.
+const gitkeepPlaceholder = ".gitkeep"
+
 func (a *App) ensureInstallDir() (string, error) {
 	dest := a.installDir()
 	err := fs.WalkDir(a.installFS, "install", func(p string, d fs.DirEntry, err error) error {
@@ -50,14 +42,14 @@ func (a *App) ensureInstallDir() (string, error) {
 		}
 		rel := strings.TrimPrefix(p, "install")
 		rel = strings.TrimPrefix(rel, "/")
-		if rel == "" {
+		if rel == "" || rel == gitkeepPlaceholder {
 			return nil
 		}
 		target := filepath.Join(dest, rel)
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
-		if installUserFiles[rel] { // keep the user's edits; only seed when absent
+		if installUserFiles[rel] {
 			if _, err := os.Stat(target); err == nil {
 				return nil
 			}
@@ -78,9 +70,6 @@ func (a *App) ensureInstallDir() (string, error) {
 	return dest, err
 }
 
-// engine builds an Engine bound to the install dir, streaming logs to the UI. It
-// carries the operator's saved choices; the setup run additionally sets the two
-// passwords, which are never persisted here.
 func (a *App) engine() *clinic.Clinic {
 	cfg := a.loadConfig()
 	return &clinic.Clinic{

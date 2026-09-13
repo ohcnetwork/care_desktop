@@ -170,7 +170,7 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 	}
 	cfg.AdminPwHash = string(h)
 	if strings.TrimSpace(installDir) != "" {
-		cfg.InstallDir = filepath.Join(strings.TrimSpace(installDir), "CARE Desktop")
+		cfg.InstallDir = filepath.Join(strings.TrimSpace(installDir), appDirName, installSubdir)
 	}
 	if strings.TrimSpace(backupDir) != "" {
 		cfg.BackupDir = filepath.Join(strings.TrimSpace(backupDir), "care-db-backups")

@@ -10,7 +10,7 @@ func (e *Clinic) Setup() error {
 	if err := e.genSecret(); err != nil {
 		return err
 	}
-	if err := e.applyDomain(); err != nil {
+	if err := e.ApplyDomain(); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(e.backupDir(), 0o755); err != nil {

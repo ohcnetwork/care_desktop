@@ -16,9 +16,14 @@ var domainFiles = []string{"Caddyfile", "backend.env", "frontend.env", "setup/in
 // pki/authorities/local have no dot before "local", so they never match.
 var hostRe = regexp.MustCompile(`\b[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.local\b`)
 
-// applyDomain points the install dir at this clinic's address. Runs before buildFrontend:
-// Vite bakes the API URL in at build time, so a later change needs a rebuild.
-func (e *Clinic) applyDomain() error {
+// ApplyDomain points the install dir at this clinic's address. Runs before
+// BuildFrontend during setup - Vite bakes the API URL in at build time, so a later
+// change needs a rebuild - and again on every launch, after the install files are
+// refreshed from the binary, because the shipped templates carry example.local.
+//
+// Idempotent: it replaces whatever host is already there rather than a fixed
+// string, and skips any file it would not change.
+func (e *Clinic) ApplyDomain() error {
 	if err := mdns.ValidateLabel(e.mdnsName()); err != nil {
 		return err
 	}

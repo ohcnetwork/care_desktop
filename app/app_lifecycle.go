@@ -13,10 +13,44 @@ import (
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.refreshInstallDir()
 	a.advStop = make(chan struct{})
 	a.startAdvertise()
 	go a.watchAdvertise()
 	go a.log.Writef("docker: %s", prereq.DockerCheck(a.engine().Runner()).Message)
+}
+
+// refreshInstallDir delivers this build's copy of the stack files to an install
+// that already exists, then re-stamps the clinic's address into them.
+//
+// Launch is the only moment an upgrade can use. ensureInstallDir was reachable
+// only from RunSetup, and RunSetup only from the wizard, which an install with
+// setup_done never shows - so before this, a clinic kept running the compose file,
+// Caddyfile and backup script of whichever version first installed it, and its
+// on-disk .env drifted from the pins compiled into the binary.
+//
+// ApplyDomain is not optional here. The shipped templates carry example.local, so
+// refreshing without re-stamping would leave Caddy serving a host nobody on the
+// ward can reach.
+//
+// Synchronous: the panel can ask to start the stack as soon as it loads, and
+// compose must not read a half-written compose file. Thirteen small files.
+//
+// Best-effort: a clinic that cannot be refreshed should still open, with the
+// reason in the log, rather than refuse to launch.
+func (a *App) refreshInstallDir() {
+	if !loadConfig().SetupDone {
+		return // the wizard will do it, with the operator's chosen directory
+	}
+	if _, err := a.ensureInstallDir(); err != nil {
+		a.logln("note: couldn't update the install files for this version (" + err.Error() + ")")
+		return
+	}
+	if err := a.engine().ApplyDomain(); err != nil {
+		a.logln("note: couldn't re-apply the clinic address after updating (" + err.Error() + ")")
+		return
+	}
+	a.logln("Install files are up to date with this version.")
 }
 
 func (a *App) shutdown(context.Context) {

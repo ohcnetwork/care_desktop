@@ -20,7 +20,7 @@ import (
 // Clinic runs CARE actions against an install directory (the folder holding
 // docker-compose.yml, the env files, and the mounted configs).
 type Clinic struct {
-	InstallDir string // dir with docker-compose.yml, *.env, clinic_settings.py, ...
+	InstallDir string // dir with docker-compose.yml, *.env, Caddyfile, minio/, scripts/, setup/
 
 	// Operator choices, supplied by the caller for the run that needs them. They
 	// are deliberately not read from the environment or .env: Compose interpolates

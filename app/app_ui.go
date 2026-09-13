@@ -48,8 +48,8 @@ func (a *App) OpenLogFolder() error {
 	if dir == "" {
 		return errors.New("this run isn't writing a log file - the log folder couldn't be opened for writing")
 	}
-	// url.URL rather than "file://"+dir: the default folder is "CARE Desktop",
-	// and an unescaped space makes the URL a no-op on Windows.
+	// url.URL rather than "file://"+dir: the operator's home or chosen parent can
+	// contain spaces, and an unescaped one makes the URL a no-op on Windows.
 	wruntime.BrowserOpenURL(a.ctx, (&url.URL{Scheme: "file", Path: dir}).String())
 	return nil
 }

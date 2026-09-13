@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 )
 
+const appDirName = "care-desktop"
+
 type Config struct {
 	SetupDone   bool   `json:"setup_done"`
 	MDNSName    string `json:"mdns_name"`
@@ -19,7 +21,7 @@ func configPath() string {
 	if err != nil {
 		dir, _ = os.UserHomeDir()
 	}
-	dir = filepath.Join(dir, "care-desktop")
+	dir = filepath.Join(dir, appDirName)
 	_ = os.MkdirAll(dir, 0o755)
 	return filepath.Join(dir, "config.json")
 }
