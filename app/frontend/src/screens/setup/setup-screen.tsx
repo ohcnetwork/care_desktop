@@ -94,6 +94,15 @@ export function SetupScreen({
     [checkMDNS],
   );
 
+  // Apply the form's own default once, so the address the operator sees in the
+  // field is the one actually being advertised. The host no longer invents a name
+  // of its own, so without this the wizard would show "care" while nothing was
+  // advertised - and the address check gates the Install button.
+  useEffect(() => {
+    void applyHost(form.hostInput);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- on mount only
+  }, []);
+
   useEffect(() => () => window.clearTimeout(hostTimer.current), []);
 
   const onHostChange = (value: string) => {

@@ -25,5 +25,14 @@ export function megabytes(bytes: number): string {
 
 /** "care" / "CARE.local" -> "care.local" */
 export function normaliseHost(raw: string): string {
-  return `${raw.trim().replace(/\.local$/i, "").toLowerCase()}.local`;
+  // Mirrors mdns.Label on the host: lowercase, trim spaces, then strip surrounding
+  // dots BEFORE and after removing a trailing ".local". Without the dot trimming,
+  // "care." became "care..local" here and in the stored config.
+  const label = raw
+    .trim()
+    .toLowerCase()
+    .replace(/^\.+|\.+$/g, "")
+    .replace(/\.local$/i, "")
+    .replace(/^\.+|\.+$/g, "");
+  return `${label}.local`;
 }

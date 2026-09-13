@@ -12,6 +12,7 @@ import (
 	"github.com/ohcnetwork/care_desktop/app/internal/backup"
 	"github.com/ohcnetwork/care_desktop/app/internal/clinic"
 	"github.com/ohcnetwork/care_desktop/app/internal/health"
+	"github.com/ohcnetwork/care_desktop/app/internal/sys/mdns"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/crypto/bcrypt"
@@ -106,10 +107,7 @@ func (a *App) notifyInstalled(mdnsName string) {
 	}
 }
 
-// CareAction runs one named action against the existing install dir. The set of
-// names actionFunc recognises is the whitelist; there is no second list to keep
-// in step with it.
-func (a *App) CareAction(action string) error {
+func (a *App) ClinicAction(action string) error {
 	fn := actionFunc(a.engine(), action)
 	if fn == nil {
 		return errors.New("action not allowed: " + action)
@@ -154,14 +152,15 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 		return err
 	}
 
-	mdns := strings.TrimSpace(mdnsName)
-	if mdns == "" {
-		mdns = "care.local"
+	// One normalisation, shared with SetMDNSName and ValidateLabel. The default is
+	// here because this is a boundary: mdnsName comes straight from the form.
+	host := mdns.Label(mdnsName)
+	if host == "" {
+		host = "care"
 	}
-	host := strings.TrimSuffix(mdns, ".local")
 
 	cfg := a.loadConfig()
-	cfg.MDNSName = mdns
+	cfg.MDNSName = host + ".local"
 	// Gates the Advanced tab, offline. Failing here has to abort the install: with
 	// no hash stored there is nothing to check a password against later.
 	h, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
@@ -270,4 +269,4 @@ func careAppDataName(name string) bool {
 	return strings.HasPrefix(n, "care")
 }
 
-func (a *App) CareStatus() (string, error) { return a.engine().Status() }
+func (a *App) ClinicStatus() (string, error) { return a.engine().Status() }

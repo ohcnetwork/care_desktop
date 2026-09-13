@@ -27,13 +27,9 @@ func configPath() string {
 }
 
 func loadConfig() Config {
-	cfg := Config{MDNSName: "care.local"}
-	b, err := os.ReadFile(configPath())
-	if err == nil {
+	var cfg Config
+	if b, err := os.ReadFile(configPath()); err == nil {
 		_ = json.Unmarshal(b, &cfg)
-	}
-	if cfg.MDNSName == "" {
-		cfg.MDNSName = "care.local"
 	}
 	return cfg
 }

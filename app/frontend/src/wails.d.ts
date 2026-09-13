@@ -36,14 +36,14 @@ declare global {
           PurgeResidue(): Promise<void>;
           RestartPlan(): Promise<RestartPlan>;
           RestartNow(): Promise<void>;
-          CareHealth(): Promise<Health>;
+          ClinicHealth(): Promise<Health>;
           ValidatePassword(pw: string): Promise<string>;
           ValidateDomain(name: string): Promise<string>;
           ValidateBackupDir(dir: string): Promise<string>;
           SetMDNSName(name: string): Promise<void>;
           VerifyAdminPassword(pw: string): Promise<boolean>;
-          CareAction(action: string): Promise<void>;
-          CareStatus(): Promise<string>;
+          ClinicAction(action: string): Promise<void>;
+          ClinicStatus(): Promise<string>;
           RunSetup(
             mdnsName: string,
             adminPassword: string,

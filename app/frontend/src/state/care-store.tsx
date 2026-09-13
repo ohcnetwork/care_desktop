@@ -204,12 +204,12 @@ export function CareProvider({ children }: { children: ReactNode }) {
     if (busyRef.current || flowRef.current !== "panel") return;
     let next: SystemState;
     try {
-      const health = await bridge.CareHealth();
+      const health = await bridge.ClinicHealth();
       if (health.active) next = "running";
       else {
         let ps = "";
         try {
-          ps = await bridge.CareStatus();
+          ps = await bridge.ClinicStatus();
         } catch {
           ps = "";
         }
@@ -235,7 +235,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
       setBusy(true, ACTION_LABELS[action] ?? "Working");
       log(`\n$ care ${action}`);
       try {
-        await bridge.CareAction(action);
+        await bridge.ClinicAction(action);
       } catch (e) {
         log(`error: ${errorText(e)}`);
         setBusy(false);
@@ -317,7 +317,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
     // unconditional — restarting a stack that is already serving would drop the
     // clinic for a minute in the middle of a consultation.
     try {
-      const health = await bridge.CareHealth();
+      const health = await bridge.ClinicHealth();
       if (!health.active && !busyRef.current) {
         log(
           (await bridge.WasAutostartLaunched())
