@@ -29,8 +29,8 @@ declare global {
           FixNetwork(): Promise<void>;
           DockerPlan(): Promise<ToolPlan>;
           GitPlan(): Promise<ToolPlan>;
-          InstallDocker(): Promise<void>;
-          InstallGit(): Promise<void>;
+          InstallDocker(): Promise<string>;
+          InstallGit(): Promise<string>;
           OpenDocker(): Promise<void>;
           ScanResidue(): Promise<ResidueReport>;
           PurgeResidue(): Promise<void>;

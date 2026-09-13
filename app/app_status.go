@@ -43,11 +43,10 @@ func (a *App) FixNetwork() error { return netfix.Fix(a.engine().Log) }
 func (a *App) DockerPlan() prereq.ToolPlan { return a.provisioner().DockerPlan() }
 func (a *App) GitPlan() prereq.ToolPlan    { return a.provisioner().GitPlan() }
 
-func (a *App) InstallDocker() error { return a.provisioner().InstallDocker() }
-func (a *App) InstallGit() error    { return a.provisioner().InstallGit() }
-func (a *App) OpenDocker() error    { return a.provisioner().OpenDocker() }
+func (a *App) InstallDocker() (string, error) { return a.provisioner().InstallDocker() }
+func (a *App) InstallGit() (string, error)    { return a.provisioner().InstallGit() }
+func (a *App) OpenDocker() error              { return a.provisioner().OpenDocker() }
 
-// provisioner streams its progress through care-log, like the install does.
 func (a *App) provisioner() *prereq.Provisioner {
 	e := a.engine()
 	return prereq.NewProvisioner(e.Runner(), e.InstallDir, e.Log, e.Confirm)

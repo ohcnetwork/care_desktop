@@ -5,11 +5,6 @@ import (
 	"unicode"
 )
 
-// ValidatePassword enforces a simple strength policy for the admin and backup
-// passwords. It lives beside the bindings because it is input policy for the
-// wizard's form, not something the engine enforces:
-// 8-20 characters, with at least one uppercase letter, one lowercase letter, and one
-// number. Returns nil when acceptable, otherwise a human-readable reason to show.
 func ValidatePassword(password string) error {
 	n := len([]rune(password))
 	if n < 8 {

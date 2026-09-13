@@ -16,7 +16,7 @@ import (
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 )
 
-// Provisioner installs the prerequisites. See docs/architecture.md.
+// Provisioner installs the prerequisites: Docker Desktop and Git.
 type Provisioner struct {
 	Dir     string
 	Log     func(string)
@@ -78,7 +78,7 @@ func (pr *Provisioner) DockerPlan() ToolPlan {
 	// re-download - offer that before offering an install.
 	if !pr.dockerDaemonUp() && dockerDesktopInstalled() {
 		return ToolPlan{
-			Tool: "docker", Action: ActionOpen, Label: "Open Docker", URL: dockerPageURL,
+			Tool: "docker", Action: ActionOpen, Label: "Open " + dockerName(), URL: dockerPageURL,
 			Detail:     "Starts Docker and waits for it to be ready. This usually takes a minute.",
 			NeedsAdmin: runtime.GOOS == "linux", // only there is starting the daemon privileged
 		}
@@ -88,7 +88,7 @@ func (pr *Provisioner) DockerPlan() ToolPlan {
 
 func (pr *Provisioner) dockerInstallPlan() ToolPlan {
 	p := ToolPlan{
-		Tool: "docker", Action: ActionInstall, Label: "Install Docker",
+		Tool: "docker", Action: ActionInstall, Label: "Install " + dockerName(),
 		URL: dockerPageURL, NeedsAdmin: true,
 	}
 	switch runtime.GOOS {
@@ -117,6 +117,16 @@ func (pr *Provisioner) dockerInstallPlan() ToolPlan {
 		p.Detail = "Install Docker for this system."
 	}
 	return p
+}
+
+// dockerName is what to call Docker in front of the operator. Docker Desktop is
+// the only build CARE installs and starts on mac and Windows, so it is named
+// exactly; on Linux there is no Desktop to name.
+func dockerName() string {
+	if runtime.GOOS == "linux" {
+		return "Docker"
+	}
+	return "Docker Desktop"
 }
 
 // GitPlan decides what to offer for git. Git is never "running", so the only
@@ -157,16 +167,35 @@ func (pr *Provisioner) GitPlan() ToolPlan {
 
 // --- installs ---------------------------------------------------------------
 
-func (pr *Provisioner) InstallDocker() error {
+// InstallDocker installs Docker Desktop and returns what to tell the operator.
+// The message is per-OS because "installed" does not always mean "ready": Windows
+// usually needs a restart before the engine can run.
+func (pr *Provisioner) InstallDocker() (string, error) {
+	var err error
 	switch runtime.GOOS {
 	case "darwin":
-		return pr.installDockerDarwin()
+		err = pr.installDockerDarwin()
 	case "windows":
-		return pr.installDockerWindows()
+		err = pr.installDockerWindows()
 	case "linux":
-		return pr.installDockerLinux()
+		err = pr.installDockerLinux()
+	default:
+		return "", fmt.Errorf("installing Docker isn't supported on %s - install it from %s", runtime.GOOS, dockerPageURL)
 	}
-	return fmt.Errorf("installing Docker isn't supported on %s - install it from %s", runtime.GOOS, dockerPageURL)
+	if err != nil {
+		return "", err
+	}
+	switch runtime.GOOS {
+	case "windows":
+		return "Docker Desktop is installed.\n\nWindows may need to restart before it can run. " +
+			"Start Docker Desktop, wait until it reports \"Engine running\", then choose Check again.", nil
+	case "linux":
+		return "Docker is installed.\n\nIf the check still fails, log out and back in so your user " +
+			"picks up the docker group, then choose Check again.", nil
+	default:
+		return "Docker Desktop is installed.\n\nIt will start on its own; that takes about a minute. " +
+			"Then choose Check again.", nil
+	}
 }
 
 func (pr *Provisioner) installDockerDarwin() error {
@@ -263,29 +292,36 @@ func (pr *Provisioner) installDockerLinux() error {
 	return pr.waitForDocker(30 * time.Second)
 }
 
-func (pr *Provisioner) InstallGit() error {
+// InstallGit installs Git and returns what to tell the operator. On macOS this
+// only opens Apple's own installer, so the message says so rather than claiming
+// the job is done.
+func (pr *Provisioner) InstallGit() (string, error) {
 	switch runtime.GOOS {
 	case "darwin":
 		// Returns as soon as the system dialog is on screen, so there is nothing
 		// to wait for here - the operator finishes it and re-runs the check.
 		pr.logln("Asking macOS to install its command line tools (this includes Git)...")
 		if err := pr.run.Run("xcode-select", "--install"); err != nil {
-			return fmt.Errorf("could not start the macOS command line tools installer "+
+			return "", fmt.Errorf("could not start the macOS command line tools installer "+
 				"(it may already be installing): %w", err)
 		}
-		pr.logln("Choose Install in the window macOS just opened, then run the check again.")
-		return nil
+		return "macOS is installing its command line tools, which include Git.\n\n" +
+			"Choose Install in the window macOS just opened and wait for it to finish, " +
+			"then choose Check again.", nil
 	case "windows":
 		if !hasCommand("winget") {
-			return fmt.Errorf("winget isn't available - install Git from %s", gitPageURL)
+			return "", fmt.Errorf("winget isn't available - install Git from %s", gitPageURL)
 		}
 		pr.logln("Installing Git with winget...")
-		return pr.run.Run("winget", "install", "-e", "--id", "Git.Git",
-			"--accept-package-agreements", "--accept-source-agreements")
+		if err := pr.run.Run("winget", "install", "-e", "--id", "Git.Git",
+			"--accept-package-agreements", "--accept-source-agreements"); err != nil {
+			return "", err
+		}
+		return "Git is installed.\n\nChoose Check again to continue.", nil
 	case "linux":
 		pm := linuxPackageManager()
 		if pm == "" {
-			return fmt.Errorf("no supported package manager found - install git from %s", gitPageURL)
+			return "", fmt.Errorf("no supported package manager found - install git from %s", gitPageURL)
 		}
 		var sh string
 		switch pm {
@@ -299,9 +335,12 @@ func (pr *Provisioner) InstallGit() error {
 			sh = "pacman -Sy --noconfirm git"
 		}
 		pr.logln("Installing git with " + pm + "...")
-		return elevate.Run(sh, true)
+		if err := elevate.Run(sh, true); err != nil {
+			return "", err
+		}
+		return "Git is installed.\n\nChoose Check again to continue.", nil
 	}
-	return fmt.Errorf("installing git isn't supported on %s - install it from %s", runtime.GOOS, gitPageURL)
+	return "", fmt.Errorf("installing git isn't supported on %s - install it from %s", runtime.GOOS, gitPageURL)
 }
 
 // --- starting Docker ---------------------------------------------------------

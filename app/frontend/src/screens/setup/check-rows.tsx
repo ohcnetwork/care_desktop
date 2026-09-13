@@ -1,6 +1,14 @@
 import { Fragment, useEffect, useState } from "react";
 
 import { Spinner } from "@/components/spinner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { onCareEvent } from "@/lib/bridge";
@@ -27,6 +35,10 @@ export function CheckRows({
   const [running, setRunning] = useState<CheckId | null>(null);
   const [progress, setProgress] = useState("");
   const [failure, setFailure] = useState("");
+  // What the host says to do now that the install finished. Held until the
+  // operator dismisses it: an install that ends with "restart Windows first"
+  // must not be summarised by the row quietly going red again.
+  const [done, setDone] = useState("");
 
   // Installing Docker means a download of several hundred megabytes. Echoing the
   // engine's log line keeps that from looking like a frozen window.
@@ -45,81 +57,106 @@ export function CheckRows({
     setFailure("");
     void check.action
       .run()
-      .catch((e) => setFailure(errorText(e)))
+      .then((message) => {
+        if (message) setDone(message);
+        else onDone();
+      })
+      .catch((e) => {
+        setFailure(errorText(e));
+        onDone();
+      })
       .finally(() => {
         setRunning(null);
         setProgress("");
-        onDone();
       });
   };
 
   return (
-    <div className="overflow-hidden rounded-lg border border-line">
-      {checks.map((check, i) => {
-        const busy = running === check.id;
-        return (
-          <Fragment key={check.id}>
-            <div
-              className={cn(
-                "flex items-center gap-3 px-3.5 py-[13px]",
-                i > 0 && "border-t border-line",
-                check.state === "bad" && "bg-danger-tint",
-              )}
+    <>
+      <AlertDialog open={done !== ""}>
+        <AlertDialogContent>
+          <AlertDialogTitle>Installed</AlertDialogTitle>
+          <AlertDialogDescription className="whitespace-pre-line">{done}</AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogAction
+              onClick={() => {
+                setDone("");
+                onDone();
+              }}
             >
-              <span
+              Check again
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <div className="overflow-hidden rounded-lg border border-line">
+        {checks.map((check, i) => {
+          const busy = running === check.id;
+          return (
+            <Fragment key={check.id}>
+              <div
                 className={cn(
-                  "flex size-5 flex-none items-center justify-center rounded-full text-[11px] font-bold",
-                  DOT[check.state],
+                  "flex items-center gap-3 px-3.5 py-[13px]",
+                  i > 0 && "border-t border-line",
+                  check.state === "bad" && "bg-danger-tint",
                 )}
               >
-                {GLYPH[check.state]}
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="text-[13.5px] font-semibold text-ink">{check.title}</div>
-                <div className="mt-px text-[12.5px] text-muted-foreground">{check.detail}</div>
+                <span
+                  className={cn(
+                    "flex size-5 flex-none items-center justify-center rounded-full text-[11px] font-bold",
+                    DOT[check.state],
+                  )}
+                >
+                  {GLYPH[check.state]}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13.5px] font-semibold text-ink">{check.title}</div>
+                  <div className="mt-px text-[12.5px] text-muted-foreground">{check.detail}</div>
+                </div>
+                <Badge variant={check.state === "wait" ? "default" : check.state}>
+                  {check.state === "wait"
+                    ? "Checking"
+                    : check.state === "ok"
+                      ? "Ready"
+                      : "Not ready"}
+                </Badge>
               </div>
-              <Badge variant={check.state === "wait" ? "default" : check.state}>
-                {check.state === "wait"
-                  ? "Checking"
-                  : check.state === "ok"
-                    ? "Ready"
-                    : "Not ready"}
-              </Badge>
-            </div>
 
-            {check.state === "bad" && (check.how || check.action) ? (
-              <div className="border-t border-danger-bg bg-[#fef6f6] py-3 pr-3.5 pl-[46px]">
-                <div className="flex items-center gap-3">
-                  <div className="min-w-0 flex-1 text-[12.5px] leading-[1.5] text-danger-ink">
-                    <div>{check.how}</div>
+              {check.state === "bad" && (check.how || check.action) ? (
+                <div className="border-t border-danger-bg bg-[#fef6f6] py-3 pr-3.5 pl-[46px]">
+                  <div className="flex items-center gap-3">
+                    <div className="min-w-0 flex-1 text-[12.5px] leading-[1.5] text-danger-ink">
+                      <div>{check.how}</div>
+                      {check.action ? (
+                        <div className="mt-1 text-muted-foreground">{check.action.detail}</div>
+                      ) : null}
+                    </div>
                     {check.action ? (
-                      <div className="mt-1 text-muted-foreground">{check.action.detail}</div>
+                      <Button
+                        variant="primary"
+                        disabled={running !== null}
+                        onClick={() => perform(check)}
+                      >
+                        {busy ? <Spinner className="size-3.5" /> : null}
+                        {busy ? "Working…" : check.action.label}
+                      </Button>
                     ) : null}
                   </div>
-                  {check.action ? (
-                    <Button
-                      variant="primary"
-                      disabled={running !== null}
-                      onClick={() => perform(check)}
-                    >
-                      {busy ? <Spinner className="size-3.5" /> : null}
-                      {busy ? "Working…" : check.action.label}
-                    </Button>
+                  {busy && progress ? (
+                    <div className="mt-2 truncate font-mono text-[12px] text-muted-foreground">
+                      {progress}
+                    </div>
+                  ) : null}
+                  {!busy && failure && running === null ? (
+                    <div className="mt-2 text-[12.5px] text-danger-ink">{failure}</div>
                   ) : null}
                 </div>
-                {busy && progress ? (
-                  <div className="mt-2 truncate font-mono text-[12px] text-muted-foreground">
-                    {progress}
-                  </div>
-                ) : null}
-                {!busy && failure && running === null ? (
-                  <div className="mt-2 text-[12.5px] text-danger-ink">{failure}</div>
-                ) : null}
-              </div>
-            ) : null}
-          </Fragment>
-        );
-      })}
-    </div>
+              ) : null}
+            </Fragment>
+          );
+        })}
+      </div>
+    </>
   );
 }

@@ -10,11 +10,14 @@ export type CheckId = "residue" | "docker" | "git" | "mdns" | "network";
  * What the operator can press on a failing row. The wizard is used by people who
  * will not open a terminal, so a check that can't be acted on is a dead end -
  * every failure that we know how to fix carries the fix.
+ *
+ * run resolves to a confirmation to show when the work succeeded, or nothing
+ * when there is none worth a dialog (opening Docker, opening a download page).
  */
 export type CheckAction = {
   label: string;
   detail: string;
-  run: () => Promise<void>;
+  run: () => Promise<string | void>;
 };
 
 export type Check = {
@@ -39,7 +42,7 @@ function summarise(results: Result[]): CheckTone {
  * Turns a plan from the host into a button. "manual" means we can't do it here,
  * so the button opens the vendor's download page instead of pretending.
  */
-function actionFor(plan: ToolPlan, install: () => Promise<void>): CheckAction | undefined {
+function actionFor(plan: ToolPlan, install: () => Promise<string | void>): CheckAction | undefined {
   if (plan.action === "" || plan.label === "") return undefined;
   if (plan.action === "manual") {
     return {
