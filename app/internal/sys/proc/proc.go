@@ -1,5 +1,3 @@
-// Package proc runs external commands. It is the only place in the app that
-// spawns a process. See docs/architecture.md.
 package proc
 
 import (
@@ -15,9 +13,11 @@ import (
 	"time"
 )
 
+const chunkSize = 64 * 1024
+
+const pathMarker = "__care_path__"
+
 // Runner executes commands with a fixed working directory, environment, and log
-// sink. The zero value is usable: it inherits the current dir and environment
-// and discards output.
 type Runner struct {
 	Dir string
 	Env []string
@@ -30,7 +30,6 @@ func (r Runner) logln(s string) {
 	}
 }
 
-// Command builds an exec.Cmd with the console window hidden on Windows.
 func Command(name string, args ...string) *exec.Cmd {
 	c := exec.Command(name, args...)
 	hideConsole(c)
@@ -44,12 +43,10 @@ func (r Runner) cmd(name string, args ...string) *exec.Cmd {
 	return c
 }
 
-// Run streams stdout and stderr to the log sink, one line at a time.
 func (r Runner) Run(name string, args ...string) error {
 	return r.RunWith(nil, name, args...)
 }
 
-// RunWith is Run with extra environment entries appended.
 func (r Runner) RunWith(extraEnv []string, name string, args ...string) error {
 	cmd := r.cmd(name, args...)
 	if len(extraEnv) > 0 {
@@ -67,12 +64,23 @@ func (r Runner) RunWith(extraEnv []string, name string, args ...string) error {
 		return fmt.Errorf("start %s: %w", name, err)
 	}
 	var wg sync.WaitGroup
+
 	stream := func(rd io.Reader) {
 		defer wg.Done()
-		sc := bufio.NewScanner(rd)
-		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for sc.Scan() {
-			r.logln(sc.Text())
+		br := bufio.NewReaderSize(rd, chunkSize)
+		skipping := false
+		for {
+			chunk, isPrefix, err := br.ReadLine()
+			if len(chunk) > 0 && !skipping {
+				r.logln(string(chunk))
+				if isPrefix {
+					r.logln("  (line too long to show in full - truncated)")
+				}
+			}
+			skipping = isPrefix
+			if err != nil {
+				return
+			}
 		}
 	}
 	wg.Add(2)
@@ -103,13 +111,6 @@ func (r Runner) Lines(name string, args ...string) []string {
 	return lines
 }
 
-// Succeeds reports whether the command exits zero, discarding all output.
-func (r Runner) Succeeds(name string, args ...string) bool {
-	return r.cmd(name, args...).Run() == nil
-}
-
-// AugmentedPath prepends the directories where docker and git live. A
-// GUI-launched app inherits a minimal PATH that usually omits them.
 func AugmentedPath() string {
 	var parts []string
 	sep := ":"
@@ -132,6 +133,7 @@ func AugmentedPath() string {
 	return strings.Join(parts, sep)
 }
 
+// FixPath widens the process PATH so binary lookups succeed.
 func FixPath() {
 	var parts []string
 	if sp := loginShellPath(); sp != "" {
@@ -145,9 +147,6 @@ func FixPath() {
 	_ = os.Setenv("PATH", strings.Join(parts, sep))
 }
 
-// loginShellPath asks the user's login shell for its PATH, which is where docker
-// and git are known to resolve. Unix only, bounded so a slow profile cannot hang
-// startup.
 func loginShellPath() string {
 	if runtime.GOOS == "windows" {
 		return ""
@@ -158,20 +157,24 @@ func loginShellPath() string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, shell, "-lc", "echo $PATH").Output()
+	out, err := exec.CommandContext(ctx, shell, "-lc",
+		"printf '"+pathMarker+"%s\\n' \"$PATH\"").Output()
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	for _, line := range strings.Split(string(out), "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), pathMarker); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
-// Exists reports whether a program resolves on PATH.
 func Exists(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
 }
 
-// FileExists reports whether p exists.
 func FileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
