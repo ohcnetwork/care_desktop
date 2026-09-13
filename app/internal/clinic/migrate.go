@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 )
 
 // migrate runs migrations, retrying until the backend/db are ready. It returns an
@@ -39,7 +41,7 @@ func (e *Clinic) createAdmin() {
 	if e.AdminPassword == "" {
 		return
 	}
-	cmd := newCmd("docker", "compose", "exec", "-T",
+	cmd := proc.Command("docker", "compose", "exec", "-T",
 		"-e", "DJANGO_SUPERUSER_PASSWORD="+e.AdminPassword,
 		"backend", "python", "manage.py", "createsuperuser", "--noinput",
 		"--username", "admin", "--email", "admin@care.local")

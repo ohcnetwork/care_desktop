@@ -1,13 +1,8 @@
-// Package clinic is the action layer: one exported method per thing an operator
-// can do to the CARE stack. Every action is plain Go calling `docker`/`git`, so
-// it runs identically on macOS, Linux, and Windows with no shell dependency.
-// See docs/behaviour-contract.md.
 package clinic
 
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -17,26 +12,17 @@ import (
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 )
 
-// Clinic runs CARE actions against an install directory (the folder holding
-// docker-compose.yml, the env files, and the mounted configs).
 type Clinic struct {
-	InstallDir string // dir with docker-compose.yml, *.env, Caddyfile, minio/, scripts/, setup/
+	InstallDir string
 
-	// Operator choices, supplied by the caller for the run that needs them. They
-	// are deliberately not read from the environment or .env: Compose interpolates
-	// .env into every service, so a password there would be visible stack-wide.
-	MDNSName       string // clinic address label, without ".local" (default "care")
-	AdminPassword  string // CARE superuser password; empty means don't create one
-	BackupPassword string // encrypts backups; required - there is no plaintext path
-	BackupDir      string // where backups are written (default ~/Desktop/care-db-backups)
+	MDNSName       string
+	AdminPassword  string
+	BackupPassword string
+	BackupDir      string
 
-	// Pins are the release pins (images, source refs), loaded and validated once
-	// at startup from the embedded .env. Every action needs them.
 	Pins *release.Pins
 
-	Log func(string) // optional sink for streamed output (one line at a time)
-	// Confirm asks the user a yes/no question (native dialog in the app). When
-	// nil, callers treat it as "no" - never block on a missing UI.
+	Log     func(string)
 	Confirm func(title, message string) bool
 }
 
@@ -46,10 +32,6 @@ func (e *Clinic) logln(s string) {
 	}
 }
 
-// --- process plumbing -------------------------------------------------------
-
-// baseEnv is the environment every docker/git call gets: the inherited env, an
-// augmented PATH, and the vars docker-compose.yml reads.
 func (e *Clinic) baseEnv() []string {
 	env := os.Environ()
 	set := func(k, v string) { env = append(env, k+"="+v) }
@@ -62,17 +44,11 @@ func (e *Clinic) baseEnv() []string {
 	set("CADDY_IMAGE", e.Pins.CaddyImage)
 	set("CADDY_WAF_IMAGE", e.Pins.CaddyWafImage)
 	set("BACKUP_IMAGE", e.Pins.BackupImage)
-	// MinIO's root credentials must match what the backend authenticates with.
-	// They are read from backend.env - the file the UI edits - because hardcoding
-	// them here meant changing them in Settings moved the backend's key while
-	// MinIO kept the old root user, and uploads failed with an auth error that
-	// pointed nowhere near the cause.
-	creds := e.minioCreds()
-	set("MINIO_ACCESS_KEY", creds[0])
-	set("MINIO_SECRET_KEY", creds[1])
+	accessKey, secretKey := e.minioCreds()
+	set("MINIO_ACCESS_KEY", accessKey)
+	set("MINIO_SECRET_KEY", secretKey)
 	set("CORAZA_MODE", e.corazaMode())
-	// No default here: the names are backend.env's to give, and the one fallback
-	// lives in minio/entrypoint.sh.
+
 	benv := e.backendEnv()
 	set("FILE_UPLOAD_BUCKET", strings.TrimSpace(benv["FILE_UPLOAD_BUCKET"]))
 	set("FACILITY_S3_BUCKET", strings.TrimSpace(benv["FACILITY_S3_BUCKET"]))
@@ -80,19 +56,16 @@ func (e *Clinic) baseEnv() []string {
 	return env
 }
 
-// minioCreds returns MinIO's access key and secret from backend.env, falling
-// back to MinIO's own defaults only when the file cannot be read (before setup,
-// when no container will be started anyway).
-func (e *Clinic) minioCreds() [2]string {
-	out := [2]string{"minioadmin", "minioadmin"}
+func (e *Clinic) minioCreds() (accessKey, secretKey string) {
+	accessKey, secretKey = "minioadmin", "minioadmin"
 	env := e.backendEnv()
-	if v := env["MINIO_ACCESS_KEY"]; v != "" {
-		out[0] = v
+	if v := strings.TrimSpace(env["BUCKET_KEY"]); v != "" {
+		accessKey = v
 	}
-	if v := env["MINIO_SECRET_KEY"]; v != "" {
-		out[1] = v
+	if v := strings.TrimSpace(env["BUCKET_SECRET"]); v != "" {
+		secretKey = v
 	}
-	return out
+	return accessKey, secretKey
 }
 
 func (e *Clinic) backendEnv() map[string]string {
@@ -121,9 +94,6 @@ func (e *Clinic) corazaMode() string {
 	return "Off"
 }
 
-// workdir returns the install dir only if it exists - before setup it doesn't, and a
-// command with a missing Dir fails to start (which silently broke the pre-setup
-// scutil/hostname checks). Empty means "inherit the current dir".
 func (e *Clinic) workdir() string {
 	if st, err := os.Stat(e.InstallDir); err == nil && st.IsDir() {
 		return e.InstallDir
@@ -131,9 +101,6 @@ func (e *Clinic) workdir() string {
 	return ""
 }
 
-func newCmd(name string, args ...string) *exec.Cmd { return proc.Command(name, args...) }
-
-// Runner exposes the engine's configured command runner.
 func (e *Clinic) Runner() proc.Runner {
 	return proc.Runner{Dir: e.workdir(), Env: e.baseEnv(), Log: e.Log}
 }
@@ -150,8 +117,6 @@ func (e *Clinic) captureLines(name string, args ...string) []string {
 	return e.Runner().Lines(name, args...)
 }
 
-// dc runs `docker compose <args>` (streamed). Project name comes from the
-// compose `name:` key - we never pass -v, so volumes/data always survive.
 func (e *Clinic) dc(args ...string) error {
 	return e.run(nil, "docker", append([]string{"compose"}, args...)...)
 }
@@ -171,10 +136,8 @@ func (e *Clinic) backupDir() string {
 	return filepath.Join(home, "Desktop", "care-db-backups")
 }
 
-// Label is the bare host label to advertise, without ".local" (e.g. "care").
 func (e *Clinic) Label() string { return e.mdnsName() }
 
-// Builder binds an image builder to this engine's settings and runner.
 func (e *Clinic) Builder() *compose.Builder {
 	return compose.NewBuilder(e.Runner(), e.InstallDir, e.Pins, e.Log)
 }

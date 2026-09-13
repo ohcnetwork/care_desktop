@@ -1,10 +1,7 @@
 package clinic
 
-// pruneBuildCache reclaims what our image builds left in Docker's build cache -
-// by far the largest thing an install leaves behind (tens of GB, dwarfing the
-// images themselves). The cache is machine-wide and carries no project label, so
-// there is no way to remove only ours; it runs under RemoveImages only, which is
-// already the "take the downloads with it" choice.
+import "github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
+
 func (e *Clinic) pruneBuildCache() {
 	e.logln("Pruning Docker build cache (shared with any other projects on this computer)...")
 	if err := e.run(nil, "docker", "builder", "prune", "-f"); err != nil {
@@ -24,7 +21,7 @@ func (e *Clinic) uninstallImages() []string {
 
 // removeImage deletes one image quietly, ignoring "not found" / "still in use".
 func (e *Clinic) removeImage(tag string) {
-	cmd := newCmd("docker", "image", "rm", tag)
+	cmd := proc.Command("docker", "image", "rm", tag)
 	cmd.Env = e.baseEnv()
 	cmd.Dir = e.workdir()
 	if cmd.Run() != nil {

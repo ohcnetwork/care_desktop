@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -123,6 +125,9 @@ func (a *App) askBeforeQuit() string {
 
 func (a *App) clinicRunning() bool {
 	if !a.loadConfig().SetupDone {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(a.installDir(), "docker-compose.yml")); err != nil {
 		return false
 	}
 	out, err := a.engine().Status()
