@@ -1,11 +1,19 @@
 package prereq
 
 import (
+	"context"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 )
+
+// probeTimeout bounds the prerequisite checks. GetState calls DockerCheck on every
+// poll, and `docker version` blocks for as long as the daemon takes to answer -
+// which, while Docker Desktop is starting, is many seconds. Untimed, the wizard
+// Docker row simply froze.
+const probeTimeout = 5 * time.Second
 
 type Status struct {
 	OK      bool   `json:"ok"`
@@ -19,7 +27,9 @@ type Status struct {
 func DockerCheck(run proc.Runner) Status {
 	// Server.Os comes back in the same call: on Windows the daemon can be pointed
 	// at Windows containers, and knowing that early is worth the extra field.
-	cmd := proc.Command("docker", "version", "--format", "{{.Server.Os}}/{{.Server.Version}}")
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	cmd := proc.CommandContext(ctx, "docker", "version", "--format", "{{.Server.Os}}/{{.Server.Version}}")
 	cmd.Env = run.Env
 	out, err := cmd.Output()
 	missing, stopped := dockerAdvice()
@@ -76,7 +86,9 @@ func wrongContainerOS(serverOS string) string {
 // hasCompose reports whether the `docker compose` v2 plugin is available - often
 // missing on non-Desktop installs, and the stack can't come up without it.
 func hasCompose(run proc.Runner) bool {
-	cmd := proc.Command("docker", "compose", "version")
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	cmd := proc.CommandContext(ctx, "docker", "compose", "version")
 	cmd.Env = run.Env
 	return cmd.Run() == nil
 }
@@ -87,7 +99,9 @@ func isNotFound(err error) bool {
 }
 
 func GitCheck(run proc.Runner) Status {
-	cmd := proc.Command("git", "--version")
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	cmd := proc.CommandContext(ctx, "git", "--version")
 	cmd.Env = run.Env
 	out, err := cmd.Output()
 	if err == nil {

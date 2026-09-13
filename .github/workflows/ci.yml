@@ -23,11 +23,10 @@ jobs:
           go-version-file: app/go.mod
           cache-dependency-path: app/go.sum
 
-      # The Wails build embeds app/install, which is staged from the repo root by
-      # the frontend build. A placeholder is enough for `go build` and `go vet`.
-      - name: Stage embed placeholder
-        run: mkdir -p install && touch install/.keep
-
+      # No staging step on purpose. app/install/.gitkeep is tracked, so
+      # //go:embed all:install resolves straight from the checkout - and if that
+      # placeholder ever stops being tracked, this job must fail the way a fresh
+      # clone does rather than paper over it with a runner-local file.
       - name: Build (host)
         run: go build ./...
 

@@ -53,6 +53,9 @@ func (a *App) startAdvertise() {
 		return
 	}
 	name := a.loadConfig().MDNSName
+	if name == "" {
+		return
+	}
 	adv, err := mdns.Advertise(name)
 	if err != nil {
 		a.logln("mDNS: couldn't advertise " + name + ".local (" + err.Error() + ")")

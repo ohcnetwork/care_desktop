@@ -21,10 +21,13 @@ type Health struct {
 	Detail string `json:"detail"`
 }
 
-// Ping hits https://localhost/ping/ with a short timeout. The cert is Caddy's
+// Ping hits https://localhost/ping/ with a short timeout. Deliberately localhost
+// rather than the clinic's name: this asks "is Caddy answering on this machine",
+// which must not also depend on mDNS resolving <name>.local - that is a separate
+// failure with its own check. The cert is Caddy's
 // self-signed internal CA, so verification is skipped - this is a same-host
 // liveness probe, not a trust decision.
-func Ping(host string) Health {
+func Ping() Health {
 	client := &http.Client{
 		Timeout:   3 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, // ponytail: local self-signed cert, host probe only
@@ -50,7 +53,7 @@ func Wait(log func(string), host string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	last := Health{Detail: "nothing answering yet"}
 	for n := 1; ; n++ {
-		if last = Ping(host); last.Active {
+		if last = Ping(); last.Active {
 			return nil
 		}
 		if time.Now().After(deadline) {

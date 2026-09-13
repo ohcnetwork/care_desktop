@@ -36,6 +36,12 @@ func Command(name string, args ...string) *exec.Cmd {
 	return c
 }
 
+func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
+	c := exec.CommandContext(ctx, name, args...)
+	hideConsole(c)
+	return c
+}
+
 func (r Runner) cmd(name string, args ...string) *exec.Cmd {
 	c := Command(name, args...)
 	c.Dir = r.Dir

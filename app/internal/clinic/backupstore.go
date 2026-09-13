@@ -8,13 +8,13 @@ const composeProject = "care-desktop"
 
 func (e *Clinic) Backups() *backup.Store {
 	s := &backup.Store{
-		Dir:        e.InstallDir,
-		BackupDir:  e.backupDir(),
-		Passphrase: e.BackupPassword,
-		Image:      e.Pins.BackupImage,
-		Host:       e.host(),
-		Log:        e.Log,
-		Migrate:    e.migrate,
+		Dir:       e.InstallDir,
+		BackupDir: e.backupDir(),
+		Image:     e.Pins.BackupImage,
+		Host:      e.host(),
+		Project:   composeProject,
+		Log:       e.Log,
+		Migrate:   e.migrate,
 	}
 	s.EnsureImage = e.Builder().EnsureBackupImage
 	return backup.New(e.Runner(), s)

@@ -13,8 +13,6 @@ import (
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 )
 
-// composeProject is the compose `name:` - volumes are named "<project>_<volume>".
-
 // Backup is one restorable point in the backup folder: a database dump and, for
 // daily backups, the matching uploaded-files archive (same timestamp). Manual
 // ("Backup now") dumps are DB-only, so FilesArchive is empty.
@@ -269,7 +267,7 @@ pg_restore -h "$H" -U "$U" -d "$DB" --no-owner --no-privileges "$RESTORE_FILE"`
 	// and its mounts are fixed at create time, so use a throwaway container with
 	// the source folder mounted there instead. --env-file gives it the same
 	// POSTGRES_* the sidecar gets from compose.
-	args := []string{"run", "--rm", "--network", composeProject,
+	args := []string{"run", "--rm", "--network", s.Project,
 		"--env-file", filepath.Join(s.Dir, "backend.env")}
 	if encrypted {
 		args = append(args, "-e", "BACKUP_PASS="+passphrase)
@@ -304,7 +302,7 @@ func (s *Store) waitForDB() {
 func (s *Store) restoreFiles(srcDir, archive, passphrase string) error {
 	s.logln("Restoring uploaded files from " + archive + " ...")
 	_ = s.dc("stop", "minio")
-	vol := composeProject + "_minio-data"
+	vol := s.Project + "_minio-data"
 	encrypted := strings.HasSuffix(archive, ".enc")
 	src := "/backups/" + archive
 	// Resolve the archive to a readable plaintext path first; decryption happens

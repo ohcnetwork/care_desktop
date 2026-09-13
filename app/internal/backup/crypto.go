@@ -17,13 +17,11 @@ func (s *Store) certPath() string   { return filepath.Join(s.keysDir(), "backup-
 func (s *Store) encKeyPath() string { return filepath.Join(s.keysDir(), "backup-key.pem.enc") }
 func (s *Store) encKeyName() string { return "backup-key.pem.enc" }
 
-// backupEncryptionOn: encryption is on iff the public cert exists.
-func (s *Store) backupEncryptionOn() bool {
+// BackupEncryptionOn: encryption is on iff the public cert exists.
+func (s *Store) BackupEncryptionOn() bool {
 	_, err := os.Stat(s.certPath())
 	return err == nil
 }
-
-func (s *Store) BackupEncryptionOn() bool { return s.backupEncryptionOn() }
 
 // privateKeyLocation prefers the backup-folder copy (pairs with those backups, so a
 // carried folder restores anywhere); the install dir copy is the fallback.
@@ -58,7 +56,7 @@ func (s *Store) GenBackupKeypair(passphrase string) error {
 	if err := s.EnsureImage(); err != nil {
 		return err
 	}
-	if s.backupEncryptionOn() {
+	if s.BackupEncryptionOn() {
 		if s.keyUnlocks(passphrase) {
 			return nil // same password - keep the existing keypair
 		}
