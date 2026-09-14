@@ -83,6 +83,7 @@ cd care-desktop && care setup && care start
 | `setup/` | the `https://care.local/setup` install page that hands the local CA to new devices |
 | `load_test_fixtures.sh` | dev-only: seed the running backend with CARE's sample data ([see below](#loading-sample-data-for-testing)) |
 | `minio/`, `scripts/` | MinIO bucket setup + the daily backup loop (run inside containers) |
+| `packaging/` | the `.deb` recipe + Linux desktop entry ([building.md](docs/building.md)) |
 | `docs/` | all documentation |
 
 The repo-root files are the **single source of truth**; the app embeds them at build
