@@ -13,9 +13,6 @@ import (
 )
 
 func (a *App) installDir() string {
-	if cfg := a.loadConfig(); cfg.InstallDir != "" {
-		return cfg.InstallDir
-	}
 	base, err := os.UserConfigDir()
 	if err != nil {
 		base, _ = os.UserHomeDir()

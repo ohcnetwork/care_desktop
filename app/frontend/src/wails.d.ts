@@ -47,8 +47,6 @@ declare global {
             mdnsName: string,
             adminPassword: string,
             backupPassword: string,
-            rememberBackup: boolean,
-            installDir: string,
             backupDir: string,
           ): Promise<void>;
           CleanupFailedInstall(): Promise<void>;
@@ -61,17 +59,8 @@ declare global {
           SetBackupDir(dir: string): Promise<string>;
           ChooseBackupFile(): Promise<string>;
           InspectBackupFile(path: string): Promise<ImportedBackup>;
-          RestoreFromFile(
-            path: string,
-            passphrase: string,
-            remember: boolean,
-          ): Promise<void>;
-          RestoreBackup(
-            dbDump: string,
-            filesArchive: string,
-            passphrase: string,
-            remember: boolean,
-          ): Promise<void>;
+          RestoreFromFile(path: string, passphrase: string): Promise<void>;
+          RestoreBackup(dbDump: string, filesArchive: string, passphrase: string): Promise<void>;
           RunUninstall(removeImages: boolean, removeBackups: boolean): Promise<void>;
           OpenURL(url: string): Promise<void>;
           ChooseFolder(title: string): Promise<string>;

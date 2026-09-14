@@ -19,7 +19,7 @@ func (a *App) ListBackups() ([]backup.Backup, error) {
 	return a.engine().Backups().ListBackups()
 }
 
-func (a *App) RestoreBackup(dbDump, filesArchive, passphrase string, remember bool) error {
+func (a *App) RestoreBackup(dbDump, filesArchive, passphrase string) error {
 	if _, err := os.Stat(filepath.Join(a.installDir(), "docker-compose.yml")); err != nil {
 		return errors.New("not set up yet - run the first-time setup")
 	}
@@ -28,11 +28,7 @@ func (a *App) RestoreBackup(dbDump, filesArchive, passphrase string, remember bo
 	}
 	e := a.engine()
 	return a.run(func() error {
-		if err := e.Backups().Restore(dbDump, filesArchive, passphrase); err != nil {
-			return err
-		}
-		rememberPassword(passphrase, remember)
-		return nil
+		return e.Backups().Restore(dbDump, filesArchive, passphrase)
 	}, false, "restore")
 }
 
@@ -136,7 +132,7 @@ func (a *App) InspectBackupFile(path string) (ImportedBackup, error) {
 	return out, nil
 }
 
-func (a *App) RestoreFromFile(path, passphrase string, remember bool) error {
+func (a *App) RestoreFromFile(path, passphrase string) error {
 	if _, err := os.Stat(filepath.Join(a.installDir(), "docker-compose.yml")); err != nil {
 		return errors.New("not set up yet - run the first-time setup")
 	}
@@ -153,11 +149,7 @@ func (a *App) RestoreFromFile(path, passphrase string, remember bool) error {
 	}
 	e := a.engine()
 	return a.run(func() error {
-		if err := e.Backups().RestoreFrom(found.Dir, found.DBDump, found.FilesArchive, passphrase); err != nil {
-			return err
-		}
-		rememberPassword(passphrase, remember)
-		return nil
+		return e.Backups().RestoreFrom(found.Dir, found.DBDump, found.FilesArchive, passphrase)
 	}, false, "restore")
 }
 

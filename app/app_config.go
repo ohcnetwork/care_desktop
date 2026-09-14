@@ -11,7 +11,6 @@ const appDirName = "care-desktop"
 type Config struct {
 	SetupDone   bool   `json:"setup_done"`
 	MDNSName    string `json:"mdns_name"`
-	InstallDir  string `json:"install_dir"`
 	BackupDir   string `json:"backup_dir"`
 	AdminPwHash string `json:"admin_pw_hash"`
 }

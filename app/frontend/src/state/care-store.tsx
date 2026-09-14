@@ -306,7 +306,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
       );
       toast("Restore started — data will be replaced");
       try {
-        await bridge.RestoreBackup(backup.db_dump, backup.files_archive, passphrase, false);
+        await bridge.RestoreBackup(backup.db_dump, backup.files_archive, passphrase);
       } catch (e) {
         log(`error: ${errorText(e)}`);
         setBusy(false);
@@ -393,8 +393,6 @@ export function CareProvider({ children }: { children: ReactNode }) {
           params.host,
           params.adminPassword,
           params.backupPassword,
-          true,
-          "",
           params.backupDir,
         )
         .catch((e) => {

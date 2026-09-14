@@ -38,7 +38,7 @@ func main() {
 		fatal(err)
 	}
 
-	appLog.Header(app.pins.AppVersion, cfg.InstallDir, cfg.MDNSName)
+	appLog.Header(app.pins.AppVersion, app.installDir(), cfg.MDNSName)
 	for _, line := range app.pins.Summary() {
 		appLog.Write(line)
 	}

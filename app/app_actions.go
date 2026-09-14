@@ -126,7 +126,7 @@ func actionFunc(e *clinic.Clinic, action string) func() error {
 	return nil
 }
 
-func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberBackup bool, installDir, backupDir string) error {
+func (a *App) RunSetup(mdnsName, adminPassword, backupPassword, backupDir string) error {
 	if err := ValidatePassword(adminPassword); err != nil {
 		return err
 	}
@@ -134,11 +134,8 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 		return err
 	}
 
-	if rememberBackup {
-		if err := backup.StorePassword(backupPassword); err != nil {
-			return fmt.Errorf("couldn't save the backup password to this computer's "+
-				"keychain: %w", err)
-		}
+	if err := backup.StorePassword(backupPassword); err != nil {
+		return fmt.Errorf("couldn't save the backup password to this computer's keychain: %w", err)
 	}
 
 	host := mdns.Label(mdnsName)
@@ -153,9 +150,6 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 		return fmt.Errorf("couldn't secure the admin password: %w", err)
 	}
 	cfg.AdminPwHash = string(h)
-	if strings.TrimSpace(installDir) != "" {
-		cfg.InstallDir = filepath.Join(strings.TrimSpace(installDir), appDirName, installSubdir)
-	}
 	if strings.TrimSpace(backupDir) != "" {
 		cfg.BackupDir = filepath.Join(strings.TrimSpace(backupDir), "care-db-backups")
 	}
@@ -169,7 +163,7 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword string, rememberB
 	if err := a.saveConfig(cfg); err != nil {
 		return err
 	}
-	a.restartAdvertise() // pick up the chosen name (usually still care.local)
+	a.restartAdvertise()
 	if _, err := a.ensureInstallDir(); err != nil {
 		return err
 	}

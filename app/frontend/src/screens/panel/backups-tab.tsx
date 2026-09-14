@@ -273,7 +273,7 @@ function ImportCard() {
                   setConfirming(false);
                   toast("Restore started — data will be replaced");
                   void bridge
-                    .RestoreFromFile(found.path, passphrase, false)
+                    .RestoreFromFile(found.path, passphrase)
                     .catch((e) => log(`error: ${errorText(e)}`));
                 }}
               >
