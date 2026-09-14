@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/ohcnetwork/care_desktop/app/internal/backup"
+	"github.com/ohcnetwork/care_desktop/app/internal/clinic"
 	"github.com/ohcnetwork/care_desktop/app/internal/residue"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -27,7 +28,7 @@ func (a *App) ScanResidue() residue.Report {
 	return residue.Scan(residue.Options{
 		Runner:       e.Runner(),
 		Project:      e.Project(),
-		InstallDir:   e.InstallDir,
+		InstallDir:   a.residueInstallDir(e),
 		ConfigPath:   a.configPath(),
 		Images:       e.Images(),
 		StoredSecret: backup.HasPassword(),
@@ -58,12 +59,19 @@ func (a *App) PurgeResidue() error {
 	for _, t := range before.Traces {
 		items += "\n  • " + t.Label + " — " + t.Detail
 	}
+
+	kept := "\n\nYour backups are NOT touched."
+	if dir := a.loadConfig().BackupDir; dir != "" {
+		kept = "\n\nYour backups in " + dir + " are NOT touched."
+	}
 	sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
 		Type:  wruntime.QuestionDialog,
 		Title: "Remove the earlier CARE Desktop?",
 		Message: "This computer still has these from an earlier CARE Desktop:\n" + items +
-			"\n\nRemoving them deletes that installation's clinic data, and cannot be undone. " +
-			"Backups are kept.\n\nYour computer needs this to be clean before a new clinic can be set up.",
+			"\n\nEverything above is deleted - clinic data, images, settings, installed files, " +
+			"and this app's log files. " +
+			"This cannot be undone." + kept +
+			"\n\nYour computer needs to be clean before a new clinic can be set up.",
 		Buttons:       []string{"Remove everything", "Cancel"},
 		DefaultButton: "Cancel",
 		CancelButton:  "Cancel",
@@ -73,7 +81,9 @@ func (a *App) PurgeResidue() error {
 	}
 
 	a.logln("Removing the earlier CARE Desktop from this computer...")
-	if err := a.engine().Purge(); err != nil {
+	e := a.engine()
+	e.InstallDir = a.residueInstallDir(e)
+	if err := e.Purge(); err != nil {
 		return err
 	}
 	// The keychain entry is the app's, not the engine's - the engine has no
@@ -81,14 +91,19 @@ func (a *App) PurgeResidue() error {
 	backup.ForgetPassword()
 	a.forgetConfig()
 
+	if err := a.log.PurgeFolder(); err != nil {
+		a.logln("note: couldn't remove the old log files (" + err.Error() + ")")
+	}
+
 	after := a.ScanResidue()
 	a.reportPurge(after)
 	return nil
 }
 
-// reportPurge is the "you're good to go" (or "here's what I couldn't reach")
-// pop-up. A silent finish would leave the operator staring at a row that only
-// just turned green, unsure whether it worked.
+func (a *App) residueInstallDir(e *clinic.Clinic) string {
+	return residue.InstallDirFrom(e.Runner(), e.Project(), e.InstallDir)
+}
+
 func (a *App) reportPurge(after residue.Report) {
 	if after.Clean {
 		_, _ = wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{

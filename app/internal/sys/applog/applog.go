@@ -101,6 +101,35 @@ func (l *Logger) Close() {
 	l.f = nil
 }
 
+func (l *Logger) PurgeFolder() error {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	dir := ""
+	if l.path != "" {
+		dir = filepath.Dir(l.path)
+	}
+	if l.f != nil {
+		_ = l.f.Close()
+		l.f = nil
+	}
+	l.mu.Unlock()
+
+	if dir == "" {
+		return nil
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+
+	fresh := openWithDir(dir)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.f, l.path, l.size = fresh.f, fresh.path, fresh.size
+	return nil
+}
+
 func (l *Logger) Header(version, installDir, clinicName string) {
 	l.Writef("CARE Desktop %s · %s/%s · Go %s", version, runtime.GOOS, runtime.GOARCH, runtime.Version())
 	l.Writef("install dir: %s", fallback(installDir, "(none yet)"))

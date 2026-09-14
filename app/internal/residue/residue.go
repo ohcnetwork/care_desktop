@@ -1,13 +1,3 @@
-// Package residue finds what an earlier CARE Desktop left on this computer.
-//
-// It exists because a fresh install onto a machine that still carries pieces of
-// an old one fails in ways that are hard to read: a leftover data volume gets
-// re-attached and the new install comes up holding the old clinic's patients, a
-// stale hosts entry points the browser at nothing, an old root certificate makes
-// the new one look untrusted. Detecting that up front, as one more prerequisite,
-// turns those into a single red row with a button.
-//
-// Detection never elevates and never changes anything. See docs/architecture.md.
 package residue
 
 import (
@@ -23,35 +13,26 @@ import (
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/trust"
 )
 
-// Trace is one thing an earlier install left behind.
 type Trace struct {
 	ID     string `json:"id"`
 	Label  string `json:"label"`
 	Detail string `json:"detail"`
 }
 
-// Report is the whole scan. Clean is the only thing the wizard gates on; Traces
-// is what it lists, so the operator can see what is about to be removed.
 type Report struct {
 	Clean  bool    `json:"clean"`
 	Traces []Trace `json:"traces"`
 }
 
-// Options is what the scan needs to know about this machine. Every field is
-// read-only.
 type Options struct {
 	Runner       proc.Runner
-	Project      string   // compose project label, e.g. care-desktop
-	InstallDir   string   // where an install would have unpacked itself
-	ConfigPath   string   // the app's own config.json
-	Images       []string // every image tag an install builds or pulls
-	StoredSecret bool     // a backup password is in the OS secret store
+	Project      string
+	InstallDir   string
+	ConfigPath   string
+	Images       []string
+	StoredSecret bool
 }
 
-// Scan looks for every trace an install can leave. Backups are deliberately not
-// scanned: they are the recovery data, they are useless to a fresh install
-// rather than harmful to it, and a "clean up" step that deleted them would be
-// indefensible. Purge leaves them alone for the same reason.
 func Scan(o Options) Report {
 	var traces []Trace
 	add := func(id, label, detail string) {
@@ -63,8 +44,7 @@ func Scan(o Options) Report {
 	if n := len(o.Runner.Lines("docker", "ps", "-aq", "--filter", label)); n > 0 {
 		add("containers", "Clinic containers", plural(n, "container", "containers")+" from an earlier install")
 	}
-	// The one that silently corrupts a fresh install: compose re-attaches a volume
-	// whose name matches, so the "new" clinic comes up holding the old data.
+
 	if n := len(o.Runner.Lines("docker", "volume", "ls", "-q", "--filter", label)); n > 0 {
 		add("volumes", "Old clinic data", plural(n, "data volume", "data volumes")+" from an earlier install")
 	}
@@ -75,7 +55,7 @@ func Scan(o Options) Report {
 		add("images", "Clinic images", plural(n, "Docker image", "Docker images")+" from an earlier install")
 	}
 
-	if _, err := os.Stat(filepath.Join(o.InstallDir, "docker-compose.yml")); err == nil {
+	if hasComposeFile(o.InstallDir) {
 		add("install-dir", "Installed files", o.InstallDir)
 	}
 	if o.ConfigPath != "" && proc.FileExists(o.ConfigPath) {
@@ -101,9 +81,28 @@ func Scan(o Options) Report {
 	return Report{Clean: len(traces) == 0, Traces: traces}
 }
 
-// presentImages returns the subset of tags that exist locally. One `docker
-// images` call rather than an inspect per tag: an install has nine tags, and on
-// a cold daemon nine round trips is a visible stall in the wizard.
+func InstallDirFrom(run proc.Runner, project, configured string) string {
+	if hasComposeFile(configured) {
+		return configured
+	}
+	for _, dir := range run.Lines("docker", "ps", "-a",
+		"--filter", "label=com.docker.compose.project="+project,
+		"--format", `{{index .Labels "com.docker.compose.project.working_dir"}}`) {
+		if dir = strings.TrimSpace(dir); hasComposeFile(dir) {
+			return dir
+		}
+	}
+	return configured
+}
+
+func hasComposeFile(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(dir, "docker-compose.yml"))
+	return err == nil
+}
+
 func presentImages(run proc.Runner, tags []string) []string {
 	have := map[string]bool{}
 	for _, line := range run.Lines("docker", "images", "--format", "{{.Repository}}:{{.Tag}}") {

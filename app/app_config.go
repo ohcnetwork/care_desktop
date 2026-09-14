@@ -43,5 +43,7 @@ func (a *App) saveConfig(cfg Config) error {
 }
 
 func (a *App) forgetConfig() {
-	_ = os.Remove(configPath())
+	p := configPath()
+	_ = os.Remove(p)
+	_ = os.Remove(filepath.Dir(p))
 }
