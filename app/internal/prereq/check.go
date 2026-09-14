@@ -44,7 +44,7 @@ func dockerAdvice() (missing, stopped string) {
 	switch runtime.GOOS {
 	case "windows":
 		return "Docker Desktop is not installed.",
-			"Docker Desktop is installed but not running."
+			"Docker Desktop is installed but not running. If you just installed it, restart this computer."
 	case "darwin":
 		return "Docker Desktop is not installed.",
 			"Docker Desktop is installed but not running."

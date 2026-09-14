@@ -57,6 +57,15 @@ export function SetupScreen({
   const adminStrength = usePasswordStrength(form.adminPassword);
   const backupStrength = usePasswordStrength(form.backupPassword);
 
+  // Every re-check asks about the restart, not just the one straight after an
+  // install: the operator can put the restart off, and until they do it Docker
+  // cannot start, so pressing "Check again" has to keep saying so.
+  const verify = useCallback(async () => {
+    await recheckAll();
+    const plan = await bridge.RestartPlan();
+    setRestart(plan.needed ? plan : null);
+  }, [recheckAll]);
+
   const hostOk = hostProblem === "";
   const adminDone =
     adminStrength.strong && form.adminConfirm !== "" && form.adminConfirm === form.adminPassword;
@@ -234,23 +243,14 @@ export function SetupScreen({
                 </InputBox>
               </Field>
 
-              <CheckRows
-                checks={checks}
-                onDone={async () => {
-                  await recheckAll();
-                  // Asked only here, right after an install: a restart Windows
-                  // wanted for its own reasons is not ours to nag about.
-                  const plan = await bridge.RestartPlan();
-                  if (plan.needed) setRestart(plan);
-                }}
-              />
+              <CheckRows checks={checks} onDone={() => void verify()} />
 
               <div className="flex items-center gap-2.5">
                 <Button
                   onClick={(e) => {
                     e.stopPropagation();
                     setVerifyNote("");
-                    void recheckAll();
+                    void verify();
                   }}
                 >
                   Check again
