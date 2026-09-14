@@ -68,7 +68,5 @@ export type CarePlugin = {
   configs?: Record<string, unknown>;
 };
 
-export type FrontendPlugin = { slug: string; meta: Record<string, unknown> };
-
-/** Which of the two .env files / plugin sets an editor is pointed at. */
+/** Which of the two .env files an editor is pointed at. */
 export type Section = "backend" | "frontend";

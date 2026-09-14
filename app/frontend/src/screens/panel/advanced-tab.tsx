@@ -23,7 +23,6 @@ import { PluginTable } from "./plugin-table";
 
 export function AdvancedTab() {
   const [unlocked, setUnlocked] = useState(false);
-  // Both editors follow one switch, the way the panel has always worked.
   const [section, setSection] = useState<Section>("backend");
 
   if (!unlocked) return <AdminGate onUnlock={() => setUnlocked(true)} />;
@@ -52,8 +51,7 @@ export function AdvancedTab() {
             <SectionTitle title="Plugins" summary="Extra features for CARE" />
           </AccordionTrigger>
           <AccordionContent>
-            <SectionSwitch section={section} onChange={setSection} />
-            <PluginTable key={section} section={section} />
+            <PluginTable />
           </AccordionContent>
         </AccordionItem>
 

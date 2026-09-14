@@ -6,7 +6,6 @@ import type {
   Backup,
   CarePlugin,
   DockerStatus,
-  FrontendPlugin,
   Health,
   ImportedBackup,
   NameStatus,
@@ -57,8 +56,6 @@ declare global {
           WriteEnv(name: string, content: string): Promise<void>;
           ReadPlugins(): Promise<CarePlugin[]>;
           SavePlugins(plugins: CarePlugin[]): Promise<void>;
-          ReadFrontendPlugins(): Promise<FrontendPlugin[]>;
-          SaveFrontendPlugins(plugins: FrontendPlugin[]): Promise<void>;
           ListBackups(): Promise<Backup[]>;
           GetBackupDir(): Promise<string>;
           SetBackupDir(dir: string): Promise<string>;

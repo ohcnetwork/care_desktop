@@ -25,26 +25,3 @@ func (a *App) SavePlugins(plugins []plugins.Plugin) error {
 	}
 	return a.engine().Plugins().WritePlugins(plugins)
 }
-
-// --- frontend plugins (CARE plug_config table, synced with /admin/apps) ------
-//
-// Unlike backend plugins, frontend plugins load at runtime from CARE's plug_config
-// table, so a toggle is a single database write - no rebuild. The engine reads and
-// writes those rows directly, the same ones CARE's own Apps page edits, so the two
-// panels stay in sync.
-
-func (a *App) ReadFrontendPlugins() ([]plugins.FrontendPlugin, error) {
-	if _, err := os.Stat(filepath.Join(a.installDir(), "docker-compose.yml")); err != nil {
-		return []plugins.FrontendPlugin{}, nil // not set up yet
-	}
-	return a.engine().Plugins().ReadFrontendPlugins()
-}
-
-// SaveFrontendPlugins writes the whole plugin list to CARE's plug_config table
-// (add + edit + remove). Instant - no rebuild, since CARE loads them at runtime.
-func (a *App) SaveFrontendPlugins(plugins []plugins.FrontendPlugin) error {
-	if _, err := os.Stat(filepath.Join(a.installDir(), "docker-compose.yml")); err != nil {
-		return errors.New("not set up yet - run the first-time setup")
-	}
-	return a.engine().Plugins().WriteFrontendPlugins(plugins)
-}

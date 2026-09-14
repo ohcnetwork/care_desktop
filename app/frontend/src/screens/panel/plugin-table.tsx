@@ -1,7 +1,6 @@
 // Backend plugins are pip packages baked into the backend image
-// (ADDITIONAL_PLUGS, rebuild on save). Frontend plugins are CARE plug_config
-// rows the browser loads at runtime (a database write, no rebuild). Same table,
-// two adapters.
+// (ADDITIONAL_PLUGS), so saving rebuilds it. Frontend plugins are not here on
+// purpose: CARE's own admin pages already manage them, live, without a rebuild.
 import { ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -19,7 +18,7 @@ import { bridge } from "@/lib/bridge";
 import { errorText, firstLine } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useCare } from "@/state/care-store";
-import type { CarePlugin, FrontendPlugin, Section } from "@/types";
+import type { CarePlugin } from "@/types";
 
 type ConfigRow = { key: string; value: string };
 type Row = {
@@ -28,14 +27,12 @@ type Row = {
   url: string;
   version: string;
   configs: ConfigRow[];
-  meta?: Record<string, unknown>;
 };
 type CatalogEntry = { value: string; label: string; row: Omit<Row, "uid"> };
 
 // Empty on purpose: this clinic ships no suggested plugins. Add entries here to
 // offer them in the picker.
-const BACKEND_CATALOG: CatalogEntry[] = [];
-const FRONTEND_CATALOG: CatalogEntry[] = [];
+const CATALOG: CatalogEntry[] = [];
 
 function parseConfigValue(raw: string): unknown {
   const t = raw.trim();
@@ -61,91 +58,37 @@ function serializeBackend(rows: Row[]): CarePlugin[] {
     });
 }
 
-function serializeFrontend(rows: Row[]): FrontendPlugin[] {
-  return rows
-    .filter((p) => p.name.trim() !== "" && p.url.trim() !== "")
-    .map((p) => {
-      const meta: Record<string, unknown> = {
-        ...(p.meta ?? {}),
-        name: p.name.trim(),
-        url: p.url.trim(),
-      };
-      const config: Record<string, unknown> = {};
-      for (const c of p.configs) {
-        if (c.key.trim() !== "") config[c.key.trim()] = parseConfigValue(c.value);
-      }
-      if (Object.keys(config).length) meta.config = config;
-      else delete meta.config;
-      return { slug: p.name.trim(), meta };
-    });
-}
-
 const CELL =
   "h-[30px] rounded-sm border-transparent bg-transparent px-2 font-mono text-[12.5px] hover:border-line focus-visible:border-brand focus-visible:bg-white";
 
-export function PluginTable({ section }: { section: Section }) {
+export function PluginTable() {
   const { busy, runAction, log } = useCare();
   const [rows, setRows] = useState<Row[]>([]);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
-  const [status, setStatus] = useState("");
-  // Frontend saves overwrite the whole plug_config set, so a save without a
-  // clean baseline read could silently delete rows. Track whether we got one.
-  const [frontendLoaded, setFrontendLoaded] = useState(false);
   const nextUid = useRef(0);
 
   const take = () => nextUid.current++;
 
-  const loadFrontend = useCallback(async (): Promise<Row[]> => {
-    const raw = (await bridge.ReadFrontendPlugins()) ?? [];
-    return raw.map((p) => {
-      const meta = (p.meta ?? {}) as Record<string, unknown>;
-      const cfg = (meta.config ?? {}) as Record<string, unknown>;
-      return {
-        uid: nextUid.current++,
-        name: p.slug,
-        url: typeof meta.url === "string" ? meta.url : "",
-        version: "",
-        configs: Object.entries(cfg).map(([key, value]) => ({ key, value: String(value) })),
-        meta,
-      };
-    });
-  }, []);
-
   const load = useCallback(async () => {
     setExpanded(new Set());
-    setStatus("");
-    if (section === "backend") {
-      setFrontendLoaded(false);
-      try {
-        const raw = await bridge.ReadPlugins();
-        setRows(
-          raw.map((p) => ({
-            uid: nextUid.current++,
-            name: p.name ?? "",
-            url: p.package_name ?? "",
-            version: p.version ?? "",
-            configs: Object.entries(p.configs ?? {}).map(([key, value]) => ({
-              key,
-              value: String(value),
-            })),
-          })),
-        );
-      } catch {
-        setRows([]);
-      }
-      return;
-    }
-    setFrontendLoaded(false);
-    setStatus("Checking…");
     try {
-      setRows(await loadFrontend());
-      setFrontendLoaded(true);
-      setStatus("");
-    } catch (e) {
+      const raw = await bridge.ReadPlugins();
+      setRows(
+        raw.map((p) => ({
+          uid: nextUid.current++,
+          name: p.name ?? "",
+          url: p.package_name ?? "",
+          version: p.version ?? "",
+          configs: Object.entries(p.configs ?? {}).map(([key, value]) => ({
+            key,
+            value: String(value),
+          })),
+        })),
+      );
+    } catch {
       setRows([]);
-      setStatus(firstLine(errorText(e)));
     }
-  }, [loadFrontend, section]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -173,54 +116,25 @@ export function PluginTable({ section }: { section: Section }) {
 
   const save = async () => {
     if (busy) return;
-    const backend = section === "backend";
     try {
-      if (backend) {
-        await bridge.SavePlugins(serializeBackend(rows));
-        toast("Rebuilding the backend");
-        await runAction("rebuild-backend");
-        return;
-      }
-      let current = rows;
-      if (!frontendLoaded) {
-        // The panel opened before CARE was ready, so we never got a clean
-        // snapshot. Read one now — without a baseline a save could delete rows
-        // we failed to read — then keep the operator's edits on top.
-        const fresh = await loadFrontend();
-        const bySlug = new Map(fresh.map((p) => [p.name, p]));
-        for (const p of rows) if (p.name.trim() || p.url.trim()) bySlug.set(p.name, p);
-        current = [...bySlug.values()];
-        setRows(current);
-        setFrontendLoaded(true);
-        setStatus("");
-      }
-      await bridge.SaveFrontendPlugins(serializeFrontend(current));
-      toast("Frontend plugins saved — staff refresh their browser");
-      setRows(await loadFrontend());
+      await bridge.SavePlugins(serializeBackend(rows));
+      toast("Rebuilding the backend");
+      await runAction("rebuild-backend");
     } catch (e) {
       log(`error saving plugins: ${errorText(e)}`);
       toast(firstLine(errorText(e)));
     }
   };
 
-  const catalog = section === "backend" ? BACKEND_CATALOG : FRONTEND_CATALOG;
-
   const addFromPicker = (value: string) => {
     if (value === "custom") {
       setRows((prev) => [
         ...prev,
-        {
-          uid: take(),
-          name: "",
-          url: "",
-          version: "",
-          configs: [],
-          meta: section === "frontend" ? {} : undefined,
-        },
+        { uid: take(), name: "", url: "", version: "", configs: [] },
       ]);
       return;
     }
-    const entry = catalog.find((c) => c.value === value);
+    const entry = CATALOG.find((c) => c.value === value);
     if (entry) {
       setRows((prev) => [
         ...prev,
@@ -240,9 +154,7 @@ export function PluginTable({ section }: { section: Section }) {
         </div>
 
         <div className="overflow-hidden rounded-lg border border-line">
-          {status ? (
-            <div className="p-5 text-center text-[13px] text-faint">{status}</div>
-          ) : rows.length === 0 ? (
+          {rows.length === 0 ? (
             <div className="p-5 text-center text-[13px] text-faint">No plugins yet</div>
           ) : null}
 
@@ -259,34 +171,24 @@ export function PluginTable({ section }: { section: Section }) {
                   <Input
                     className={cn(CELL, "w-[190px] flex-none text-[13px] font-semibold text-ink")}
                     spellCheck={false}
-                    placeholder={section === "backend" ? "care_hcx" : "care_hello_fe"}
+                    placeholder="care_hcx"
                     value={row.name}
                     onChange={(e) => patchRow(row.uid, { name: e.target.value })}
                   />
                   <Input
                     className={cn(CELL, "flex-1")}
                     spellCheck={false}
-                    placeholder={
-                      section === "backend"
-                        ? "git+https://github.com/org/repo.git"
-                        : "https://host/assets/remoteEntry.js"
-                    }
+                    placeholder="git+https://github.com/org/repo.git"
                     value={row.url}
                     onChange={(e) => patchRow(row.uid, { url: e.target.value })}
                   />
-                  {section === "backend" ? (
-                    <Input
-                      className={cn(CELL, "w-[90px] flex-none")}
-                      spellCheck={false}
-                      placeholder="@main"
-                      value={row.version}
-                      onChange={(e) => patchRow(row.uid, { version: e.target.value })}
-                    />
-                  ) : (
-                    <span className="w-[90px] flex-none px-2 font-mono text-[12.5px] text-faint">
-                      latest
-                    </span>
-                  )}
+                  <Input
+                    className={cn(CELL, "w-[90px] flex-none")}
+                    spellCheck={false}
+                    placeholder="@main"
+                    value={row.version}
+                    onChange={(e) => patchRow(row.uid, { version: e.target.value })}
+                  />
                   <Button
                     size="icon"
                     title="remove plugin"
@@ -366,19 +268,19 @@ export function PluginTable({ section }: { section: Section }) {
             <SelectValue placeholder="Add a plugin" />
           </SelectTrigger>
           <SelectContent className="w-auto">
-            {catalog.map((entry) => (
+            {CATALOG.map((entry) => (
               <SelectItem key={entry.value} value={entry.value}>
                 {entry.label}
               </SelectItem>
             ))}
             <SelectItem value="custom">
-              {catalog.length ? "Custom, add by URL" : "Add by URL"}
+              {CATALOG.length ? "Custom, add by URL" : "Add by URL"}
             </SelectItem>
           </SelectContent>
         </Select>
         <span className="flex-1" />
         <Button variant="primary" disabled={busy} onClick={() => void save()}>
-          {section === "backend" ? "Save and rebuild backend" : "Save frontend plugins"}
+          Save and rebuild backend
         </Button>
       </div>
     </>

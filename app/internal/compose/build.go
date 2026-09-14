@@ -65,7 +65,7 @@ func (b *Builder) BuildBackend() error {
 	df := filepath.Join(src, "docker", "prod.Dockerfile")
 	args := []string{"build", "-f", df, "-t", b.set.BackendImage,
 		"--label", builtFromLabel + "=" + b.backendBuiltFrom()}
-	if plugs := plugins.New(b.run, b.dir, b.Log).AdditionalPlugs(); plugs != "" {
+	if plugs := plugins.New(b.dir).AdditionalPlugs(); plugs != "" {
 		b.logln("Building with plugins (ADDITIONAL_PLUGS set)")
 		args = append(args, "--build-arg", "ADDITIONAL_PLUGS="+plugs)
 	}
@@ -79,7 +79,7 @@ func (b *Builder) EnsureBackendImage() error {
 
 func (b *Builder) backendBuiltFrom() string {
 	out := b.set.AppVersion + "+" + b.set.BeRef
-	if plugs := plugins.New(b.run, b.dir, b.Log).AdditionalPlugs(); plugs != "" {
+	if plugs := plugins.New(b.dir).AdditionalPlugs(); plugs != "" {
 		out += "+plugs@" + shortHash([]byte(plugs))
 	}
 	return out

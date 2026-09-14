@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 )
 
-// --- env editing ------------------------------------------------------------
-
 func (a *App) envPath(name string) (string, error) {
 	switch name {
 	case "backend":
