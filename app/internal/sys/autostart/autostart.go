@@ -1,5 +1,3 @@
-// Package autostart manages the launch-at-login entry for this application.
-// See docs/architecture.md.
 package autostart
 
 import (
@@ -26,7 +24,6 @@ func linuxDesktopPath() string {
 	return filepath.Join(home, ".config", "autostart", "care-desktop.desktop")
 }
 
-// Enabled reports whether the app is set to launch at login.
 func Enabled() bool {
 	switch runtime.GOOS {
 	case "darwin":
@@ -36,14 +33,11 @@ func Enabled() bool {
 		_, err := os.Stat(linuxDesktopPath())
 		return err == nil
 	case "windows":
-		// reg query exits 0 only if the value exists.
 		return proc.Command("reg", "query", runKey, "/v", appName).Run() == nil
 	}
 	return false
 }
 
-// Set turns launch-at-login on or off, passing --autostart so the app can bring
-// CARE up by itself.
 func Set(on bool) error {
 	exe, err := os.Executable()
 	if err != nil {

@@ -5,40 +5,13 @@ import (
 	"path/filepath"
 
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/autostart"
-	"github.com/ohcnetwork/care_desktop/app/internal/sys/hosts"
-	"github.com/ohcnetwork/care_desktop/app/internal/sys/netfix"
-	"github.com/ohcnetwork/care_desktop/app/internal/sys/trust"
 )
 
-// Project is the compose project name every container, volume, and network of an
-// install is labelled with.
 func (e *Clinic) Project() string { return composeProject }
 
-// Images is every image tag an install builds or pulls.
 func (e *Clinic) Images() []string { return e.uninstallImages() }
 
-// Purge removes every trace of an earlier CARE Desktop from this computer, so a
-// fresh install starts from nothing. It differs from Uninstall in two ways, both
-// deliberate:
-//
-//  1. It force-removes the compose project by label without first checking that
-//     an install dir with a compose file exists. Uninstall guards that check
-//     because it is torn down on behalf of one install dir, and the label is
-//     machine-wide - so an unguarded teardown there would destroy a *different*
-//     install's data. Purge is the opposite case: it is invoked from the
-//     first-run wizard, before this app owns an install, and its whole purpose is
-//     to remove whatever carries the label. There is nothing else it could hit.
-//
-//  2. It never touches the backup folder. Backups are the recovery data. They do
-//     not interfere with a fresh install, and deleting them to "clean up" would
-//     destroy the only copy of a clinic's history.
-//
-// Best-effort throughout: one failed step is logged and the rest still runs, so
-// a half-broken leftover install can still be cleared.
 func (e *Clinic) Purge() error {
-	// Capture both before teardown: the root CA lives in the caddy-data volume
-	// that is about to be destroyed, and the machine's original name is recorded
-	// inside the install dir this deletes.
 	rootPEM := e.caddyRootPEM()
 
 	if _, err := os.Stat(filepath.Join(e.InstallDir, "docker-compose.yml")); err == nil {
@@ -47,7 +20,7 @@ func (e *Clinic) Purge() error {
 			e.logln("  (compose down reported an error - continuing cleanup)")
 		}
 	}
-	e.forceRemoveProject()
+	e.TeardownProject()
 
 	e.logln("Removing Docker images...")
 	for _, img := range e.uninstallImages() {
@@ -55,21 +28,9 @@ func (e *Clinic) Purge() error {
 	}
 	e.pruneBuildCache()
 
-	if looksLikeSourceRepo(e.InstallDir) {
-		e.logln("Install dir looks like a source checkout - left in place: " + e.InstallDir)
-	} else if _, err := os.Stat(e.InstallDir); err == nil {
-		e.logln("Removing installed files " + e.InstallDir)
-		_ = os.RemoveAll(e.InstallDir)
-	}
+	e.removeInstallFiles()
 
-	var failed []string
-	if s := trust.Untrust(e.Log, e.Confirm, rootPEM); s != "" {
-		failed = append(failed, s)
-	}
-	if s := hosts.Remove(e.Log, e.Confirm, e.host()); s != "" {
-		failed = append(failed, s)
-	}
-	netfix.Undo(e.Log)
+	failed := e.revertSystemChanges(rootPEM)
 
 	if autostart.Enabled() {
 		e.logln("Removing the start-at-login entry...")
