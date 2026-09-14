@@ -135,6 +135,13 @@ run_backup() {
 	echo "[backup] done"
 }
 
+# One-shot mode, used by the app's "Backup now": database only, under the name
+# the caller picked, then exit. Same dump/verify/seal/rename as the daily run.
+if [ "${1:-}" = "once" ]; then
+	db_backup "${2:?no backup name given}"
+	exit
+fi
+
 echo "[backup] sidecar started; encrypted backups -> $BACKUP_DIR ($RET_DESC)"
 
 while true; do

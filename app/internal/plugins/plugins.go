@@ -1,5 +1,3 @@
-// Package plugins reads and writes the backend plugin list (ADDITIONAL_PLUGS in
-// backend.env). Frontend plugins are managed in CARE's own admin pages.
 package plugins
 
 import (
@@ -9,21 +7,14 @@ import (
 	"strings"
 )
 
-// Manager edits the plugin configuration for one install directory.
 type Manager struct {
-	Dir string // install dir, holding backend.env
+	Dir string
 }
 
 func New(dir string) *Manager { return &Manager{Dir: dir} }
 
-// ADDITIONAL_PLUGS (in backend.env) is CARE's plugin list. It's read at build time
-// (pip-installs packages) AND runtime, so enabling a plugin needs a backend rebuild,
-// not a restart - buildBackend passes it as a --build-arg.
 const additionalPlugsKey = "ADDITIONAL_PLUGS"
 
-// Plugin mirrors CARE's Plug dataclass. Configs is map[string]any so values keep
-// their JSON type (a boolean false actually disables a plugin flag; a string "false"
-// would be truthy in Python). omitempty: blank version -> CARE's default, empty configs dropped.
 type Plugin struct {
 	Name        string         `json:"name"`
 	PackageName string         `json:"package_name"`
@@ -33,8 +24,6 @@ type Plugin struct {
 
 func (m *Manager) backendEnvPath() string { return filepath.Join(m.Dir, "backend.env") }
 
-// ReadPlugins parses the plugin list out of ADDITIONAL_PLUGS in backend.env. A
-// missing or empty var means no plugins (not an error).
 func (m *Manager) ReadPlugins() ([]Plugin, error) {
 	raw := strings.TrimSpace(m.envVar(additionalPlugsKey))
 	if raw == "" {
@@ -47,7 +36,6 @@ func (m *Manager) ReadPlugins() ([]Plugin, error) {
 	return plugs, nil
 }
 
-// WritePlugins writes the list to ADDITIONAL_PLUGS (empty list removes the var).
 func (m *Manager) WritePlugins(plugs []Plugin) error {
 	raw := ""
 	if len(plugs) > 0 {
@@ -60,7 +48,6 @@ func (m *Manager) WritePlugins(plugs []Plugin) error {
 	return m.setEnvVar(additionalPlugsKey, raw)
 }
 
-// AdditionalPlugs is the raw ADDITIONAL_PLUGS value from backend.env.
 func (m *Manager) AdditionalPlugs() string { return strings.TrimSpace(m.envVar(additionalPlugsKey)) }
 
 func (m *Manager) envVar(key string) string {
@@ -76,7 +63,6 @@ func (m *Manager) envVar(key string) string {
 	return ""
 }
 
-// setEnvVar upserts key=val in backend.env, preserving other lines (empty val removes it).
 func (m *Manager) setEnvVar(key, val string) error {
 	path := m.backendEnvPath()
 	b, err := os.ReadFile(path)
