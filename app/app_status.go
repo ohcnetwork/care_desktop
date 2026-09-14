@@ -49,7 +49,7 @@ func (a *App) OpenDocker() error              { return a.provisioner().OpenDocke
 
 func (a *App) provisioner() *prereq.Provisioner {
 	e := a.engine()
-	return prereq.NewProvisioner(e.Runner(), e.InstallDir, e.Log, e.Confirm)
+	return prereq.NewProvisioner(e.Runner(), e.Log)
 }
 
 func (a *App) RestartPlan() reboot.Plan { return reboot.Check() }

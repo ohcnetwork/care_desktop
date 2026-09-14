@@ -23,11 +23,9 @@ export type RestartPlan = {
 /** What the app can do about a prerequisite that isn't ready on this machine. */
 export type ToolAction = "" | "install" | "open" | "manual";
 export type ToolPlan = {
-  tool: string;
   action: ToolAction;
   label: string;
   detail: string;
-  needs_admin: boolean;
   url: string;
 };
 export type AppState = {
