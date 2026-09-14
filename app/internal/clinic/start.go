@@ -38,7 +38,7 @@ func (e *Clinic) Start() error {
 	}
 	e.createAdmin()
 	e.logln("Waiting for CARE to become healthy...")
-	if err := health.Wait(e.Log, e.host(), 3*time.Minute); err != nil {
+	if err := health.Wait(e.Log, 3*time.Minute); err != nil {
 		return err
 	}
 	e.logln("")

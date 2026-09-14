@@ -1,5 +1,3 @@
-// Package hosts manages the loopback entry that lets the server's own browser
-// open the clinic. See docs/architecture.md#mdns-advertising-and-self-heal.
 package hosts
 
 import (
@@ -11,10 +9,6 @@ import (
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/elevate"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 )
-
-// Points <name>.local at loopback so the server's OWN browser can open the clinic;
-// no host resolves a name its own second mDNS responder advertises. See
-// docs/architecture.md#mdns-advertising-and-self-heal.
 
 const marker = "# care-desktop"
 
@@ -49,8 +43,6 @@ func hasEntry(data, host string) bool {
 
 func line(host string) string { return "127.0.0.1 " + host + " " + marker }
 
-// Leading blank line terminates a hosts file with no trailing newline. echo, not
-// printf: printf's "\n" would also be an AppleScript escape under `do shell script`.
 func addSh(host string) string {
 	p := path()
 	return "echo '' >> " + p + "; echo " + elevate.ShQuote(line(host)) + " >> " + p
@@ -61,7 +53,6 @@ func addPS(host string) string {
 		elevate.PSQuote(line(host))
 }
 
-// Unprivileged first: succeeds as root, so no prompt where none is needed.
 func Step(log func(string), host string) (elevate.Step, bool) {
 	if data, err := os.ReadFile(path()); err == nil && hasEntry(string(data), host) {
 		return elevate.Step{}, false
@@ -84,10 +75,6 @@ func addUnprivileged(host string) error {
 	return proc.Command("sh", "-c", addSh(host)).Run()
 }
 
-// removeHostsEntry drops the line install added. It returns a description of what
-// was left behind, or "" when the file is clean — a surviving "127.0.0.1
-// care.local" is silently poisonous: the machine keeps resolving the name to
-// itself long after CARE is gone, and every other device on the LAN looks broken.
 func Remove(log func(string), confirm func(string, string) bool, host string) string {
 	data, err := os.ReadFile(path())
 	if err != nil || !strings.Contains(string(data), marker) {
@@ -102,7 +89,6 @@ func Remove(log func(string), confirm func(string, string) bool, host string) st
 		_ = proc.Command("powershell", "-NoProfile", "-Command", ps).Run()
 		return Leftover(host)
 	}
-	// cat back rather than mv: keeps the file's inode, owner, and mode.
 	p := path()
 	sh := `t=$(mktemp) && grep -v ` + elevate.ShQuote(marker) + ` ` + p +
 		` > "$t" && cat "$t" > ` + p + `; rm -f "$t"`
@@ -116,9 +102,6 @@ func Remove(log func(string), confirm func(string, string) bool, host string) st
 	return Leftover(host)
 }
 
-// hostsEntryLeftover re-reads the file: the removal runs through a shell (and on
-// Windows through an elevation prompt the operator can dismiss), so its exit
-// status says little about whether the line is actually gone.
 func Leftover(host string) string {
 	data, err := os.ReadFile(path())
 	if err != nil || !strings.Contains(string(data), marker) {
@@ -134,9 +117,6 @@ func logln(log func(string), s string) {
 	}
 }
 
-// Present reports whether the hosts file still carries the line install added.
-// Matched on the marker, not on a host name, so it finds the entry left by an
-// install that used a different clinic address.
 func Present() bool {
 	data, err := os.ReadFile(path())
 	return err == nil && strings.Contains(string(data), marker)

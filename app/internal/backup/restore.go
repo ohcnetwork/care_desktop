@@ -190,7 +190,7 @@ func (s *Store) RestoreFrom(srcDir, dbDump, filesArchive, passphrase string) err
 		return err
 	}
 	s.logln("Waiting for CARE to become healthy...")
-	if err := health.Wait(s.Log, s.Host, 3*time.Minute); err != nil {
+	if err := health.Wait(s.Log, 3*time.Minute); err != nil {
 		return err
 	}
 	s.logln("")

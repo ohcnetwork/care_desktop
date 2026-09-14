@@ -1,5 +1,3 @@
-// Package trust installs and removes CARE's local root certificate in the
-// operating system trust store. See docs/architecture.md#certificate-trust--the-setup-bootstrap.
 package trust
 
 import (
@@ -24,7 +22,6 @@ func installSh(path string) string {
 		return "security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain " +
 			elevate.ShQuote(path)
 	}
-	// Debian layout first, then RHEL.
 	q := elevate.ShQuote(path)
 	return "cp " + q + " /usr/local/share/ca-certificates/care-root.crt && update-ca-certificates " +
 		"|| { cp " + q + " /etc/pki/ca-trust/source/anchors/care-root.crt && update-ca-trust; }"
@@ -53,8 +50,6 @@ func installUnprivileged(path string) error {
 	return nil
 }
 
-// cleanup removes the staged cert; it must outlive the elevated call, so caStep
-// does not remove it itself.
 func Step(log func(string), host, rootPEM string) (elevate.Step, func(), bool) {
 	noop := func() {}
 	if HostTrusts(host) {
@@ -87,7 +82,6 @@ func Step(log func(string), host, rootPEM string) (elevate.Step, func(), bool) {
 	}, cleanup, true
 }
 
-// HostTrusts asks the system verdict; no InsecureSkipVerify on purpose: we want the real system verdict.
 func HostTrusts(host string) bool {
 	c := &http.Client{Timeout: 4 * time.Second}
 	resp, err := c.Get("https://" + host + "/ping/")
@@ -106,22 +100,20 @@ var linuxCAAnchors = []string{
 	"/etc/pki/ca-trust/source/anchors/care-root.crt",
 }
 
-// Sweeps by CN as well as fingerprint: setup mints a new root each install, so
-// matching only the current one leaves every earlier root trusted forever.
-// Untrust removes the root we installed. It returns a description of what
-// was left behind, or "" when there is nothing to report — a still-trusted root
-// is the leftover with the longest reach, so uninstall names it rather than
-// burying it in the log.
 func Untrust(log func(string), confirm func(string, string) bool, rootPEM string) string {
 	fp := SHA1Hex(rootPEM)
 	removed, err := removeTrustedRoots(confirm, fp)
+	if Present() {
+		detail := ""
+		if err != nil {
+			detail = " (" + err.Error() + ")"
+		}
+		logln(log, "Could not remove CARE's certificate from this machine's trust store"+detail+
+			". Remove \""+CommonName+"\" by hand if you want it gone.")
+		return "The certificate \"" + CommonName + "\" is still trusted by this computer" + detail +
+			". " + manualRemoval()
+	}
 	switch {
-	case err != nil:
-		logln(log, "Could not remove CARE's certificate from this machine's trust store ("+
-			err.Error()+"). Remove \""+CommonName+"\" by hand if you want it gone.")
-		return "The certificate \"" + CommonName + "\" is still trusted by this computer (" +
-			err.Error() + "). Remove it in Keychain Access, or run: security delete-certificate -c " +
-			elevate.ShQuote(CommonName)
 	case removed:
 		logln(log, "Removed CARE's certificate from this machine's trust store.")
 	case fp == "":
@@ -129,6 +121,18 @@ func Untrust(log func(string), confirm func(string, string) bool, rootPEM string
 			"If a browser still trusts \""+CommonName+"\", remove it by hand.")
 	}
 	return ""
+}
+
+func manualRemoval() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "Remove it in Keychain Access, or run: security delete-certificate -c " +
+			elevate.ShQuote(CommonName)
+	case "windows":
+		return "Remove it in certmgr.msc, or run as administrator: certutil -delstore Root " +
+			elevate.PSQuote(CommonName)
+	}
+	return "Delete " + strings.Join(linuxCAAnchors, " and ") + ", then run update-ca-certificates."
 }
 
 func removeTrustedRoots(confirm func(string, string) bool, fp string) (bool, error) {
@@ -143,7 +147,6 @@ func removeTrustedRoots(confirm func(string, string) bool, fp string) (bool, err
 	return false, nil
 }
 
-// System keychain is read first (free) so an empty store raises no admin prompt.
 func removeTrustedRootsDarwin(confirm func(string, string) bool, fp string) (bool, error) {
 	login := os.Getenv("HOME") + "/Library/Keychains/login.keychain-db"
 	removed := false
@@ -208,8 +211,6 @@ func appendUnique(list []string, h string) []string {
 	return append(list, h)
 }
 
-// One UAC prompt; presence checked first (readable without admin) so an uninstall
-// with nothing of ours never prompts.
 func removeTrustedRootsWindows(fp string) (bool, error) {
 	if !windowsRootPresent(fp) {
 		return false, nil
@@ -237,11 +238,9 @@ func windowsRootPresent(fp string) bool {
 	if strings.Contains(s, strings.ToUpper(CommonName)) {
 		return true
 	}
-	// certutil prints fingerprints byte-spaced; compare without the spaces.
 	return fp != "" && strings.Contains(strings.ReplaceAll(s, " ", ""), strings.ToUpper(fp))
 }
 
-// File-based, so nothing accumulates and there is nothing to sweep by name.
 func removeTrustedRootsLinux(confirm func(string, string) bool) (bool, error) {
 	present := false
 	for _, p := range linuxCAAnchors {
@@ -267,7 +266,6 @@ func removeTrustedRootsLinux(confirm func(string, string) bool) (bool, error) {
 	return true, nil
 }
 
-// SHA1Hex is the fingerprint macOS `security` and Windows `certutil` both match on.
 func SHA1Hex(pemData string) string {
 	block, _ := pem.Decode([]byte(pemData))
 	if block == nil || block.Type != "CERTIFICATE" {
@@ -294,10 +292,6 @@ func logln(log func(string), s string) {
 	}
 }
 
-// Present reports whether this machine still trusts a CARE root. It reads only
-// the stores that are readable without privileges, so a scan never raises a
-// prompt; a root that is only visible to root is reported as absent rather than
-// nagging the operator for a question they did not ask.
 func Present() bool {
 	switch runtime.GOOS {
 	case "darwin":

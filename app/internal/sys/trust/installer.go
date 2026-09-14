@@ -8,8 +8,6 @@ import (
 	"strings"
 )
 
-// SHA256Colons formats the fingerprint the way OS cert viewers show it, so a
-// user can compare what the script prints against the /setup page.
 func SHA256Colons(pemData string) string {
 	block, _ := pem.Decode([]byte(pemData))
 	if block == nil || block.Type != "CERTIFICATE" {
