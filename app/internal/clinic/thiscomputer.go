@@ -9,10 +9,7 @@ import (
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/elevate"
 )
 
-// ensureLocalAccess makes https://<name>.local work in this machine's own browser.
-// Both steps need admin and both need Caddy up, so they share ONE approval and one
-// elevation. See docs/architecture.md#one-install-one-approval.
-func (e *Clinic) ensureLocalAccess() {
+func (e *Clinic) setUpThisComputer() {
 	host := e.host()
 
 	var steps []elevate.Step

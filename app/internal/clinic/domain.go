@@ -38,21 +38,6 @@ func (e *Clinic) ApplyDomain() error {
 	return nil
 }
 
-func (e *Clinic) configuredHost() string {
-	b, err := os.ReadFile(filepath.Join(e.InstallDir, "Caddyfile"))
-	if err != nil {
-		return ""
-	}
-	return hostRe.FindString(string(b))
-}
-
-func (e *Clinic) warnDomainDrift() {
-	if cur := e.configuredHost(); cur != "" && cur != e.host() {
-		e.logln("warning: this install still serves https://" + cur + "/ but the address is set to " +
-			e.host() + ". Run setup again so the whole stack matches.")
-	}
-}
-
 func (e *Clinic) host() string {
 	return mdns.Label(e.mdnsName()) + ".local"
 }

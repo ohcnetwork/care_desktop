@@ -1,6 +1,8 @@
 package compose
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,29 +30,41 @@ func (b *Builder) logln(s string) {
 	}
 }
 
-func (b *Builder) clone(repo, ref, label string) (dir string, cleanup func(), err error) {
-	dir, err = os.MkdirTemp("", "care-"+label+"-")
-	if err != nil {
-		return "", nil, err
+func (b *Builder) source(repo, ref, label string) (string, error) {
+	dir := filepath.Join(b.dir, "src", label)
+	stamp := filepath.Join(dir, ".care-source")
+	want := b.set.AppVersion + "+" + ref
+
+	if got, err := os.ReadFile(stamp); err == nil && strings.TrimSpace(string(got)) == want {
+		b.logln("Using the CARE " + label + " source already downloaded (" + ref + ").")
+		return dir, nil
 	}
-	cleanup = func() { _ = os.RemoveAll(dir) }
+	if err := os.RemoveAll(dir); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return "", err
+	}
 	b.logln("Downloading the CARE " + label + " source (" + ref + ")...")
 	if err := b.run.Run("git", "clone", "--depth", "1", "--branch", ref, repo, dir); err != nil {
-		cleanup()
-		return "", nil, err
+		_ = os.RemoveAll(dir)
+		return "", err
 	}
-	return dir, cleanup, nil
+	if err := os.WriteFile(stamp, []byte(want), 0o644); err != nil {
+		return "", err
+	}
+	return dir, nil
 }
 
 func (b *Builder) BuildBackend() error {
-	src, cleanup, err := b.clone(b.set.BeRepo, b.set.BeRef, "backend")
+	src, err := b.source(b.set.BeRepo, b.set.BeRef, "backend")
 	if err != nil {
 		return err
 	}
-	defer cleanup()
 	b.logln("Building the backend image (" + b.set.BackendImage + ")... (several minutes)")
 	df := filepath.Join(src, "docker", "prod.Dockerfile")
-	args := []string{"build", "-f", df, "-t", b.set.BackendImage, "--label", builtFromLabel + "=" + b.set.BeRef}
+	args := []string{"build", "-f", df, "-t", b.set.BackendImage,
+		"--label", builtFromLabel + "=" + b.backendBuiltFrom()}
 	if plugs := plugins.New(b.run, b.dir, b.Log).AdditionalPlugs(); plugs != "" {
 		b.logln("Building with plugins (ADDITIONAL_PLUGS set)")
 		args = append(args, "--build-arg", "ADDITIONAL_PLUGS="+plugs)
@@ -60,7 +74,15 @@ func (b *Builder) BuildBackend() error {
 }
 
 func (b *Builder) EnsureBackendImage() error {
-	return b.ensure(b.set.BackendImage, b.set.BeRef, "backend", b.BuildBackend)
+	return b.ensure(b.set.BackendImage, b.backendBuiltFrom(), "backend", b.BuildBackend)
+}
+
+func (b *Builder) backendBuiltFrom() string {
+	out := b.set.AppVersion + "+" + b.set.BeRef
+	if plugs := plugins.New(b.run, b.dir, b.Log).AdditionalPlugs(); plugs != "" {
+		out += "+plugs@" + shortHash([]byte(plugs))
+	}
+	return out
 }
 
 func emptyBuildContext() (dir string, cleanup func(), err error) {
@@ -113,11 +135,10 @@ func (b *Builder) EnsureCaddyImage() error {
 }
 
 func (b *Builder) BuildFrontend() error {
-	src, cleanup, err := b.clone(b.set.FeRepo, b.set.FeRef, "frontend")
+	src, err := b.source(b.set.FeRepo, b.set.FeRef, "frontend")
 	if err != nil {
 		return err
 	}
-	defer cleanup()
 	env, err := os.ReadFile(filepath.Join(b.dir, "frontend.env"))
 	if err != nil {
 		return err
@@ -127,11 +148,24 @@ func (b *Builder) BuildFrontend() error {
 	}
 	b.logln("Building the frontend image (" + b.set.FrontendImage + ")... (a few minutes)")
 	return b.run.Run("docker", "build", "-t", b.set.FrontendImage,
-		"--label", builtFromLabel+"="+b.set.FeRef, src)
+		"--label", builtFromLabel+"="+b.frontendBuiltFrom(), src)
+}
+
+func (b *Builder) frontendBuiltFrom() string {
+	out := b.set.AppVersion + "+" + b.set.FeRef
+	if env, err := os.ReadFile(filepath.Join(b.dir, "frontend.env")); err == nil {
+		out += "+env@" + shortHash(env)
+	}
+	return out
 }
 
 func (b *Builder) EnsureFrontendImage() error {
-	return b.ensure(b.set.FrontendImage, b.set.FeRef, "frontend", b.BuildFrontend)
+	return b.ensure(b.set.FrontendImage, b.frontendBuiltFrom(), "frontend", b.BuildFrontend)
+}
+
+func shortHash(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 const builtFromLabel = "org.opencontainers.image.base.name"
@@ -146,7 +180,19 @@ func (b *Builder) ensure(tag, want, label string, build func() error) error {
 	}
 	b.logln("The " + label + " image was built from " + quoteOrUnknown(got) +
 		", but this release expects " + want + " - rebuilding.")
-	return build()
+	if err := build(); err != nil {
+		return err
+	}
+	b.pruneDangling()
+	return nil
+}
+
+func (b *Builder) pruneDangling() {
+	cmd := proc.Command("docker", "image", "prune", "-f")
+	cmd.Env = b.run.Env
+	if err := cmd.Run(); err == nil {
+		b.logln("Cleared out images left behind by the rebuild.")
+	}
 }
 
 func (b *Builder) builtFrom(tag string) (value string, ok bool) {

@@ -7,11 +7,7 @@ import (
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/trust"
 )
 
-// Renders the /setup page's one-click trust installers with the root PEM embedded.
-// Embedded, not fetched: a device that doesn't trust us yet can't fetch over https,
-// and we don't want an installer that shrugs off TLS errors.
-// See docs/architecture.md#certificate-trust--the-setup-bootstrap.
-func (e *Clinic) writeCertInstallers() {
+func (e *Clinic) writeDeviceSetupScripts() {
 	root := e.caddyRootPEM()
 	if root == "" {
 		return
