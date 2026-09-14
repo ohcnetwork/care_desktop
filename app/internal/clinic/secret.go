@@ -8,8 +8,6 @@ import (
 	"strings"
 )
 
-// genSecret replaces DJANGO_SECRET_KEY=CHANGE_ME in backend.env with a random
-// key. crypto/rand - strong, and no python/shell needed.
 func (e *Clinic) genSecret() error {
 	path := filepath.Join(e.InstallDir, "backend.env")
 	b, err := os.ReadFile(path)

@@ -1,5 +1,3 @@
-// Package compose builds the container images CARE runs, downloading the source
-// repositories they are built from. See docs/architecture.md.
 package compose
 
 import (
@@ -12,7 +10,6 @@ import (
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 )
 
-// Builder builds and inspects images for one install directory.
 type Builder struct {
 	Log func(string)
 
@@ -21,7 +18,6 @@ type Builder struct {
 	run proc.Runner
 }
 
-// NewBuilder binds a Builder to an install dir, its release pins, and a runner.
 func NewBuilder(run proc.Runner, dir string, set *release.Pins, log func(string)) *Builder {
 	return &Builder{Log: log, dir: dir, set: set, run: run}
 }
@@ -32,10 +28,6 @@ func (b *Builder) logln(s string) {
 	}
 }
 
-// clone makes a shallow checkout of ref in a fresh temporary directory and returns
-// it with a cleanup func. Nothing is cached between builds on purpose: a kept clone
-// is only reused when it already exists, which silently pins the source to whatever
-// ref was current the first time and ignores every later change to CARE_BE_REF.
 func (b *Builder) clone(repo, ref, label string) (dir string, cleanup func(), err error) {
 	dir, err = os.MkdirTemp("", "care-"+label+"-")
 	if err != nil {
@@ -59,7 +51,6 @@ func (b *Builder) BuildBackend() error {
 	b.logln("Building the backend image (" + b.set.BackendImage + ")... (several minutes)")
 	df := filepath.Join(src, "docker", "prod.Dockerfile")
 	args := []string{"build", "-f", df, "-t", b.set.BackendImage, "--label", builtFromLabel + "=" + b.set.BeRef}
-	// CARE pip-installs plugins at build time from ADDITIONAL_PLUGS.
 	if plugs := plugins.New(b.run, b.dir, b.Log).AdditionalPlugs(); plugs != "" {
 		b.logln("Building with plugins (ADDITIONAL_PLUGS set)")
 		args = append(args, "--build-arg", "ADDITIONAL_PLUGS="+plugs)
@@ -72,7 +63,6 @@ func (b *Builder) EnsureBackendImage() error {
 	return b.ensure(b.set.BackendImage, b.set.BeRef, "backend", b.BuildBackend)
 }
 
-// emptyBuildContext is the context for Dockerfiles that COPY nothing
 func emptyBuildContext() (dir string, cleanup func(), err error) {
 	dir, err = os.MkdirTemp("", "care-buildctx-")
 	if err != nil {
@@ -81,7 +71,6 @@ func emptyBuildContext() (dir string, cleanup func(), err error) {
 	return dir, func() { _ = os.RemoveAll(dir) }, nil
 }
 
-// BuildBackup builds the Postgres+openssl backup image.
 func (b *Builder) BuildBackup() error {
 	b.logln("Building the backup image (" + b.set.BackupImage + ")...")
 	df := filepath.Join(b.dir, "backup.Dockerfile")
@@ -100,7 +89,6 @@ func (b *Builder) EnsureBackupImage() error {
 	return b.ensure(b.set.BackupImage, b.set.PostgresImage, "backup", b.BuildBackup)
 }
 
-// BuildCaddy builds the reverse-proxy image with the Coraza WAF compiled in (xcaddy).
 func (b *Builder) BuildCaddy() error {
 	b.logln("Building the Caddy + WAF image (" + b.set.CaddyWafImage + ")... (compiles Caddy; a few minutes)")
 	df := filepath.Join(b.dir, "caddy.Dockerfile")
@@ -130,7 +118,6 @@ func (b *Builder) BuildFrontend() error {
 		return err
 	}
 	defer cleanup()
-	// frontend.env overrides care_fe's committed .env (Vite reads .env.local).
 	env, err := os.ReadFile(filepath.Join(b.dir, "frontend.env"))
 	if err != nil {
 		return err
@@ -147,16 +134,8 @@ func (b *Builder) EnsureFrontendImage() error {
 	return b.ensure(b.set.FrontendImage, b.set.FeRef, "frontend", b.BuildFrontend)
 }
 
-// builtFromLabel records the pin an image was built from, so a changed pin can be
-// detected. Tags are fixed (care-backup:clinic and friends), so tag existence alone
-// cannot tell a stale image from a current one: after a POSTGRES_IMAGE bump the old
-// backup image still exists, and its older pg_dump then refuses to dump the newer
-// server, silently ending backups.
 const builtFromLabel = "org.opencontainers.image.base.name"
 
-// ensure builds tag unless it already exists AND was built from want. An image with
-// no label predates this check and is treated as stale: one rebuild is cheaper than
-// running an image we cannot account for.
 func (b *Builder) ensure(tag, want, label string, build func() error) error {
 	got, ok := b.builtFrom(tag)
 	switch {
@@ -170,8 +149,6 @@ func (b *Builder) ensure(tag, want, label string, build func() error) error {
 	return build()
 }
 
-// builtFrom reports the recorded input of an existing image. ok is false when the
-// image is absent.
 func (b *Builder) builtFrom(tag string) (value string, ok bool) {
 	cmd := proc.Command("docker", "image", "inspect", "-f",
 		"{{index .Config.Labels \""+builtFromLabel+"\"}}", tag)
