@@ -1,16 +1,11 @@
-# CARE clinic reverse proxy - HTTPS only, ONE origin, trusted LAN only.
-# The site is served over https://example.local with a self-signed *internal* cert
-# (no public CA can sign a .local name). Plain http on :80 only bounces to https,
-# so there is no http surface and no CORS to configure.
 {
-	# Keep cert automation on (so `tls internal` can issue), but don't let Caddy
-	# auto-add its own :80 redirects - we define an explicit redirect site below.
 	auto_https disable_redirects
-	order coraza_waf first # must run before reverse_proxy
+	order coraza_waf first
 
-	# Rename the internal CA so trust prompts (e.g. the iOS profile screen) show
-	# "CARE Desktop Local CA" instead of Caddy's default "Caddy Local Authority".
-	# Only affects a freshly-minted root; delete the caddy-data volume to re-mint.
+	servers {
+		protocols h1 h2
+	}
+
 	pki {
 		ca local {
 			name "CARE Desktop"
@@ -20,13 +15,9 @@
 	}
 }
 
-# The cert-trust bootstrap (install page + root CA), served on BOTH http and
-# https. iOS Safari auto-upgrades http->https, so the page must exist on https
-# too or Safari lands on the frontend 404 before the device trusts us.
 (bootstrap) {
 	handle_path /setup* {
 		root * /setup
-		# Written by the engine each start, with the CA embedded (see certscript.go).
 		@installer path /install-cert.sh /install-cert.ps1
 		header @installer Content-Disposition "attachment"
 		header @installer Content-Type "application/octet-stream"
@@ -34,9 +25,7 @@
 			index index.html
 		}
 	}
-	# The root CA, served only via the setup page (its button carries ?ok=1).
-	# A direct visit with neither the marker nor a same-site referer is bounced
-	# back to the instructions.
+
 	handle /root.crt {
 		@direct {
 			not query ok=1
@@ -51,22 +40,12 @@
 	}
 }
 
-# The site body, shared by every https listener below.
+
 (site) {
 	encode gzip
 
-	# Django (CARE's production settings) emits Strict-Transport-Security: max-age=60.
-	# Strip it. :80 above already redirects to https, so HSTS adds no enforcement here -
-	# only a client-side pin that makes certificate errors NON-BYPASSABLE, host-wide,
-	# with no way to exempt a path. This clinic re-mints its root CA on every reinstall,
-	# so a pinned device would meet an untrusted cert it cannot click past, on the very
-	# host serving /setup - the page that would re-trust it. Stripping is
-	# value-independent, so upstream's TODO to raise that 60 to 518400 (6 days) can
-	# never reach a clinic. This is the only reason there is no clinic_settings.py.
 	header -Strict-Transport-Security
 
-	# WAF on /api only
-	# Off (inert) | DetectionOnly (evaluate + log, never block) | On (block with 403).
 	handle /api/* {
 		coraza_waf {
 			load_owasp_crs
@@ -79,20 +58,13 @@
 		}
 		reverse_proxy backend:9000
 	}
-	handle /static/* {
-		reverse_proxy backend:9000
-	}
-	handle /ping/* {
-		reverse_proxy backend:9000
-	}
-	handle /health/* {
+	@backend path /static/* /ping/* /health/*
+	handle @backend {
 		reverse_proxy backend:9000
 	}
 
-	handle /patient-bucket/* {
-		reverse_proxy minio:9000
-	}
-	handle /facility-bucket/* {
+	@buckets path /patient-bucket/* /facility-bucket/*
+	handle @buckets {
 		reverse_proxy minio:9000
 	}
 
@@ -101,9 +73,6 @@
 	}
 }
 
-# http is gone EXCEPT the trust bootstrap: a device can't open https until it
-# trusts our root, so the install page and the cert file are served over plain
-# http. Everything else is permanently redirected to https.
 :80 {
 	import bootstrap
 	handle {
@@ -112,16 +81,11 @@
 }
 
 example.local:443 {
-	tls internal # self-signed cert from Caddy's local CA (LAN name, no public CA)
-	# Bootstrap first so /setup + /root.crt win over site's catch-all. Needed on
-	# https too: iOS Safari auto-upgrades http->https and would otherwise land on
-	# the frontend 404 before the device trusts our root.
+	tls internal
 	import bootstrap
 	import site
 }
 
-# localhost over https, /ping/ only - lets the app's own health probe hit
-# https://localhost/ping/ without depending on mDNS resolving on the server itself.
 localhost:443 {
 	tls internal
 	reverse_proxy /ping/* backend:9000

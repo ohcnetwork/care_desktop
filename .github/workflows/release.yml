@@ -74,6 +74,15 @@ jobs:
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
+
+      - name: Stage the deployment kit
+        shell: bash
+        run: |
+          cp -R deployments/. app/install/
+          for f in .env docker-compose.yml Caddyfile scripts/backup.sh; do
+            test -f "app/install/$f" || { echo "::error::staging missed $f"; exit 1; }
+          done
+
       # No -ldflags version: CARE_DESKTOP_VERSION in deployments/.env is the single
       # source, embedded with the pins it describes. wails.json is stamped from the
       # tag above only because Info.plist and NSIS need it in their own metadata.
