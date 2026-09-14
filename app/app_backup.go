@@ -36,8 +36,8 @@ func (a *App) RestoreBackup(dbDump, filesArchive, passphrase string, remember bo
 		_ = backup.StorePassword(passphrase)
 	}
 	e := a.engine()
-	a.run(func() error { return e.Backups().Restore(dbDump, filesArchive, passphrase) }, false, "restore")
-	return nil
+	return a.run(func() error { return e.Backups().Restore(dbDump, filesArchive, passphrase) },
+		false, "restore")
 }
 
 // --- where the backups go ---------------------------------------------------
@@ -187,10 +187,9 @@ func (a *App) RestoreFromFile(path, passphrase string, remember bool) error {
 		_ = backup.StorePassword(passphrase)
 	}
 	e := a.engine()
-	a.run(func() error {
+	return a.run(func() error {
 		return e.Backups().RestoreFrom(found.Dir, found.DBDump, found.FilesArchive, passphrase)
 	}, false, "restore")
-	return nil
 }
 
 // ChooseBackupFile opens the system file picker at the current backup folder and

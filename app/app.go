@@ -21,6 +21,8 @@ type App struct {
 	pins      *release.Pins
 	log       *applog.Logger
 
+	jobMu sync.Mutex
+
 	advMu   sync.Mutex
 	adv     *mdns.Advertiser
 	advStop chan struct{}
