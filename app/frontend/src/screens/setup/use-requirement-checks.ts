@@ -4,7 +4,18 @@ import { bridge } from "@/lib/bridge";
 import type { ToolPlan } from "@/types";
 
 export type CheckTone = "wait" | "ok" | "bad";
-export type CheckId = "residue" | "docker" | "git" | "mdns" | "network";
+export type CheckId = "residue" | "docker" | "git" | "mdns" | "clinic" | "network";
+
+/**
+ * Which prerequisites are worth testing.
+ *
+ * "setup" is the first-run wizard. "running" is the same machinery pointed at a
+ * clinic that is already installed and has stopped answering, so two rows drop
+ * out: residue (after setup those "leftovers" are the live install) and git
+ * (needed to fetch the software, not to serve it - a missing git blocks the next
+ * update, it does not take the clinic down). One row is added: the clinic itself.
+ */
+export type ChecksMode = "setup" | "running";
 
 /**
  * What the operator can press on a failing row. The wizard is used by people who
@@ -59,11 +70,13 @@ function actionFor(plan: ToolPlan, install: () => Promise<string | void>): Check
  * separate rows rather than one "runtime" row because they are fixed in
  * different ways, and a row can only carry one button.
  */
-export function useRequirementChecks(host: string) {
+export function useRequirementChecks(host: string, mode: ChecksMode = "setup") {
+  const inSetup = mode === "setup";
   const [residue, setResidue] = useState<Result>(WAITING);
   const [docker, setDocker] = useState<Result>(WAITING);
   const [git, setGit] = useState<Result>(WAITING);
   const [mdns, setMdns] = useState<Result>(WAITING);
+  const [clinic, setClinic] = useState<Result>(WAITING);
   const [network, setNetwork] = useState<Result | null>(null);
 
   /**
@@ -145,6 +158,33 @@ export function useRequirementChecks(host: string) {
     return result;
   }, []);
 
+  /**
+   * Is the clinic actually serving? Only meaningful once it is installed, which
+   * is why it carries a Start button rather than an install one.
+   */
+  const checkClinic = useCallback(async (): Promise<Result> => {
+    setClinic(WAITING);
+    let result: Result;
+    try {
+      const health = await bridge.ClinicHealth();
+      result = health.active
+        ? { state: "ok", how: "" }
+        : {
+            state: "bad",
+            how: health.detail || "The clinic isn't answering on this computer.",
+            action: {
+              label: "Start clinic",
+              detail: "Starts the clinic software. This takes about a minute.",
+              run: () => bridge.ClinicAction("start"),
+            },
+          };
+    } catch (e) {
+      result = { state: "bad", how: String(e) };
+    }
+    setClinic(result);
+    return result;
+  }, []);
+
   const checkMDNS = useCallback(async (): Promise<Result> => {
     setMdns(WAITING);
     let result: Result;
@@ -176,7 +216,8 @@ export function useRequirementChecks(host: string) {
                 ? undefined
                 : {
                     label: "Fix automatically",
-                    detail: "Sets this WiFi network to Private and opens the clinic's ports.",
+                    detail:
+                      "Windows has this network locked down. It will be updated so other devices on this WiFi can reach the clinic on this computer.",
                     run: () => bridge.FixNetwork(),
                   },
           }
@@ -189,61 +230,73 @@ export function useRequirementChecks(host: string) {
   }, []);
 
   const recheckAll = useCallback(async (): Promise<CheckTone> => {
-    const [r, d, g, m, n] = await Promise.all([
-      checkResidue(),
+    const [r, d, g, m, c, n] = await Promise.all([
+      inSetup ? checkResidue() : null,
       checkDocker(),
-      checkGit(),
+      inSetup ? checkGit() : null,
       checkMDNS(),
+      inSetup ? null : checkClinic(),
       checkNetwork(),
     ]);
-    return summarise(n ? [r, d, g, m, n] : [r, d, g, m]);
-  }, [checkResidue, checkDocker, checkGit, checkMDNS, checkNetwork]);
+    return summarise([r, d, g, m, c, n].filter((x): x is Result => x !== null));
+  }, [inSetup, checkResidue, checkDocker, checkGit, checkMDNS, checkClinic, checkNetwork]);
 
   useEffect(() => {
     void recheckAll();
   }, [recheckAll]);
 
   const checks = useMemo<Check[]>(() => {
-    const list: Check[] = [
-      {
+    const list: Check[] = [];
+    if (inSetup) {
+      list.push({
         id: "residue",
         title: "A clean computer",
         detail: "Nothing left from an earlier CARE Desktop",
         ...residue,
-      },
-      {
-        id: "docker",
-        title: "Docker",
-        detail: "Runs the clinic software on this computer",
-        ...docker,
-      },
-      {
+      });
+    }
+    list.push({
+      id: "docker",
+      title: "Docker",
+      detail: "Runs the clinic software on this computer",
+      ...docker,
+    });
+    if (inSetup) {
+      list.push({
         id: "git",
         title: "Git",
         detail: "Downloads the clinic software",
         ...git,
-      },
-      {
-        id: "mdns",
-        title: "Network name",
-        detail: `${host} on the clinic WiFi`,
-        ...mdns,
-      },
-    ];
+      });
+    }
+    list.push({
+      id: "mdns",
+      title: "Network name",
+      detail: `${host} on the clinic WiFi`,
+      ...mdns,
+    });
+    if (!inSetup) {
+      list.push({
+        id: "clinic",
+        title: "Clinic software",
+        detail: "Serving the clinic to your staff",
+        ...clinic,
+      });
+    }
     if (network) {
       list.push({
         id: "network",
         title: "Network profile",
-        detail: "WiFi set to Private",
+        detail: "Other devices can reach this computer",
         ...network,
       });
     }
     return list;
-  }, [docker, git, host, mdns, network, residue]);
+  }, [inSetup, clinic, docker, git, host, mdns, network, residue]);
 
   const overall = useMemo(
-    () => summarise(network ? [residue, docker, git, mdns, network] : [residue, docker, git, mdns]),
-    [docker, git, mdns, network, residue],
+    () => summarise(checks.map((c) => ({ state: c.state, how: c.how }))),
+    [checks],
   );
 
   return { checks, overall, recheckAll, checkMDNS };

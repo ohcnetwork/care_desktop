@@ -1,5 +1,5 @@
-import { ArrowUpRight } from "lucide-react";
-import { useEffect } from "react";
+import { ArrowUpRight, TriangleAlert } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { Screen, ScreenBody } from "@/components/screen";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { useCare, type PanelTab } from "@/state/care-store";
 import { AdvancedTab } from "./advanced-tab";
 import { BackupsTab } from "./backups-tab";
 import { OverviewTab } from "./overview-tab";
+import { TroubleDialog } from "./trouble-dialog";
 
 const TAB_META: Record<PanelTab, { title: string; subtitle: string }> = {
   overview: { title: "Overview", subtitle: "Your clinic server at a glance." },
@@ -16,7 +17,8 @@ const TAB_META: Record<PanelTab, { title: string; subtitle: string }> = {
 };
 
 export function PanelScreen() {
-  const { tab, mdnsName, reloadBackups } = useCare();
+  const { tab, mdnsName, reloadBackups, trouble } = useCare();
+  const [diagnosing, setDiagnosing] = useState(false);
   const meta = TAB_META[tab];
 
   // Opening the tab is the refresh gesture, as it was before.
@@ -26,6 +28,23 @@ export function PanelScreen() {
 
   return (
     <Screen>
+      {diagnosing ? <TroubleDialog onClose={() => setDiagnosing(false)} /> : null}
+
+      {/* A banner, not a pop-up: this panel often sits minimised on a shelf PC,
+          and a window that steals focus on a blip gets dismissed unread. It
+          stays until the clinic answers again - there is nothing to dismiss. */}
+      {trouble ? (
+        <div className="flex items-center gap-3 border-b border-danger-bg bg-danger-tint px-[34px] py-3">
+          <TriangleAlert className="size-4 flex-none text-danger-ink" strokeWidth={2.2} />
+          <div className="min-w-0 flex-1 text-[13px] leading-[1.45] text-danger-ink">
+            Staff can&apos;t reach the clinic right now.
+          </div>
+          <Button variant="primary" onClick={() => setDiagnosing(true)}>
+            See what&apos;s wrong
+          </Button>
+        </div>
+      ) : null}
+
       <div className="flex items-center gap-4 px-[34px] pt-[26px] pb-[18px]">
         <div className="min-w-0 flex-1">
           <h1 className="text-[23px] font-bold tracking-[-0.015em] text-ink">{meta.title}</h1>

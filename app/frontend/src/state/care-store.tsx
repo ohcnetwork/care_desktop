@@ -57,6 +57,10 @@ const ACTION_LABELS: Record<string, string> = {
   "backup-now": "Backing up",
 };
 
+// Docker Desktop needs about a minute after a reboot before it can answer, and
+// the panel starts the clinic itself on launch. Nothing is wrong until then.
+const GRACE_MS = 90_000;
+
 const NO_STEPS_DONE: Record<SetupStep, boolean> = {
   checks: false,
   backup: false,
@@ -86,6 +90,8 @@ type CareStore = {
   busy: boolean;
   busyLabel: string;
   system: SystemState;
+  /** The clinic is down and nobody asked for that - the panel says so. */
+  trouble: boolean;
   version: string;
   backups: Backup[];
   autostart: boolean;
@@ -120,6 +126,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
   const [version, setVersion] = useState("");
   const [backups, setBackups] = useState<Backup[]>([]);
   const [autostart, setAutostartState] = useState(false);
+  const [trouble, setTrouble] = useState(false);
 
   // Refs shadow the state the event handlers and the poll timer read, so they
   // never work from a stale closure and never need to re-subscribe.
@@ -131,6 +138,14 @@ export function CareProvider({ children }: { children: ReactNode }) {
   // lines and only a step change needs to repaint.
   const logRef = useRef<string[]>([]);
   const lastErrorRef = useRef("");
+
+  // Three things stand between "health check failed" and alarming the operator.
+  // Stopping the clinic is a legitimate thing to do, Docker takes about a minute
+  // to come up after a reboot, and a container restarting shouldn't raise an
+  // alarm that is still on screen after it recovers.
+  const stoppedOnPurposeRef = useRef(false);
+  const panelSinceRef = useRef(0);
+  const downStreakRef = useRef(0);
 
   const setFlow = useCallback((next: Flow) => {
     flowRef.current = next;
@@ -219,6 +234,12 @@ export function CareProvider({ children }: { children: ReactNode }) {
       next = "stopped";
     }
     setSystem(next);
+
+    downStreakRef.current = next === "running" ? 0 : downStreakRef.current + 1;
+    const settled = Date.now() - panelSinceRef.current > GRACE_MS;
+    setTrouble(
+      downStreakRef.current >= 2 && settled && !stoppedOnPurposeRef.current && !busyRef.current,
+    );
   }, []);
 
   const reloadBackups = useCallback(async () => {
@@ -232,6 +253,17 @@ export function CareProvider({ children }: { children: ReactNode }) {
   const runAction = useCallback(
     async (action: string) => {
       if (busyRef.current) return;
+      // What the operator asked for, which is what makes a stopped clinic either
+      // a fault or a choice. Not persisted: the panel starts the clinic on every
+      // launch, so the intent dies with the session, same as the state it describes.
+      if (action === "stop") stoppedOnPurposeRef.current = true;
+      if (action === "start" || action === "restart") {
+        stoppedOnPurposeRef.current = false;
+        // Down and being fixed is not down and unattended. refresh() skips while
+        // busy, so without this the banner would sit there through the restart.
+        downStreakRef.current = 0;
+        setTrouble(false);
+      }
       setBusy(true, ACTION_LABELS[action] ?? "Working");
       log(`\n$ care ${action}`);
       try {
@@ -301,6 +333,10 @@ export function CareProvider({ children }: { children: ReactNode }) {
   );
 
   const bootPanel = useCallback(async () => {
+    panelSinceRef.current = Date.now();
+    stoppedOnPurposeRef.current = false;
+    downStreakRef.current = 0;
+    setTrouble(false);
     try {
       const state = await bridge.GetState();
       setMdnsName(state.mdns_name || "care.local");
@@ -479,6 +515,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
       busy,
       busyLabel,
       system,
+      trouble,
       version,
       backups,
       autostart,
@@ -493,7 +530,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
     [
       ready, flow, mdnsName, openStep, stepsDone, setStepDone,
       run, startInstall, retryInstall, restartSetup, openPanel,
-      tab, busy, busyLabel, system, version, backups, autostart, refresh, reloadBackups,
+      tab, busy, busyLabel, system, trouble, version, backups, autostart, refresh, reloadBackups,
       runAction, setAutostart, restore, uninstall, log,
     ],
   );
