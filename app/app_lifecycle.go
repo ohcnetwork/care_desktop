@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/ohcnetwork/care_desktop/app/internal/prereq"
+	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 
 	"github.com/wailsapp/wails/v2/pkg/options"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -19,22 +21,41 @@ func (a *App) startup(ctx context.Context) {
 	a.advStop = make(chan struct{})
 	a.startAdvertise()
 	go a.watchAdvertise()
-	go a.log.Writef("docker: %s", prereq.DockerCheck(a.engine().Runner()).Message)
+	go func() {
+		a.log.Writef("docker: %s", prereq.DockerCheck(a.engine().Runner()).Message)
+	}()
 }
 
 func (a *App) refreshInstallDir() {
-	if !loadConfig().SetupDone {
+	updated := false
+	if err := a.withJob(func() error {
+		cfg := a.loadConfig()
+		if !cfg.SetupDone || cfg.Removing {
+			return nil
+		}
+		pending, err := a.engine().Backups().PendingRestore()
+		if err != nil {
+			return err
+		}
+		if pending {
+			a.logln("An unfinished restore was found; its installed configuration was left unchanged for recovery.")
+			return nil
+		}
+		if _, err := a.ensureInstallDir(); err != nil {
+			return err
+		}
+		if err := a.engine().ApplyDomain(); err != nil {
+			return err
+		}
+		updated = true
+		return nil
+	}); err != nil {
+		a.logln("error: couldn't update the installed configuration (" + err.Error() + ")")
 		return
 	}
-	if _, err := a.ensureInstallDir(); err != nil {
-		a.logln("note: couldn't update the install files for this version (" + err.Error() + ")")
-		return
+	if updated {
+		a.logln("Install files are up to date with this version.")
 	}
-	if err := a.engine().ApplyDomain(); err != nil {
-		a.logln("note: couldn't re-apply the clinic address after updating (" + err.Error() + ")")
-		return
-	}
-	a.logln("Install files are up to date with this version.")
 }
 
 func (a *App) shutdown(context.Context) {
@@ -67,6 +88,14 @@ func (a *App) onSecondInstance(options.SecondInstanceData) {
 }
 
 func (a *App) beforeClose(context.Context) (prevent bool) {
+	if !a.jobMu.TryLock() {
+		a.logln("An operation is still running. Wait for it to finish before closing CARE Desktop.")
+		return true
+	}
+	defer a.jobMu.Unlock()
+	if a.closing {
+		return false
+	}
 	answer := make(chan string, 1)
 	go func() { answer <- a.askBeforeQuit() }()
 
@@ -76,10 +105,16 @@ func (a *App) beforeClose(context.Context) (prevent bool) {
 		case keepRunning:
 			return true
 		case stopAndQuit:
-			a.stopForQuit()
+			if err := a.stopForQuit(); err != nil {
+				a.logln("error: " + err.Error())
+				a.notifyActionFailed("stop", err.Error())
+				return true
+			}
 		}
+		a.closing = true
 		return false
 	case <-time.After(quitPromptTimeout):
+		a.closing = true
 		return false
 	}
 }
@@ -106,7 +141,8 @@ func (a *App) askBeforeQuit() string {
 }
 
 func (a *App) clinicRunning() bool {
-	if !a.loadConfig().SetupDone {
+	cfg := a.loadConfig()
+	if !cfg.SetupDone || cfg.Removing {
 		return false
 	}
 	if _, err := os.Stat(filepath.Join(a.installDir(), "docker-compose.yml")); err != nil {
@@ -124,15 +160,14 @@ func (a *App) clinicRunning() bool {
 	return false
 }
 
-func (a *App) stopForQuit() {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_ = a.engine().Stop()
-	}()
-	select {
-	case <-done:
-	case <-time.After(stopDeadline):
-		a.logln("Docker did not finish stopping in time - quitting anyway.")
+func (a *App) stopForQuit() error {
+	ctx, cancel := context.WithTimeout(context.Background(), stopDeadline)
+	defer cancel()
+	run := a.engine().Runner()
+	cmd := proc.CommandContext(ctx, "docker", "compose", "stop")
+	cmd.Dir, cmd.Env = run.Dir, run.Env
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("Docker did not finish stopping; CARE Desktop was kept open: %w: %s", err, strings.TrimSpace(string(out)))
 	}
+	return nil
 }

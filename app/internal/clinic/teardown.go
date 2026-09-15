@@ -1,23 +1,67 @@
 package clinic
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
 
-func (e *Clinic) TeardownProject() {
-	label := "label=com.docker.compose.project=" + composeProject
+type projectResource struct {
+	kind   string
+	query  []string
+	remove []string
+	ids    []string
+}
 
-	if ids := e.captureLines("docker", "ps", "-aq", "--filter", label); len(ids) > 0 {
-		e.logln("Force-removing leftover containers...")
-		_ = e.run(nil, "docker", append([]string{"rm", "-f"}, ids...)...)
+func (e *Clinic) inspectProject() ([]projectResource, error) {
+	label := "label=com.docker.compose.project=" + composeProject
+	resources := []projectResource{
+		{kind: "containers", query: []string{"ps", "-aq", "--filter", label}, remove: []string{"rm", "-f"}},
+		{kind: "volumes", query: []string{"volume", "ls", "-q", "--filter", label}, remove: []string{"volume", "rm"}},
+		{kind: "networks", query: []string{"network", "ls", "-q", "--filter", label}, remove: []string{"network", "rm"}},
 	}
-	if vols := e.captureLines("docker", "volume", "ls", "-q", "--filter", label); len(vols) > 0 {
-		_ = e.run(nil, "docker", append([]string{"volume", "rm", "-f"}, vols...)...)
+	var failed []error
+	for i := range resources {
+		ids, err := e.captureLines("docker", resources[i].query...)
+		if err != nil {
+			failed = append(failed, fmt.Errorf("could not inspect clinic %s; start Docker and retry: %w", resources[i].kind, err))
+		}
+		resources[i].ids = ids
 	}
-	if nets := e.captureLines("docker", "network", "ls", "-q", "--filter", label); len(nets) > 0 {
-		_ = e.run(nil, "docker", append([]string{"network", "rm"}, nets...)...)
+	return resources, errors.Join(failed...)
+}
+
+func (e *Clinic) TeardownProject() error {
+	resources, err := e.inspectProject()
+	if err != nil {
+		return err
 	}
+	var failed []error
+	for _, resource := range resources {
+		if len(resource.ids) == 0 {
+			continue
+		}
+		e.logln("Removing clinic " + resource.kind + "...")
+		removeErr := e.run(nil, "docker", append(resource.remove, resource.ids...)...)
+		left, err := e.captureLines("docker", resource.query...)
+		if err != nil {
+			failed = append(failed, errors.Join(removeErr, err))
+		} else if len(left) > 0 {
+			failed = append(failed, errors.Join(removeErr, fmt.Errorf("%d clinic %s remain", len(left), resource.kind)))
+		}
+	}
+	remaining, err := e.inspectProject()
+	if err != nil {
+		failed = append(failed, err)
+	} else {
+		for _, resource := range remaining {
+			if len(resource.ids) > 0 {
+				failed = append(failed, fmt.Errorf("clinic %s have not been removed", resource.kind))
+			}
+		}
+	}
+	return errors.Join(failed...)
 }
 
 func looksLikeSourceRepo(dir string) bool {

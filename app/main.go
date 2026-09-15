@@ -28,7 +28,6 @@ var assets embed.FS
 var installFS embed.FS
 
 func main() {
-	cfg := loadConfig()
 	appLog = applog.Open()
 	defer appLog.Close()
 	appLog.OnFatal = func(msg string) { fatal(errors.New(msg)) }
@@ -38,7 +37,7 @@ func main() {
 		fatal(err)
 	}
 
-	appLog.Header(app.pins.AppVersion, app.installDir(), cfg.MDNSName)
+	appLog.Header(app.pins.AppVersion, app.installDir(), app.loadConfig().MDNSName)
 	for _, line := range app.pins.Summary() {
 		appLog.Write(line)
 	}

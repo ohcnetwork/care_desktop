@@ -1,23 +1,31 @@
 package main
 
-import (
-	"errors"
-	"os"
-	"path/filepath"
+import "github.com/ohcnetwork/care_desktop/app/internal/plugins"
 
-	"github.com/ohcnetwork/care_desktop/app/internal/plugins"
-)
-
-func (a *App) ReadPlugins() ([]plugins.Plugin, error) {
-	if _, err := os.Stat(filepath.Join(a.installDir(), "backend.env")); err != nil {
-		return []plugins.Plugin{}, nil // not set up yet
-	}
-	return plugins.New(a.installDir()).ReadPlugins()
+func (a *App) ReadPlugins(adminPassword string) ([]plugins.Plugin, error) {
+	var list []plugins.Plugin
+	err := a.withJob(func() error {
+		if err := a.requireAdmin(adminPassword); err != nil {
+			return err
+		}
+		if err := a.requireSetup(); err != nil {
+			return err
+		}
+		var err error
+		list, err = plugins.New(a.installDir()).ReadPlugins()
+		return err
+	})
+	return list, err
 }
 
-func (a *App) SavePlugins(pluginList []plugins.Plugin) error {
-	if _, err := os.Stat(filepath.Join(a.installDir(), "backend.env")); err != nil {
-		return errors.New("not set up yet - run the first-time setup")
-	}
-	return plugins.New(a.installDir()).WritePlugins(pluginList)
+func (a *App) SavePlugins(pluginList []plugins.Plugin, adminPassword string) error {
+	return a.withJob(func() error {
+		if err := a.requireAdmin(adminPassword); err != nil {
+			return err
+		}
+		if err := a.requireStableClinic(); err != nil {
+			return err
+		}
+		return plugins.New(a.installDir()).WritePlugins(pluginList)
+	})
 }

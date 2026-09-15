@@ -175,7 +175,7 @@ export function useRequirementChecks(host: string, mode: ChecksMode = "setup") {
             action: {
               label: "Start clinic",
               detail: "Starts the clinic software. This takes about a minute.",
-              run: () => bridge.ClinicAction("start"),
+              run: () => bridge.ClinicAction("start", ""),
             },
           };
     } catch (e) {

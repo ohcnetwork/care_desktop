@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
 	"strings"
 
@@ -19,8 +18,8 @@ import (
 )
 
 func (a *App) run(fn func() error, markSetup bool, label string) error {
-	if !a.jobMu.TryLock() {
-		return errors.New("something else is still running - wait for it to finish")
+	if err := a.lockJob(); err != nil {
+		return err
 	}
 	go func() {
 		defer a.jobMu.Unlock()
@@ -34,29 +33,102 @@ func (a *App) run(fn func() error, markSetup bool, label string) error {
 				if !markSetup {
 					a.notifyActionFailed(label, detail)
 				}
-				wruntime.EventsEmit(a.ctx, "care-done", code)
 			}
+			a.emit("care-done", code)
 		}()
-		if err := fn(); err != nil {
+		err := fn()
+		if markSetup && err == nil {
+			cfg := a.loadConfig()
+			cfg.SetupDone = true
+			err = a.saveConfig(cfg)
+			if err == nil {
+				a.emit("setup-done", true)
+				a.notifyInstalled(cfg.MDNSName)
+			}
+		}
+		if err != nil {
 			a.logln("error: " + err.Error())
 			code = 1
 			if !markSetup {
 				a.notifyActionFailed(label, err.Error())
 			}
 		}
-		if markSetup && code == 0 {
-			cfg := a.loadConfig()
-			cfg.SetupDone = true
-			_ = a.saveConfig(cfg)
-			wruntime.EventsEmit(a.ctx, "setup-done", true)
-			a.notifyInstalled(cfg.MDNSName)
-		}
-		wruntime.EventsEmit(a.ctx, "care-done", code)
 	}()
 	return nil
 }
 
+func (a *App) lockJob() error {
+	if !a.jobMu.TryLock() {
+		return errors.New("something else is still running - wait for it to finish")
+	}
+	if a.closing {
+		a.jobMu.Unlock()
+		return errors.New("CARE Desktop is closing")
+	}
+	return nil
+}
+
+func (a *App) withJob(fn func() error) error {
+	if err := a.lockJob(); err != nil {
+		return err
+	}
+	defer a.jobMu.Unlock()
+	return fn()
+}
+
+func (a *App) requireSetup() error {
+	cfg := a.loadConfig()
+	if cfg.Removing {
+		return errors.New("cleanup is incomplete; finish removing this installation before starting or changing it")
+	}
+	if !cfg.SetupDone {
+		return errors.New("not set up yet - run the first-time setup")
+	}
+	info, err := os.Stat(filepath.Join(a.installDir(), "docker-compose.yml"))
+	if err != nil {
+		return fmt.Errorf("the installed compose file is unavailable: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("the installed compose file is not a regular file")
+	}
+	return nil
+}
+
+func (a *App) beginRemoval() error {
+	cfg := a.loadConfig()
+	cfg.Removing = true
+	if err := a.saveConfig(cfg); err != nil {
+		return err
+	}
+	a.restartAdvertise()
+	return nil
+}
+
+func (a *App) requireAdmin(password string) error {
+	if !a.loadConfig().SetupDone || !a.VerifyAdminPassword(password) {
+		return errors.New("the admin password does not match this installation")
+	}
+	return nil
+}
+
+func (a *App) requireStableClinic() error {
+	if err := a.requireSetup(); err != nil {
+		return err
+	}
+	pending, err := a.engine().Backups().PendingRestore()
+	if err != nil {
+		return err
+	}
+	if pending {
+		return errors.New("a restore is unfinished; start CARE to recover it before making other changes")
+	}
+	return nil
+}
+
 func (a *App) notifyActionFailed(label, detail string) {
+	if a.ctx == nil {
+		return
+	}
 	title := "CARE couldn't finish that"
 	switch label {
 	case "start":
@@ -81,6 +153,9 @@ func (a *App) notifyActionFailed(label, detail string) {
 }
 
 func (a *App) notifyInstalled(mdnsName string) {
+	if a.ctx == nil {
+		return
+	}
 	if mdnsName == "" {
 		mdnsName = "care.local"
 	}
@@ -97,15 +172,28 @@ func (a *App) notifyInstalled(mdnsName string) {
 	}
 }
 
-func (a *App) ClinicAction(action string) error {
-	fn := actionFunc(a.engine(), action)
-	if fn == nil {
+func (a *App) ClinicAction(action, adminPassword string) error {
+	switch action {
+	case "start", "stop", "restart", "rebuild-backend", "rebuild-frontend", "backup-now":
+	default:
 		return errors.New("action not allowed: " + action)
 	}
-	if _, err := os.Stat(filepath.Join(a.installDir(), "docker-compose.yml")); err != nil {
-		return errors.New("not set up yet - run the first-time setup")
-	}
-	return a.run(fn, false, action)
+	return a.run(func() error {
+		if err := a.requireSetup(); err != nil {
+			return err
+		}
+		if action != "start" && action != "stop" {
+			if err := a.requireStableClinic(); err != nil {
+				return err
+			}
+		}
+		if strings.HasPrefix(action, "rebuild-") {
+			if err := a.requireAdmin(adminPassword); err != nil {
+				return err
+			}
+		}
+		return actionFunc(a.engine(), action)()
+	}, false, action)
 }
 
 func actionFunc(e *clinic.Clinic, action string) func() error {
@@ -134,88 +222,85 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword, backupDir string
 		return err
 	}
 
-	if err := backup.StorePassword(backupPassword); err != nil {
-		return fmt.Errorf("couldn't save the backup password to this computer's keychain: %w", err)
-	}
-
 	host := mdns.Label(mdnsName)
 	if host == "" {
 		host = "care"
 	}
 
-	cfg := a.loadConfig()
-	cfg.MDNSName = host + ".local"
-	h, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("couldn't secure the admin password: %w", err)
-	}
-	cfg.AdminPwHash = string(h)
-	if strings.TrimSpace(backupDir) != "" {
-		cfg.BackupDir = filepath.Join(strings.TrimSpace(backupDir), "care-db-backups")
-	}
-	backupParent := strings.TrimSpace(backupDir)
-	if backupParent == "" && cfg.BackupDir != "" {
-		backupParent = filepath.Dir(cfg.BackupDir)
-	}
-	if problem := a.ValidateBackupDir(backupParent); problem != "" {
-		return errors.New(problem)
-	}
-	if err := a.saveConfig(cfg); err != nil {
+	if err := mdns.ValidateLabel(host); err != nil {
 		return err
 	}
-	a.restartAdvertise()
-	if _, err := a.ensureInstallDir(); err != nil {
-		return err
-	}
-
-	e := a.engine()
-	e.MDNSName = host
-	e.AdminPassword = adminPassword
-	e.BackupPassword = backupPassword
 	return a.run(func() error {
+		cfg := a.loadConfig()
+		if cfg.SetupDone || cfg.Removing {
+			return errors.New("this computer already has a clinic set up")
+		}
+		cfg.MDNSName = host + ".local"
+		h, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("couldn't secure the admin password: %w", err)
+		}
+		cfg.AdminPwHash = string(h)
+		if strings.TrimSpace(backupDir) != "" {
+			cfg.BackupDir = filepath.Join(strings.TrimSpace(backupDir), "care-db-backups")
+		}
+		backupParent := strings.TrimSpace(backupDir)
+		if backupParent == "" && cfg.BackupDir != "" {
+			backupParent = filepath.Dir(cfg.BackupDir)
+		}
+		if problem := a.ValidateBackupDir(backupParent); problem != "" {
+			return errors.New(problem)
+		}
+		if err := a.saveConfig(cfg); err != nil {
+			return err
+		}
+		if _, err := a.ensureInstallDir(); err != nil {
+			return err
+		}
+		e := a.engine()
+		e.AdminPassword = adminPassword
+		e.BackupPassword = backupPassword
 		if err := health.EnsurePortFree(e.Runner(), e.Host()); err != nil {
 			return err
 		}
 		if err := e.Setup(); err != nil {
 			return err
 		}
+		if err := backup.StorePassword(backupPassword); err != nil {
+			return fmt.Errorf("couldn't save the backup password to this computer's keychain: %w", err)
+		}
+		a.restartAdvertise()
 		return e.Start()
 	}, true, "setup")
 }
 
 func (a *App) CleanupFailedInstall() error {
-	a.engine().TeardownProject()
-
-	var firstErr error
-	remove := func(target string) {
-		if target == "" {
-			return
+	return a.withJob(func() error {
+		if a.loadConfig().SetupDone {
+			return errors.New("this clinic is installed; use Uninstall instead of failed-install cleanup")
 		}
-		a.logln("cleanup: removing " + target)
-		if err := os.RemoveAll(target); err != nil && firstErr == nil {
-			firstErr = err
+		e := a.engine()
+		if _, err := a.ScanResidue(); err != nil {
+			return err
 		}
-	}
-
-	remove(a.installDir())
-	remove(filepath.Dir(a.configPath())) // our own folder, named exactly
-	if runtime.GOOS == "windows" {
-		if base, err := os.UserConfigDir(); err == nil {
-			if entries, err := os.ReadDir(base); err == nil {
-				for _, ent := range entries {
-					if careAppDataName(ent.Name()) {
-						remove(filepath.Join(base, ent.Name()))
-					}
-				}
-			}
+		if err := e.Backups().PreserveRecoveryKey(); err != nil {
+			return err
 		}
-	}
-	return firstErr
-}
-
-func careAppDataName(name string) bool {
-	n := strings.NewReplacer(" ", "", "-", "", "_", "").Replace(strings.ToLower(name))
-	return strings.HasPrefix(n, "care")
+		if err := a.beginRemoval(); err != nil {
+			return err
+		}
+		if err := e.Uninstall(clinic.UninstallOptions{RemoveInstallDir: true}); err != nil {
+			return err
+		}
+		if err := backup.ForgetPassword(); err != nil {
+			return err
+		}
+		if err := a.forgetConfig(); err != nil {
+			return err
+		}
+		a.restartAdvertise()
+		return nil
+	})
 }
 
 func (a *App) ClinicStatus() (string, error) { return a.engine().Status() }

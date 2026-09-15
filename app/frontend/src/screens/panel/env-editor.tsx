@@ -113,18 +113,22 @@ function EnvRow({
   );
 }
 
-export function EnvEditor({ section }: { section: Section }) {
+export function EnvEditor({ section, adminPassword }: { section: Section; adminPassword: string }) {
   const { busy, runAction, log } = useCare();
   const [entries, setEntries] = useState<Entry[]>([]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setProblem(null);
     try {
-      setEntries(parseEnv(await bridge.ReadEnv(section)));
+      setEntries(parseEnv(await bridge.ReadEnv(section, adminPassword)));
+      setProblem("");
     } catch (e) {
-      setEntries([{ kind: "comment", raw: `# could not read ${section}.env: ${errorText(e)}` }]);
+      setEntries([]);
+      setProblem(errorText(e));
     }
-  }, [section]);
+  }, [section, adminPassword]);
 
   useEffect(() => {
     setAdvancedOpen(false);
@@ -155,12 +159,12 @@ export function EnvEditor({ section }: { section: Section }) {
   );
 
   const save = async () => {
-    if (busy) return;
+    if (busy || problem !== "") return;
     const backend = section === "backend";
     try {
-      await bridge.WriteEnv(section, serializeEnv(entries));
+      await bridge.WriteEnv(section, serializeEnv(entries), adminPassword);
       toast(backend ? "Settings applied" : "Rebuilding the app with new settings");
-      await runAction(backend ? "start" : "rebuild-frontend");
+      await runAction(backend ? "start" : "rebuild-frontend", adminPassword);
     } catch (e) {
       log(`error saving env: ${errorText(e)}`);
       toast("Couldn't save settings");
@@ -169,6 +173,12 @@ export function EnvEditor({ section }: { section: Section }) {
 
   return (
     <>
+      {problem ? (
+        <Alert variant="danger">
+          <span>{problem}</span>
+          <Button disabled={busy} onClick={() => void load()}>Retry</Button>
+        </Alert>
+      ) : null}
       <div className="flex items-center gap-[9px] text-xs font-bold tracking-[0.05em] text-muted-foreground uppercase">
         <span>Everyday settings</span>
         <span className="rounded-full bg-brand-bg px-2.5 py-[3px] font-mono text-[11.5px] font-semibold tracking-normal text-brand-ink normal-case">
@@ -203,7 +213,7 @@ export function EnvEditor({ section }: { section: Section }) {
 
       <div className="flex items-center gap-2.5">
         <Button
-          disabled={busy}
+          disabled={busy || problem !== ""}
           onClick={() =>
             setEntries((prev) => [...prev, { kind: "kv", key: "", value: "", isNew: true }])
           }
@@ -211,7 +221,7 @@ export function EnvEditor({ section }: { section: Section }) {
           Add setting
         </Button>
         <span className="flex-1" />
-        <Button variant="primary" disabled={busy} onClick={() => void save()}>
+        <Button variant="primary" disabled={busy || problem !== ""} onClick={() => void save()}>
           {section === "backend" ? "Save and apply" : "Save and rebuild app"}
         </Button>
       </div>

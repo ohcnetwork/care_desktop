@@ -17,11 +17,11 @@ func (e *Clinic) reportLeftovers(opts UninstallOptions, failed []string) {
 
 	e.logln("")
 	if len(failed) == 0 && len(kept) == 0 {
-		e.logln("Uninstall complete. Every change CARE made to this computer has been reverted.")
+		e.logln("Clinic resources removed.")
 		return
 	}
 	if len(failed) == 0 {
-		e.logln("Uninstall complete. Kept on purpose:")
+		e.logln("Clinic resources removed. Kept on purpose:")
 	} else {
 		e.logln("Uninstall finished, but these could NOT be reverted:")
 		for _, s := range failed {

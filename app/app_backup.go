@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/ohcnetwork/care_desktop/app/internal/backup"
@@ -13,29 +14,36 @@ import (
 )
 
 func (a *App) ListBackups() ([]backup.Backup, error) {
-	if _, err := os.Stat(filepath.Join(a.installDir(), "docker-compose.yml")); err != nil {
-		return nil, nil // not set up yet - no backups to offer
+	info, err := os.Stat(filepath.Join(a.installDir(), "docker-compose.yml"))
+	if os.IsNotExist(err) {
+		return []backup.Backup{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("the installed compose file is not a regular file")
 	}
 	return a.engine().Backups().ListBackups()
 }
 
-func (a *App) RestoreBackup(dbDump, filesArchive, passphrase string) error {
-	if _, err := os.Stat(filepath.Join(a.installDir(), "docker-compose.yml")); err != nil {
-		return errors.New("not set up yet - run the first-time setup")
-	}
-	if passphrase == "" {
-		passphrase = backup.LoadPassword()
-	}
-	e := a.engine()
+func (a *App) RestoreBackup(dbDump, filesArchive, passphrase, adminPassword string) error {
 	return a.run(func() error {
-		return e.Backups().Restore(dbDump, filesArchive, passphrase)
+		if err := a.requireAdmin(adminPassword); err != nil {
+			return err
+		}
+		if err := a.requireStableClinic(); err != nil {
+			return err
+		}
+		if passphrase == "" {
+			var err error
+			passphrase, err = backup.LoadPassword()
+			if err != nil {
+				return err
+			}
+		}
+		return a.engine().Backups().Restore(dbDump, filesArchive, passphrase)
 	}, false, "restore")
-}
-
-func rememberPassword(passphrase string, remember bool) {
-	if passphrase != "" && remember {
-		_ = backup.StorePassword(passphrase)
-	}
 }
 
 func (a *App) GetBackupDir() string { return a.engine().BackupDirPath() }
@@ -45,35 +53,46 @@ func (a *App) SetBackupDir(dir string) (string, error) {
 	if dir == "" {
 		return "", errors.New("choose a folder for the backups")
 	}
-	if problem := a.ValidateBackupDir(dir); problem != "" {
-		return "", errors.New(problem)
-	}
-	target := filepath.Join(dir, "care-db-backups")
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		return "", err
-	}
-
-	cfg := a.loadConfig()
-	previous := a.engine().BackupDirPath()
-	cfg.BackupDir = target
-	if err := a.saveConfig(cfg); err != nil {
-		return "", err
-	}
-
-	e := a.engine()
-	if err := e.Backups().CopyRecoveryKey(); err != nil {
-		a.logln("note: couldn't copy the recovery key into the new folder (" + err.Error() +
-			"). Restores on THIS computer still work; the folder is not yet self-contained.")
-	}
-
-	a.logln("Backups will now go to " + target)
-	if previous != "" && previous != target {
-		a.logln("Earlier backups were left in " + previous + " - move them yourself if you want them together.")
-	}
-	if err := e.RestartBackupSidecar(); err != nil {
-		return target, errors.New("the folder was saved, but the backup service didn't pick it up: " + err.Error())
-	}
-	return target, nil
+	var target string
+	err := a.withJob(func() error {
+		if err := a.requireStableClinic(); err != nil {
+			return err
+		}
+		if problem := a.ValidateBackupDir(dir); problem != "" {
+			return errors.New(problem)
+		}
+		target = filepath.Join(dir, "care-db-backups")
+		previousConfig := a.loadConfig()
+		previous := a.engine()
+		running, err := previous.Runner().Lines("docker", "compose", "ps", "--services", "--filter", "status=running")
+		if err != nil {
+			return err
+		}
+		next := a.engine()
+		next.BackupDir = target
+		if err := next.Backups().CopyRecoveryKey(); err != nil {
+			return err
+		}
+		cfg := previousConfig
+		cfg.BackupDir = target
+		if err := a.saveConfig(cfg); err != nil {
+			return err
+		}
+		if slices.Contains(running, "backup") {
+			if err := next.RestartBackupSidecar(); err != nil {
+				if saveErr := a.saveConfig(previousConfig); saveErr != nil {
+					return errors.Join(err, saveErr)
+				}
+				return errors.Join(err, previous.RestartBackupSidecar())
+			}
+		}
+		a.logln("Backups will now go to " + target)
+		if old := previous.BackupDirPath(); old != target {
+			a.logln("Earlier backups and their recovery key were left in " + old + ".")
+		}
+		return nil
+	})
+	return target, err
 }
 
 var importable = regexp.MustCompile(`^care-(?:manual-)?(\d{8}-\d{6})\.dump(?:\.enc)?$`)
@@ -100,8 +119,12 @@ func (a *App) InspectBackupFile(path string) (ImportedBackup, error) {
 		return out, errors.New("that isn't a CARE database backup. Choose a file named like " +
 			"care-20260101-020000.dump.enc - the one from the clinic's backup folder.")
 	}
-	if _, err := os.Stat(path); err != nil {
+	info, err := os.Stat(path)
+	if err != nil {
 		return out, errors.New("couldn't open that file: " + err.Error())
+	}
+	if !info.Mode().IsRegular() {
+		return out, errors.New("choose a regular backup file")
 	}
 
 	dir := filepath.Dir(path)
@@ -111,14 +134,25 @@ func (a *App) InspectBackupFile(path string) (ImportedBackup, error) {
 		DBDump:    name,
 		Encrypted: strings.HasSuffix(name, ".enc"),
 	}
-	for _, candidate := range []string{"files-" + m[1] + ".tar.gz.enc", "files-" + m[1] + ".tar.gz"} {
-		if _, err := os.Stat(filepath.Join(dir, candidate)); err == nil {
-			out.FilesArchive = candidate
-			break
+	if !strings.HasPrefix(name, "care-manual-") {
+		for _, candidate := range []string{"files-" + m[1] + ".tar.gz.enc", "files-" + m[1] + ".tar.gz"} {
+			if info, err := os.Stat(filepath.Join(dir, candidate)); err == nil && info.Mode().IsRegular() {
+				out.FilesArchive = candidate
+				break
+			} else if err != nil && !os.IsNotExist(err) {
+				return out, err
+			}
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "backup-key.pem.enc")); err == nil {
+	out.Encrypted = out.Encrypted || strings.HasSuffix(out.FilesArchive, ".enc")
+	key, err := os.Stat(filepath.Join(dir, "backup-key.pem.enc"))
+	if err == nil {
+		if !key.Mode().IsRegular() {
+			return out, errors.New("the recovery key beside this backup is not a regular file")
+		}
 		out.HasKey = true
+	} else if !os.IsNotExist(err) {
+		return out, err
 	}
 
 	scope := "database only"
@@ -132,24 +166,28 @@ func (a *App) InspectBackupFile(path string) (ImportedBackup, error) {
 	return out, nil
 }
 
-func (a *App) RestoreFromFile(path, passphrase string) error {
-	if _, err := os.Stat(filepath.Join(a.installDir(), "docker-compose.yml")); err != nil {
-		return errors.New("not set up yet - run the first-time setup")
-	}
-	found, err := a.InspectBackupFile(path)
-	if err != nil {
-		return err
-	}
-	if found.Encrypted && !found.HasKey {
-		a.logln("note: no backup-key.pem.enc beside that file - trying this computer's own key, " +
-			"which only works if the backup came from this clinic.")
-	}
-	if passphrase == "" {
-		passphrase = backup.LoadPassword()
-	}
-	e := a.engine()
+func (a *App) RestoreFromFile(path, passphrase, adminPassword string) error {
 	return a.run(func() error {
-		return e.Backups().RestoreFrom(found.Dir, found.DBDump, found.FilesArchive, passphrase)
+		if err := a.requireAdmin(adminPassword); err != nil {
+			return err
+		}
+		if err := a.requireStableClinic(); err != nil {
+			return err
+		}
+		found, err := a.InspectBackupFile(path)
+		if err != nil {
+			return err
+		}
+		if found.Encrypted && !found.HasKey {
+			a.logln("No recovery key beside that file; trying this installation's key.")
+		}
+		if passphrase == "" {
+			passphrase, err = backup.LoadPassword()
+			if err != nil {
+				return err
+			}
+		}
+		return a.engine().Backups().RestoreFrom(found.Dir, found.DBDump, found.FilesArchive, passphrase)
 	}, false, "restore")
 }
 

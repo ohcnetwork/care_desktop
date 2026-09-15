@@ -1,50 +1,72 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
+	"errors"
+	"strings"
 
 	"github.com/ohcnetwork/care_desktop/app/internal/backup"
 	"github.com/ohcnetwork/care_desktop/app/internal/clinic"
-
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/ohcnetwork/care_desktop/app/internal/sys/autostart"
 )
 
-func (a *App) RunUninstall(removeImages, removeBackups bool) error {
-	e := a.engine()
-	go func() {
-		_ = e.Uninstall(clinic.UninstallOptions{
+func (a *App) RunUninstall(removeImages, removeBackups bool, adminPassword string) error {
+	return a.run(func() error {
+		if err := a.requireAdmin(adminPassword); err != nil {
+			return err
+		}
+		if _, err := a.ScanResidue(); err != nil {
+			return err
+		}
+		e := a.engine()
+		if !removeBackups {
+			if err := e.Backups().PreserveRecoveryKey(); err != nil {
+				return err
+			}
+		}
+		if err := a.beginRemoval(); err != nil {
+			return err
+		}
+		if err := e.Uninstall(clinic.UninstallOptions{
 			RemoveImages:     removeImages,
 			RemoveInstallDir: true,
 			RemoveBackups:    removeBackups,
-		})
-		_ = a.SetAutostart(false)
-		backup.ForgetPassword()
-		_ = os.RemoveAll(filepath.Dir(a.configPath()))
-
-		a.reportUninstall(removeImages)
-		wruntime.EventsEmit(a.ctx, "uninstalled", true)
-	}()
-	return nil
+		}); err != nil {
+			return err
+		}
+		if autostart.Enabled() {
+			if err := autostart.Set(false); err != nil {
+				return err
+			}
+		}
+		if err := a.reportUninstall(removeImages); err != nil {
+			return err
+		}
+		if err := backup.ForgetPassword(); err != nil {
+			return err
+		}
+		if err := a.forgetConfig(); err != nil {
+			return err
+		}
+		a.logln("Uninstall complete.")
+		a.emit("uninstalled", true)
+		return nil
+	}, false, "uninstall")
 }
 
-func (a *App) reportUninstall(removeImages bool) {
-	var items string
-	for _, t := range a.ScanResidue().Traces {
-		if t.ID == "images" && !removeImages {
-			continue // kept on purpose
+func (a *App) reportUninstall(removeImages bool) error {
+	after, err := a.ScanResidue()
+	if err != nil {
+		return err
+	}
+	var items []string
+	for _, t := range after.Traces {
+		if t.ID == "config" || t.ID == "secret" || (t.ID == "images" && !removeImages) {
+			continue
 		}
-		items += "\n  \u2022 " + t.Label + " \u2014 " + t.Detail
+		items = append(items, t.Label+": "+t.Detail)
 	}
-	if items == "" {
-		return
+	if len(items) > 0 {
+		return errors.New("cleanup is incomplete; settings were kept so it can be retried:\n" + strings.Join(items, "\n"))
 	}
-	_, _ = wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
-		Type:  wruntime.WarningDialog,
-		Title: "Some things are still here",
-		Message: "The clinic was removed, but these are still on this computer:" + items +
-			"\n\nThey usually need an administrator rights. Setting up a clinic again offers to " +
-			"clear them, or ask your IT support to remove them.",
-		Buttons: []string{"OK"},
-	})
+	return nil
 }

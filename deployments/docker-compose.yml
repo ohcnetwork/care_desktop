@@ -91,6 +91,8 @@ services:
     restart: unless-stopped
     environment:
       CORAZA_MODE: ${CORAZA_MODE:-Off}
+      FILE_UPLOAD_BUCKET: ${FILE_UPLOAD_BUCKET:-patient-bucket}
+      FACILITY_S3_BUCKET: ${FACILITY_S3_BUCKET:-facility-bucket}
     command:
       - /bin/sh
       - -c

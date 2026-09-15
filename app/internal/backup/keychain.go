@@ -1,6 +1,10 @@
 package backup
 
-import "github.com/zalando/go-keyring"
+import (
+	"errors"
+
+	"github.com/zalando/go-keyring"
+)
 
 const (
 	keychainService = "care-desktop"
@@ -11,19 +15,26 @@ func StorePassword(pw string) error {
 	return keyring.Set(keychainService, keychainAccount, pw)
 }
 
-func LoadPassword() string {
+func LoadPassword() (string, error) {
 	pw, err := keyring.Get(keychainService, keychainAccount)
-	if err != nil {
-		return ""
+	if errors.Is(err, keyring.ErrNotFound) {
+		return "", nil
 	}
-	return pw
+	return pw, err
 }
 
-func HasPassword() bool {
+func HasPassword() (bool, error) {
 	_, err := keyring.Get(keychainService, keychainAccount)
-	return err == nil
+	if errors.Is(err, keyring.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
-func ForgetPassword() {
-	_ = keyring.Delete(keychainService, keychainAccount)
+func ForgetPassword() error {
+	err := keyring.Delete(keychainService, keychainAccount)
+	if errors.Is(err, keyring.ErrNotFound) {
+		return nil
+	}
+	return err
 }

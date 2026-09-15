@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/ohcnetwork/care_desktop/app/internal/health"
-	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 )
 
 type Backup struct {
@@ -26,6 +25,8 @@ var dumpRe = regexp.MustCompile(`^care-(?:manual-)?(\d{8}-\d{6})\.dump(?:\.enc)?
 
 var safeName = regexp.MustCompile(`^(?:care-(?:manual-)?\d{8}-\d{6}\.dump(?:\.enc)?|files-\d{8}-\d{6}\.tar\.gz(?:\.enc)?)$`)
 
+var filesRe = regexp.MustCompile(`^files-(\d{8}-\d{6})\.tar\.gz(?:\.enc)?$`)
+
 func (s *Store) ListBackups() ([]Backup, error) {
 	dir := s.BackupDir
 	entries, err := os.ReadDir(dir)
@@ -35,14 +36,18 @@ func (s *Store) ListBackups() ([]Backup, error) {
 		}
 		return nil, err
 	}
-	files := map[string]string{}
+	files := map[string]bool{}
 	for _, en := range entries {
-		n := en.Name()
-		if core, ok := strings.CutPrefix(n, "files-"); ok {
-			core = strings.TrimSuffix(core, ".enc")
-			if ts, ok := strings.CutSuffix(core, ".tar.gz"); ok {
-				files[ts] = n
-			}
+		m := filesRe.FindStringSubmatch(en.Name())
+		if m == nil {
+			continue
+		}
+		info, err := en.Info()
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode().IsRegular() {
+			files[en.Name()] = true
 		}
 	}
 	var out []Backup
@@ -51,15 +56,35 @@ func (s *Store) ListBackups() ([]Backup, error) {
 		if m == nil {
 			continue
 		}
-		ts := m[1]
-		b := Backup{
-			DBDump:       en.Name(),
-			FilesArchive: files[ts],
-			Manual:       strings.HasPrefix(en.Name(), "care-manual-"),
-			Encrypted:    strings.HasSuffix(en.Name(), ".enc"),
+		info, err := en.Info()
+		if err != nil {
+			return nil, err
 		}
-		if info, err := en.Info(); err == nil {
-			b.SizeBytes = info.Size()
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		ts := m[1]
+		if _, err := time.Parse("20060102-150405", ts); err != nil {
+			continue
+		}
+		b := Backup{
+			DBDump:    en.Name(),
+			Manual:    strings.HasPrefix(en.Name(), "care-manual-"),
+			Encrypted: strings.HasSuffix(en.Name(), ".enc"),
+			SizeBytes: info.Size(),
+		}
+		if !b.Manual {
+			candidates := []string{"files-" + ts + ".tar.gz", "files-" + ts + ".tar.gz.enc"}
+			if b.Encrypted {
+				candidates[0], candidates[1] = candidates[1], candidates[0]
+			}
+			for _, name := range candidates {
+				if files[name] {
+					b.FilesArchive = name
+					b.Encrypted = b.Encrypted || strings.HasSuffix(name, ".enc")
+					break
+				}
+			}
 		}
 		b.Label = backupLabel(ts, b.Manual, b.FilesArchive != "", b.Encrypted)
 		out = append(out, b)
@@ -103,60 +128,105 @@ func (s *Store) RestoreFrom(srcDir, dbDump, filesArchive, passphrase string) err
 	if srcDir == "" {
 		srcDir = s.BackupDir
 	}
-	dbDump = filepath.Base(dbDump)
-	if !safeName.MatchString(dbDump) || !strings.HasPrefix(dbDump, "care-") {
+	srcDir, err := filepath.Abs(srcDir)
+	if err != nil {
+		return err
+	}
+	m := dumpRe.FindStringSubmatch(dbDump)
+	if m == nil {
 		return fmt.Errorf("not a database dump: %q", dbDump)
+	}
+	if _, err := time.Parse("20060102-150405", m[1]); err != nil {
+		return fmt.Errorf("invalid backup timestamp: %q", dbDump)
 	}
 	if err := s.mustExist(srcDir, dbDump); err != nil {
 		return err
 	}
 	if filesArchive != "" {
-		filesArchive = filepath.Base(filesArchive)
-		if !safeName.MatchString(filesArchive) || !strings.HasPrefix(filesArchive, "files-") {
+		f := filesRe.FindStringSubmatch(filesArchive)
+		if f == nil {
 			return fmt.Errorf("not a files archive: %q", filesArchive)
+		}
+		if strings.HasPrefix(dbDump, "care-manual-") {
+			return fmt.Errorf("manual backups restore the database only")
+		}
+		if f[1] != m[1] {
+			return fmt.Errorf("the database and files backups must have the same timestamp")
 		}
 		if err := s.mustExist(srcDir, filesArchive); err != nil {
 			return err
 		}
 	}
 
+	var key string
 	encrypted := strings.HasSuffix(dbDump, ".enc") || strings.HasSuffix(filesArchive, ".enc")
 	if encrypted {
 		if passphrase == "" {
 			return fmt.Errorf("this backup is encrypted - the backup password is required to restore it")
 		}
-		if s.keyFor(srcDir) == "" {
+		key, err = s.keyFor(srcDir)
+		if err != nil {
+			return err
+		}
+		if key == "" {
 			return fmt.Errorf("backup encryption key not found - restore on the original computer, or copy %s into the backup folder next to the dumps", s.encKeyName())
 		}
 	}
-
-	s.logln("Restoring from backup - this replaces the current data.")
-	s.logln("Stopping app services...")
-	_ = s.dc("stop", "backend", "celery-worker", "celery-beat")
-	if err := s.dc("up", "-d", "db", "backup"); err != nil {
+	if pending, err := s.readRestoreJournal(); err != nil {
+		return err
+	} else if pending != nil {
+		return fmt.Errorf("restore %s still has recovery data; start CARE to recover or finish it before restoring another backup", pending.ID)
+	}
+	if s.EnsureRestoreImages == nil || s.Migrate == nil || s.BackendImage == "" {
+		return fmt.Errorf("staged restore images and migrations are not configured")
+	}
+	if err := s.EnsureRestoreImages(); err != nil {
 		return err
 	}
-	if err := s.restoreDB(srcDir, dbDump, passphrase); err != nil {
+	j, err := s.newRestoreJournal(filesArchive != "")
+	if err != nil {
 		return err
 	}
-	if filesArchive != "" {
-		if err := s.restoreFiles(srcDir, filesArchive, passphrase); err != nil {
-			return err
+	if err := s.writeRestoreJournal(j); err != nil {
+		return err
+	}
+	if err := s.prepareRestore(j, srcDir, dbDump, filesArchive, key, passphrase); err != nil {
+		return s.restoreFailure(j, err)
+	}
+	s.logln("Stopping and checking all CARE writers, including backups and uploads...")
+	if err := s.stopRestoreWriters(); err != nil {
+		return s.restoreFailure(j, err)
+	}
+	if j.WithFiles {
+		if err := s.snapshotRestoreFiles(j); err != nil {
+			return s.restoreFailure(j, err)
 		}
 	}
-	s.logln("Applying database migrations...")
-	if err := s.dc("up", "-d", "--wait", "--wait-timeout", "300", "db", "redis", "backend"); err != nil {
-		return err
+	j.Phase = "prepared"
+	if err := s.writeRestoreJournal(j); err != nil {
+		return s.restoreFailure(j, err)
 	}
-	if err := s.Migrate(); err != nil {
-		return err
+	if j.WithFiles {
+		if err := s.replaceRestoreFiles(j, false); err != nil {
+			return s.restoreFailure(j, err)
+		}
+	}
+	if err := s.swapRestoreDatabase(j, false); err != nil {
+		return s.restoreFailure(j, err)
+	}
+	j.Phase = "committed"
+	if err := s.writeRestoreJournal(j); err != nil {
+		return s.restoreFailure(j, err)
 	}
 	s.logln("Bringing CARE back up...")
 	if err := s.dc("up", "-d", "--wait", "--wait-timeout", "300"); err != nil {
-		return err
+		return s.restoreFailure(j, err)
 	}
 	s.logln("Waiting for CARE to become healthy...")
 	if err := health.Wait(s.Log, 3*time.Minute); err != nil {
+		return s.restoreFailure(j, err)
+	}
+	if err := s.FinishRestore(); err != nil {
 		return err
 	}
 	s.logln("")
@@ -165,98 +235,102 @@ func (s *Store) RestoreFrom(srcDir, dbDump, filesArchive, passphrase string) err
 }
 
 func (s *Store) mustExist(dir, name string) error {
-	if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
-		return fmt.Errorf("backup not found in %s: %s", dir, name)
+	info, err := os.Lstat(filepath.Join(dir, name))
+	if err != nil {
+		return fmt.Errorf("cannot read backup %s: %w", name, err)
+	}
+	if !info.Mode().IsRegular() || info.Size() == 0 {
+		return fmt.Errorf("backup must be a nonempty regular file, not a directory or link: %s", name)
 	}
 	return nil
 }
 
-func (s *Store) keyFor(dir string) string {
-	if p := filepath.Join(dir, s.encKeyName()); proc.FileExists(p) {
-		return p
+func (s *Store) keyFor(dir string) (string, error) {
+	for _, path := range []string{filepath.Join(dir, s.encKeyName()), s.encKeyPath()} {
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if !info.Mode().IsRegular() || info.Size() == 0 {
+			return "", fmt.Errorf("the backup key is not a nonempty regular file: %s", path)
+		}
+		return filepath.Abs(path)
 	}
-	if proc.FileExists(s.encKeyPath()) {
-		return s.encKeyPath()
-	}
-	return ""
+	return "", nil
 }
 
-func (s *Store) restoreDB(srcDir, dump, passphrase string) error {
-	if err := s.waitForDB(); err != nil {
+func (s *Store) prepareRestore(j *restoreJournal, srcDir, dump, archive, key, passphrase string) error {
+	s.logln("Copying and fully validating the backup without changing the current database or files...")
+	if err := s.createRestoreVolume(j, j.stageVolume()); err != nil {
 		return err
 	}
-	s.logln("Restoring database from " + dump + " ...")
-	script := `set -e
-export PGPASSWORD="$POSTGRES_PASSWORD"
-DB="${POSTGRES_DB:-care}"; H="${POSTGRES_HOST:-db}"; U="${POSTGRES_USER:-postgres}"
-` + s.plaintextOf(dump, "RESTORE_FILE", "/tmp/care-restore.dump") + `
-# Validate the archive BEFORE dropping anything. Decrypting proves the password
-# was right, not that the dump is intact; without this a corrupt-but-decryptable
-# file gets as far as dropdb+createdb and then fails, leaving an empty database
-# where a working clinic used to be. scripts/backup.sh runs the same check before
-# it writes, so a dump that fails here was damaged in storage or in transit.
-pg_restore --list "$RESTORE_FILE" >/dev/null
-psql -h "$H" -U "$U" -d postgres -v ON_ERROR_STOP=1 \
-  -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$DB' AND pid<>pg_backend_pid();"
-dropdb -h "$H" -U "$U" --if-exists "$DB"
-createdb -h "$H" -U "$U" "$DB"
-pg_restore -h "$H" -U "$U" -d "$DB" --no-owner --no-privileges "$RESTORE_FILE"`
-	if err := s.runInBackupImage(srcDir, passphrase, script); err != nil {
-		return fmt.Errorf("database restore failed: %w", err)
+	script := "set -eu\numask 077\n" + stageBackupFile(dump, "database.dump")
+	if archive != "" {
+		script += stageBackupFile(archive, "files.tar.gz")
 	}
-	return nil
-}
-
-func (s *Store) plaintextOf(name, v, tmp string) string {
-	src := "/backups/" + name
-	if !strings.HasSuffix(name, ".enc") {
-		return v + `="` + src + `"`
+	script += "pg_restore --exit-on-error --file=/dev/null /restore/database.dump\nsync\n"
+	mounts := []string{"--mount", restoreMount("volume", j.stageVolume(), "/restore", false),
+		"--mount", restoreMount("bind", srcDir, "/backups", true)}
+	if key != "" {
+		mounts = append(mounts, "--mount", restoreMount("bind", key, "/restore-key.pem.enc", true))
 	}
-	return `KEY=/backups/` + s.encKeyName() + `
-[ -f "$KEY" ] || KEY=/keys/` + s.encKeyName() + `
-` + v + `=` + tmp + `
-trap 'rm -f "$` + v + `"' EXIT
-openssl cms -decrypt -binary -inform DER -in "` + src + `" -out "$` + v + `" -inkey "$KEY" -passin env:BACKUP_PASS`
-}
-
-func (s *Store) runInBackupImage(srcDir, passphrase, script string, extra ...string) error {
-	args := []string{"run", "--rm", "--network", s.Project,
-		"--env-file", filepath.Join(s.Dir, "backend.env")}
-	if passphrase != "" {
-		args = append(args, "-e", "BACKUP_PASS="+passphrase)
+	args := s.restoreHelperArgs(j, "preflight", "none", mounts...)
+	args = append(args, "-e", "BACKUP_PASS", s.Image, "sh", "-c", script)
+	if err := s.run.RunWith([]string{"BACKUP_PASS=" + passphrase}, "docker", args...); err != nil {
+		return fmt.Errorf("backup copy, decryption or full dump validation failed: %w", err)
 	}
-	args = append(args, extra...)
-	args = append(args,
-		"-v", srcDir+":/backups:ro",
-		"-v", s.keysDir()+":/keys:ro",
-		s.Image, "sh", "-c", script)
-	return s.run.Run("docker", args...)
-}
-
-func (s *Store) waitForDB() error {
-	for n := 1; n <= 20; n++ {
-		if s.dc("exec", "-T", "backup", "sh", "-c",
-			`pg_isready -h "${POSTGRES_HOST:-db}" -U "${POSTGRES_USER:-postgres}" -q`) == nil {
-			return nil
+	if j.WithFiles {
+		args := s.restoreHelperArgs(j, "extract", "none",
+			"--mount", restoreMount("volume", j.stageVolume(), "/restore", false))
+		args = append(args, "--read-only", "--user", "0:0", "--entrypoint", "python", s.BackendImage, "-B", "-c", validateRestoreFiles)
+		if err := s.run.Run("docker", args...); err != nil {
+			return fmt.Errorf("files archive validation or staged extraction failed: %w", err)
 		}
-		s.logln(fmt.Sprintf("  waiting for database... (%d)", n))
-		time.Sleep(5 * time.Second)
 	}
-	return fmt.Errorf("the database did not start, so nothing was changed - start CARE and try the restore again")
+	if err := s.startRestoreDB(); err != nil {
+		return err
+	}
+	state, err := s.restoreDatabaseState(j)
+	if err != nil {
+		return err
+	}
+	if state.Live == nil || state.Staged != nil || state.Old != nil {
+		return fmt.Errorf("the current database is missing or a staging database name is already in use")
+	}
+	j.OriginalOID = state.Live.OID
+	if err := s.writeRestoreJournal(j); err != nil {
+		return err
+	}
+	s.logln("Restoring the replacement into a separate database...")
+	if err := s.runRestoreSQL(j, "stage-db", createRestoreDatabase,
+		"--mount", restoreMount("volume", j.stageVolume(), "/restore", true)); err != nil {
+		return fmt.Errorf("staged database restore failed: %w", err)
+	}
+	s.logln("Applying migrations only to the staged database...")
+	if err := s.Migrate(j.stagedDatabase(), j.ID); err != nil {
+		return fmt.Errorf("staged database migration failed: %w", err)
+	}
+	state, err = s.restoreDatabaseState(j)
+	if err != nil {
+		return err
+	}
+	if state.Live == nil || state.Live.OID != j.OriginalOID || state.Staged == nil ||
+		state.Staged.Tag != j.tag() || state.Old != nil {
+		return fmt.Errorf("database identity changed while preparing the restore")
+	}
+	j.StagedOID = state.Staged.OID
+	return s.writeRestoreJournal(j)
 }
 
-func (s *Store) restoreFiles(srcDir, archive, passphrase string) error {
-	s.logln("Restoring uploaded files from " + archive + " ...")
-	_ = s.dc("stop", "minio")
-	script := `set -e
-` + s.plaintextOf(archive, "ARCHIVE", "/tmp/files.tar.gz") + `
-tar -tzf "$ARCHIVE" >/dev/null
-cd /minio-data
-rm -rf ./* ./.[!.]* ./..?* 2>/dev/null || true
-tar xzf "$ARCHIVE" -C /minio-data`
-	if err := s.runInBackupImage(srcDir, passphrase, script,
-		"-v", s.Project+"_minio-data:/minio-data"); err != nil {
-		return fmt.Errorf("file restore failed: %w", err)
+func stageBackupFile(name, target string) string {
+	script := "[ -f /backups/" + name + " ] && [ ! -L /backups/" + name + " ]\n"
+	if strings.HasSuffix(name, ".enc") {
+		return script + "cp /backups/" + name + " /restore/" + target + ".enc\n" +
+			"openssl cms -decrypt -binary -inform DER -in /restore/" + target + ".enc -out /restore/" + target +
+			" -inkey /restore-key.pem.enc -passin env:BACKUP_PASS\n"
 	}
-	return nil
+	return script + "cp /backups/" + name + " /restore/" + target + "\n"
 }

@@ -63,7 +63,7 @@
 		reverse_proxy backend:9000
 	}
 
-	@buckets path /patient-bucket/* /facility-bucket/*
+	@buckets path /{$FILE_UPLOAD_BUCKET:patient-bucket}/* /{$FACILITY_S3_BUCKET:facility-bucket}/*
 	handle @buckets {
 		reverse_proxy minio:9000
 	}

@@ -10,76 +10,104 @@ import (
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-func (a *App) ScanResidue() residue.Report {
+func (a *App) ScanResidue() (residue.Report, error) {
 	e := a.engine()
+	dir, err := a.residueInstallDir(e)
+	if err != nil {
+		return residue.Report{}, err
+	}
+	stored, err := backup.HasPassword()
+	if err != nil {
+		return residue.Report{}, err
+	}
 	return residue.Scan(residue.Options{
 		Runner:       e.Runner(),
 		Project:      e.Project(),
-		InstallDir:   a.residueInstallDir(e),
+		InstallDir:   dir,
 		ConfigPath:   a.configPath(),
 		Images:       e.Images(),
-		StoredSecret: backup.HasPassword(),
+		StoredSecret: stored,
 	})
 }
 
 func (a *App) PurgeResidue() error {
-	if a.loadConfig().SetupDone {
-		return errors.New("this computer already has a clinic set up - use Uninstall in the panel instead")
-	}
-
-	before := a.ScanResidue()
-	if before.Clean {
+	return a.withJob(func() error {
+		cfg := a.loadConfig()
+		if cfg.SetupDone && !cfg.Removing {
+			return errors.New("this computer already has a clinic set up - use Uninstall in the panel instead")
+		}
+		before, err := a.ScanResidue()
+		if err != nil {
+			return err
+		}
+		if before.Clean {
+			return nil
+		}
+		if a.ctx == nil {
+			return errors.New("open CARE Desktop to confirm removal of the earlier installation")
+		}
+		items := ""
+		kept := "\n\nYour backups and their recovery key are kept. Make sure you know the backup password before removing its saved copy."
+		for _, t := range before.Traces {
+			items += "\n  - " + t.Label + ": " + t.Detail
+		}
+		sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
+			Type: wruntime.QuestionDialog, Title: "Remove the earlier CARE Desktop?",
+			Message: "This computer still has these from an earlier CARE Desktop:\n" + items +
+				"\n\nClinic data, images, settings, installed files and old logs will be deleted. This cannot be undone." + kept,
+			Buttons: []string{"Remove everything", "Cancel"}, DefaultButton: "Cancel", CancelButton: "Cancel",
+		})
+		if err != nil {
+			return err
+		}
+		if sel != "Remove everything" {
+			return nil
+		}
+		e := a.engine()
+		e.InstallDir, err = a.residueInstallDir(e)
+		if err != nil {
+			return err
+		}
+		if folder := a.log.Folder(); folder != "" {
+			if err := backup.CheckLocation(e.BackupDirPath(), folder); err != nil {
+				return err
+			}
+		}
+		if err := e.Backups().PreserveRecoveryKey(); err != nil {
+			return err
+		}
+		if err := a.beginRemoval(); err != nil {
+			return err
+		}
+		a.logln("Removing the earlier CARE Desktop from this computer...")
+		if err := e.Purge(); err != nil {
+			return err
+		}
+		if err := a.reportUninstall(true); err != nil {
+			return err
+		}
+		if err := a.log.PurgeFolder(); err != nil {
+			return err
+		}
+		if err := backup.ForgetPassword(); err != nil {
+			return err
+		}
+		if err := a.forgetConfig(); err != nil {
+			return err
+		}
+		after, err := a.ScanResidue()
+		if err != nil {
+			return err
+		}
+		a.reportPurge(after)
+		if !after.Clean {
+			return errors.New("cleanup is incomplete; remove the reported leftovers before setting up another clinic")
+		}
 		return nil
-	}
-
-	items := ""
-	for _, t := range before.Traces {
-		items += "\n  • " + t.Label + " — " + t.Detail
-	}
-
-	kept := "\n\nYour backups are NOT touched."
-	if dir := a.loadConfig().BackupDir; dir != "" {
-		kept = "\n\nYour backups in " + dir + " are NOT touched."
-	}
-	if backup.HasPassword() {
-		kept += " Restoring them later needs your backup password, and this removes " +
-			"the saved copy from this computer - make sure you know it before continuing."
-	}
-	sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
-		Type:  wruntime.QuestionDialog,
-		Title: "Remove the earlier CARE Desktop?",
-		Message: "This computer still has these from an earlier CARE Desktop:\n" + items +
-			"\n\nEverything above is deleted - clinic data, images, settings, installed files, " +
-			"and this app's log files. " +
-			"This cannot be undone." + kept +
-			"\n\nYour computer needs to be clean before a new clinic can be set up.",
-		Buttons:       []string{"Remove everything", "Cancel"},
-		DefaultButton: "Cancel",
-		CancelButton:  "Cancel",
 	})
-	if err != nil || sel != "Remove everything" {
-		return nil
-	}
-
-	a.logln("Removing the earlier CARE Desktop from this computer...")
-	e := a.engine()
-	e.InstallDir = a.residueInstallDir(e)
-	if err := e.Purge(); err != nil {
-		return err
-	}
-	backup.ForgetPassword()
-	a.forgetConfig()
-
-	if err := a.log.PurgeFolder(); err != nil {
-		a.logln("note: couldn't remove the old log files (" + err.Error() + ")")
-	}
-
-	after := a.ScanResidue()
-	a.reportPurge(after)
-	return nil
 }
 
-func (a *App) residueInstallDir(e *clinic.Clinic) string {
+func (a *App) residueInstallDir(e *clinic.Clinic) (string, error) {
 	return residue.InstallDirFrom(e.Runner(), e.Project(), e.InstallDir)
 }
 

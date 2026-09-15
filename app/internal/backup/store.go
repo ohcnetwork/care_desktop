@@ -5,15 +5,17 @@ import (
 )
 
 type Store struct {
-	Dir       string
-	BackupDir string
-	Image     string
-	Host      string
-	Project   string
-	Log       func(string)
+	Dir          string
+	BackupDir    string
+	Image        string
+	BackendImage string
+	Host         string
+	Project      string
+	Log          func(string)
 
-	EnsureImage func() error
-	Migrate     func() error
+	EnsureImage         func() error
+	EnsureRestoreImages func() error
+	Migrate             func(database, restoreID string) error
 
 	run proc.Runner
 }

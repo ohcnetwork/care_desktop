@@ -16,10 +16,11 @@ const RESTORE_INFO =
   "Restoring replaces today's data with the chosen copy. CARE pauses for a moment while it restores, and you confirm before anything changes.";
 
 export function BackupsTab() {
-  const { backups, busy, runAction, reloadBackups, restore } = useCare();
+  const { backups, backupsError, busy, runAction, reloadBackups, restore } = useCare();
   const [showInfo, setShowInfo] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [passphrase, setPassphrase] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
 
   return (
     <div className="flex flex-col gap-3">
@@ -37,7 +38,7 @@ export function BackupsTab() {
         />
         <span className="flex-1" />
         <span className="text-[13px] text-muted-foreground">
-          {backups.length ? `${backups.length} kept` : ""}
+          {!backupsError && backups.length ? `${backups.length} kept` : ""}
         </span>
         <Button
           disabled={busy}
@@ -53,7 +54,9 @@ export function BackupsTab() {
       {showInfo ? <Alert>{RESTORE_INFO}</Alert> : null}
 
       <div className="overflow-hidden rounded-xl border border-line bg-card shadow-card">
-        {backups.length === 0 ? (
+        {backupsError ? (
+          <Alert variant="danger">Could not read the backup folder: {backupsError}</Alert>
+        ) : backups.length === 0 ? (
           <div className="p-5 text-center text-[13px] text-faint">
             No backups yet. Click <b>Back up now</b> or wait for the daily backup.
           </div>
@@ -88,6 +91,7 @@ export function BackupsTab() {
                   </Badge>
                   <Button disabled={busy} onClick={() => {
                       setPassphrase("");
+                      setAdminPassword("");
                       setConfirming(backup.db_dump);
                     }}>
                     Restore
@@ -95,6 +99,16 @@ export function BackupsTab() {
                 </div>
                 {confirming === backup.db_dump ? (
                   <div className="flex flex-col gap-3 border-t border-danger-bg bg-danger-tint px-4 py-[13px] text-[12.5px] text-danger-ink">
+                    <label className="flex items-center gap-3">
+                      <span className="flex-none">Admin password</span>
+                      <input
+                        type="password"
+                        autoComplete="current-password"
+                        value={adminPassword}
+                        onChange={(e) => setAdminPassword(e.target.value)}
+                        className="min-w-0 flex-1 rounded-sm border border-danger-bg bg-white px-2 py-1 font-mono text-[12.5px] text-ink"
+                      />
+                    </label>
                     {backup.encrypted ? (
                       <label className="flex items-center gap-3">
                         <span className="flex-none">Backup password</span>
@@ -115,9 +129,12 @@ export function BackupsTab() {
                       <Button onClick={() => setConfirming(null)}>Cancel</Button>
                       <Button
                         variant="destructive"
+                        disabled={busy || !adminPassword}
                         onClick={() => {
                           setConfirming(null);
-                          void restore(backup, passphrase);
+                          void restore(backup, passphrase, adminPassword);
+                          setAdminPassword("");
+                          setPassphrase("");
                         }}
                       >
                         Yes, restore
@@ -190,11 +207,12 @@ function BackupFolderRow() {
 
 /** Restore a backup that came from another computer, chosen with the file picker. */
 function ImportCard() {
-  const { busy, log } = useCare();
+  const { busy, restoreFile } = useCare();
   const [found, setFound] = useState<ImportedBackup | null>(null);
   const [problem, setProblem] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
 
   const pick = async () => {
     const path = await bridge.ChooseBackupFile();
@@ -202,6 +220,7 @@ function ImportCard() {
     setProblem("");
     setConfirming(false);
     setPassphrase("");
+    setAdminPassword("");
     try {
       setFound(await bridge.InspectBackupFile(path));
     } catch (e) {
@@ -260,6 +279,16 @@ function ImportCard() {
               />
             </label>
           ) : null}
+          <label className="flex items-center gap-3 text-[12.5px]">
+            <span className="flex-none text-muted-foreground">Admin password</span>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={adminPassword}
+              onChange={(e) => setAdminPassword(e.target.value)}
+              className="min-w-0 flex-1 rounded-sm border border-line bg-white px-2 py-1 font-mono text-[12.5px] text-ink"
+            />
+          </label>
 
           {confirming ? (
             <div className="flex items-center gap-3 rounded-lg border border-danger-bg bg-danger-tint px-3.5 py-[11px] text-[12.5px] text-danger-ink">
@@ -269,12 +298,12 @@ function ImportCard() {
               <Button onClick={() => setConfirming(false)}>Cancel</Button>
               <Button
                 variant="destructive"
+                disabled={busy || !adminPassword}
                 onClick={() => {
                   setConfirming(false);
-                  toast("Restore started — data will be replaced");
-                  void bridge
-                    .RestoreFromFile(found.path, passphrase)
-                    .catch((e) => log(`error: ${errorText(e)}`));
+                  void restoreFile(found.path, passphrase, adminPassword);
+                  setAdminPassword("");
+                  setPassphrase("");
                 }}
               >
                 Yes, restore

@@ -1,10 +1,14 @@
 package plugins
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/compose-spec/compose-go/v2/dotenv"
+	"github.com/ohcnetwork/care_desktop/app/internal/sys/atomicfile"
 )
 
 type Manager struct {
@@ -25,13 +29,19 @@ type Plugin struct {
 func (m *Manager) backendEnvPath() string { return filepath.Join(m.Dir, "backend.env") }
 
 func (m *Manager) ReadPlugins() ([]Plugin, error) {
-	raw := strings.TrimSpace(m.envVar(additionalPlugsKey))
+	raw, err := m.AdditionalPlugs()
+	if err != nil {
+		return nil, err
+	}
 	if raw == "" {
 		return []Plugin{}, nil
 	}
-	var plugs []Plugin
+	plugs := []Plugin{}
 	if err := json.Unmarshal([]byte(raw), &plugs); err != nil {
 		return nil, err
+	}
+	if plugs == nil {
+		return []Plugin{}, nil
 	}
 	return plugs, nil
 }
@@ -43,24 +53,26 @@ func (m *Manager) WritePlugins(plugs []Plugin) error {
 		if err != nil {
 			return err
 		}
-		raw = string(b)
+		raw = "'" + strings.ReplaceAll(string(b), "'", `\'`) + "'"
 	}
 	return m.setEnvVar(additionalPlugsKey, raw)
 }
 
-func (m *Manager) AdditionalPlugs() string { return strings.TrimSpace(m.envVar(additionalPlugsKey)) }
+func (m *Manager) AdditionalPlugs() (string, error) {
+	value, err := m.envVar(additionalPlugsKey)
+	return strings.TrimSpace(value), err
+}
 
-func (m *Manager) envVar(key string) string {
+func (m *Manager) envVar(key string) (string, error) {
 	b, err := os.ReadFile(m.backendEnvPath())
 	if err != nil {
-		return ""
+		return "", err
 	}
-	for _, line := range strings.Split(string(b), "\n") {
-		if v, ok := strings.CutPrefix(strings.TrimSpace(line), key+"="); ok {
-			return v
-		}
+	env, err := dotenv.Parse(bytes.NewReader(b))
+	if err != nil {
+		return "", err
 	}
-	return ""
+	return env[key], nil
 }
 
 func (m *Manager) setEnvVar(key, val string) error {
@@ -69,23 +81,30 @@ func (m *Manager) setEnvVar(key, val string) error {
 	if err != nil {
 		return err
 	}
-	lines := strings.Split(string(b), "\n")
-	for i, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), key+"=") {
-			if val == "" {
-				lines = append(lines[:i], lines[i+1:]...)
-			} else {
-				lines[i] = key + "=" + val
+	lines := make([]string, 0)
+	found := false
+	for _, line := range strings.Split(string(b), "\n") {
+		text := strings.TrimPrefix(strings.TrimSpace(line), "export ")
+		name, _, ok := strings.Cut(text, "=")
+		if ok && strings.TrimSpace(name) == key {
+			if !found && val != "" {
+				lines = append(lines, key+"="+val)
 			}
-			return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+			found = true
+			continue
 		}
+		lines = append(lines, line)
 	}
-	if val != "" {
+	if !found && val != "" {
 		if n := len(lines); n > 0 && lines[n-1] == "" {
 			lines = append(lines[:n-1], key+"="+val, "")
 		} else {
 			lines = append(lines, key+"="+val)
 		}
 	}
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+	output := strings.Join(lines, "\n")
+	if _, err := dotenv.Parse(strings.NewReader(output)); err != nil {
+		return err
+	}
+	return atomicfile.Write(path, []byte(output), 0o600)
 }

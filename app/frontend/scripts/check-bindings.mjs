@@ -42,4 +42,17 @@ if (missing.length > 0) {
   console.error("\nRename both sides, or the UI fails at runtime, not at build.");
   process.exit(1);
 }
+const parameters = (text) => text.split(",").map((s) => s.trim()).filter(Boolean).length;
+const goParameters = new Map(
+  [...go.matchAll(/^func \(a \*App\) ([A-Z]\w*)\(([^)]*)\)/gm)]
+    .map((m) => [m[1], parameters(m[2])]),
+);
+const mismatched = [...block.matchAll(/^\s+([A-Z]\w*)\(([^)]*)\)/gm)]
+  .filter((m) => goParameters.get(m[1]) !== parameters(m[2]));
+if (mismatched.length > 0) {
+  for (const m of mismatched) {
+    console.error(`${m[1]}: Go accepts ${goParameters.get(m[1])} arguments, wails.d.ts declares ${parameters(m[2])}`);
+  }
+  process.exit(1);
+}
 console.log(`bindings ok — ${declared.length} declared, all present on the Go App`);

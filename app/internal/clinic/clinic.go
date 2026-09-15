@@ -36,6 +36,8 @@ func (e *Clinic) baseEnv() []string {
 	env := os.Environ()
 	set := func(k, v string) { env = append(env, k+"="+v) }
 	set("PATH", proc.AugmentedPath())
+	set("COMPOSE_PROJECT_NAME", composeProject)
+	set("COMPOSE_FILE", filepath.Join(e.InstallDir, "docker-compose.yml"))
 	set("BACKEND_IMAGE", e.Pins.BackendImage)
 	set("FRONTEND_IMAGE", e.Pins.FrontendImage)
 	set("POSTGRES_IMAGE", e.Pins.PostgresImage)
@@ -113,7 +115,7 @@ func (e *Clinic) capture(name string, args ...string) (string, error) {
 	return e.Runner().Capture(name, args...)
 }
 
-func (e *Clinic) captureLines(name string, args ...string) []string {
+func (e *Clinic) captureLines(name string, args ...string) ([]string, error) {
 	return e.Runner().Lines(name, args...)
 }
 

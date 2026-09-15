@@ -2,13 +2,17 @@ package release
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/compose-spec/compose-go/v2/dotenv"
 )
 
 const EnvFile = ".env"
+
+var versionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-dev)?$`)
 
 type Pins struct {
 	AppVersion string
@@ -86,5 +90,29 @@ func Load(env []byte) (*Pins, error) {
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("%s is missing required values: %s", EnvFile, strings.Join(missing, ", "))
 	}
+	if !versionPattern.MatchString(p.AppVersion) {
+		return nil, fmt.Errorf("CARE_DESKTOP_VERSION must be X.Y.Z or X.Y.Z-dev")
+	}
+	if !strings.HasSuffix(p.AppVersion, "-dev") {
+		for _, ref := range []struct {
+			key   string
+			value string
+		}{
+			{"CARE_BE_REF", p.BeRef},
+			{"CARE_FE_REF", p.FeRef},
+		} {
+			if !IsCommitRef(ref.value) {
+				return nil, fmt.Errorf("%s must be a full commit SHA for a release; moving refs require a -dev CARE_DESKTOP_VERSION", ref.key)
+			}
+		}
+	}
 	return &p, nil
+}
+
+func IsCommitRef(ref string) bool {
+	if len(ref) != 40 {
+		return false
+	}
+	_, err := hex.DecodeString(ref)
+	return err == nil
 }

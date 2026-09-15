@@ -1,6 +1,8 @@
 package hosts
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,6 +26,7 @@ func path() string {
 }
 
 func hasEntry(data, host string) bool {
+	found := false
 	for _, ln := range strings.Split(data, "\n") {
 		line := strings.TrimSpace(ln)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -32,20 +35,27 @@ func hasEntry(data, host string) bool {
 		if i := strings.IndexByte(line, '#'); i >= 0 {
 			line = line[:i] // drop any trailing comment
 		}
-		for _, field := range strings.Fields(line) {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		for _, field := range fields[1:] {
 			if strings.EqualFold(field, host) {
-				return true
+				if !net.ParseIP(fields[0]).IsLoopback() {
+					return false
+				}
+				found = true
 			}
 		}
 	}
-	return false
+	return found
 }
 
 func line(host string) string { return "127.0.0.1 " + host + " " + marker }
 
 func addSh(host string) string {
-	p := path()
-	return "echo '' >> " + p + "; echo " + elevate.ShQuote(line(host)) + " >> " + p
+	p := elevate.ShQuote(path())
+	return "printf '\\n%s\\n' " + elevate.ShQuote(line(host)) + " >> " + p
 }
 
 func addPS(host string) string {
@@ -54,10 +64,11 @@ func addPS(host string) string {
 }
 
 func Step(log func(string), host string) (elevate.Step, bool) {
-	if data, err := os.ReadFile(path()); err == nil && hasEntry(string(data), host) {
+	if HasEntry(host) {
 		return elevate.Step{}, false
 	}
-	if err := addUnprivileged(host); err == nil {
+	_ = addUnprivileged(host)
+	if HasEntry(host) {
 		logln(log, "Added a hosts entry so https://"+host+"/ opens on this computer.")
 		return elevate.Step{}, false
 	}
@@ -66,6 +77,11 @@ func Step(log func(string), host string) (elevate.Step, bool) {
 		Sh:   addSh(host),
 		PS:   addPS(host),
 	}, true
+}
+
+func HasEntry(host string) bool {
+	data, err := os.ReadFile(path())
+	return err == nil && hasEntry(string(data), host)
 }
 
 func addUnprivileged(host string) error {
@@ -77,7 +93,7 @@ func addUnprivileged(host string) error {
 
 func Remove(log func(string), confirm func(string, string) bool, host string) string {
 	data, err := os.ReadFile(path())
-	if err != nil || !strings.Contains(string(data), marker) {
+	if os.IsNotExist(err) || err == nil && !strings.Contains(string(data), marker) {
 		return ""
 	}
 	logln(log, "Removing the "+host+" hosts entry...")
@@ -89,25 +105,44 @@ func Remove(log func(string), confirm func(string, string) bool, host string) st
 		_ = proc.Command("powershell", "-NoProfile", "-Command", ps).Run()
 		return Leftover(host)
 	}
-	p := path()
-	sh := `t=$(mktemp) && grep -v ` + elevate.ShQuote(marker) + ` ` + p +
-		` > "$t" && cat "$t" > ` + p + `; rm -f "$t"`
-	if elevate.Run(sh, false) == nil {
-		return Leftover(host)
+	return removeUnix(confirm, host, path(), elevate.Run)
+}
+
+func removeSh(p string) string {
+	return `t=$(mktemp) || exit $?; trap 'rm -f "$t"' EXIT; grep -F -v ` +
+		elevate.ShQuote(marker) + ` ` + elevate.ShQuote(p) +
+		` > "$t"; status=$?; [ "$status" -le 1 ] || exit "$status"; cat "$t" > ` + elevate.ShQuote(p)
+}
+
+func removeUnix(confirm func(string, string) bool, host, p string, run func(string, bool) error) string {
+	sh := removeSh(p)
+	_ = run(sh, false)
+	if leftover(host, p) == "" {
+		return ""
 	}
 	if confirm == nil || confirm("Remove the "+host+" hosts entry?",
 		"Remove the line CARE added to this computer's hosts file?\n\nThis needs administrator approval.") {
-		_ = elevate.Run(sh, true)
+		_ = run(sh, true)
 	}
-	return Leftover(host)
+	return leftover(host, p)
 }
 
 func Leftover(host string) string {
-	data, err := os.ReadFile(path())
-	if err != nil || !strings.Contains(string(data), marker) {
+	return leftover(host, path())
+}
+
+func leftover(host, p string) string {
+	data, err := os.ReadFile(p)
+	if os.IsNotExist(err) {
 		return ""
 	}
-	return "The line \"" + line(host) + "\" is still in " + path() +
+	if err != nil {
+		return "Could not check CARE's hosts entry in " + p + ": " + err.Error()
+	}
+	if !strings.Contains(string(data), marker) {
+		return ""
+	}
+	return "The line \"" + line(host) + "\" is still in " + p +
 		". Until it is removed this computer resolves " + host + " to itself."
 }
 
@@ -118,6 +153,21 @@ func logln(log func(string), s string) {
 }
 
 func Present() bool {
-	data, err := os.ReadFile(path())
-	return err == nil && strings.Contains(string(data), marker)
+	present, err := Inspect()
+	return present || err != nil
+}
+
+func Inspect() (bool, error) {
+	return inspect(path())
+}
+
+func inspect(p string) (bool, error) {
+	data, err := os.ReadFile(p)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("could not inspect %s: %w", p, err)
+	}
+	return strings.Contains(string(data), marker), nil
 }

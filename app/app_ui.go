@@ -42,4 +42,6 @@ func (a *App) OpenLogFolder() error {
 
 func (a *App) AutostartEnabled() bool { return autostart.Enabled() }
 
-func (a *App) SetAutostart(on bool) error { return autostart.Set(on) }
+func (a *App) SetAutostart(on bool) error {
+	return a.withJob(func() error { return autostart.Set(on) })
+}

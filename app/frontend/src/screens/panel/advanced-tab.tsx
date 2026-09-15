@@ -22,14 +22,14 @@ import { EnvEditor } from "./env-editor";
 import { PluginTable } from "./plugin-table";
 
 export function AdvancedTab() {
-  const [unlocked, setUnlocked] = useState(false);
+  const [adminPassword, setAdminPassword] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("backend");
 
-  if (!unlocked) return <AdminGate onUnlock={() => setUnlocked(true)} />;
+  if (adminPassword === null) return <AdminGate onUnlock={setAdminPassword} />;
 
   return (
     <div className="flex flex-col gap-3">
-      <RebuildCard />
+      <RebuildCard adminPassword={adminPassword} />
       <LogRow />
 
       <Accordion type="multiple">
@@ -42,7 +42,7 @@ export function AdvancedTab() {
           </AccordionTrigger>
           <AccordionContent>
             <SectionSwitch section={section} onChange={setSection} />
-            <EnvEditor key={section} section={section} />
+            <EnvEditor key={section} section={section} adminPassword={adminPassword} />
           </AccordionContent>
         </AccordionItem>
 
@@ -51,7 +51,7 @@ export function AdvancedTab() {
             <SectionTitle title="Plugins" summary="Extra features for CARE" />
           </AccordionTrigger>
           <AccordionContent>
-            <PluginTable />
+            <PluginTable adminPassword={adminPassword} />
           </AccordionContent>
         </AccordionItem>
 
@@ -63,7 +63,7 @@ export function AdvancedTab() {
             />
           </AccordionTrigger>
           <AccordionContent>
-            <UninstallPanel />
+            <UninstallPanel adminPassword={adminPassword} />
           </AccordionContent>
         </AccordionItem>
       </Accordion>
@@ -88,22 +88,22 @@ function SectionSwitch({
   );
 }
 
-function RebuildCard() {
+function RebuildCard({ adminPassword }: { adminPassword: string }) {
   const { busy, runAction } = useCare();
   return (
     <Card className="flex items-center gap-3.5 px-[18px] py-4">
       <div className="min-w-0 flex-1">
         <CardTitle>Rebuild the app</CardTitle>
-        <CardDescription>Latest code and settings. Patient data is kept.</CardDescription>
+        <CardDescription>Bundled code and current settings. Patient data is kept.</CardDescription>
       </div>
-      <Button disabled={busy} onClick={() => void runAction("rebuild-frontend")}>
+      <Button disabled={busy} onClick={() => void runAction("rebuild-frontend", adminPassword)}>
         Rebuild
       </Button>
     </Card>
   );
 }
 
-function AdminGate({ onUnlock }: { onUnlock: () => void }) {
+function AdminGate({ onUnlock }: { onUnlock: (password: string) => void }) {
   const [password, setPassword] = useState("");
   const [reveal, setReveal] = useState(false);
   const [error, setError] = useState("");
@@ -117,7 +117,7 @@ function AdminGate({ onUnlock }: { onUnlock: () => void }) {
     setChecking(true);
     try {
       if (await bridge.VerifyAdminPassword(password)) {
-        onUnlock();
+        onUnlock(password);
         return;
       }
       setError("That password does not match the admin password.");
@@ -176,7 +176,7 @@ function AdminGate({ onUnlock }: { onUnlock: () => void }) {
   );
 }
 
-function UninstallPanel() {
+function UninstallPanel({ adminPassword }: { adminPassword: string }) {
   const { busy, uninstall } = useCare();
   const [removeBackups, setRemoveBackups] = useState(false);
   const [removeImages, setRemoveImages] = useState(false);
@@ -213,7 +213,7 @@ function UninstallPanel() {
             variant="destructive"
             onClick={() => {
               setConfirming(false);
-              void uninstall(removeImages, removeBackups);
+              void uninstall(removeImages, removeBackups, adminPassword);
             }}
           >
             Yes, delete

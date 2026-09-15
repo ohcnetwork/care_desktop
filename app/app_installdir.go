@@ -13,16 +13,13 @@ import (
 )
 
 func (a *App) installDir() string {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		base, _ = os.UserHomeDir()
-	}
+	base := filepath.Dir(a.configPath())
 	if runtime.GOOS == "windows" {
-		if home, herr := os.UserHomeDir(); herr == nil {
-			base = home
+		if home, err := os.UserHomeDir(); err == nil && filepath.IsAbs(home) {
+			base = filepath.Join(home, appDirName)
 		}
 	}
-	return filepath.Join(base, appDirName, installSubdir)
+	return filepath.Join(base, installSubdir)
 }
 
 const installSubdir = "install"

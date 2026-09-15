@@ -41,7 +41,7 @@ declare global {
           ValidateBackupDir(dir: string): Promise<string>;
           SetMDNSName(name: string): Promise<void>;
           VerifyAdminPassword(pw: string): Promise<boolean>;
-          ClinicAction(action: string): Promise<void>;
+          ClinicAction(action: string, adminPassword: string): Promise<void>;
           ClinicStatus(): Promise<string>;
           RunSetup(
             mdnsName: string,
@@ -50,18 +50,18 @@ declare global {
             backupDir: string,
           ): Promise<void>;
           CleanupFailedInstall(): Promise<void>;
-          ReadEnv(name: string): Promise<string>;
-          WriteEnv(name: string, content: string): Promise<void>;
-          ReadPlugins(): Promise<CarePlugin[]>;
-          SavePlugins(plugins: CarePlugin[]): Promise<void>;
+          ReadEnv(name: string, adminPassword: string): Promise<string>;
+          WriteEnv(name: string, content: string, adminPassword: string): Promise<void>;
+          ReadPlugins(adminPassword: string): Promise<CarePlugin[]>;
+          SavePlugins(plugins: CarePlugin[], adminPassword: string): Promise<void>;
           ListBackups(): Promise<Backup[]>;
           GetBackupDir(): Promise<string>;
           SetBackupDir(dir: string): Promise<string>;
           ChooseBackupFile(): Promise<string>;
           InspectBackupFile(path: string): Promise<ImportedBackup>;
-          RestoreFromFile(path: string, passphrase: string): Promise<void>;
-          RestoreBackup(dbDump: string, filesArchive: string, passphrase: string): Promise<void>;
-          RunUninstall(removeImages: boolean, removeBackups: boolean): Promise<void>;
+          RestoreFromFile(path: string, passphrase: string, adminPassword: string): Promise<void>;
+          RestoreBackup(dbDump: string, filesArchive: string, passphrase: string, adminPassword: string): Promise<void>;
+          RunUninstall(removeImages: boolean, removeBackups: boolean, adminPassword: string): Promise<void>;
           OpenURL(url: string): Promise<void>;
           ChooseFolder(title: string): Promise<string>;
           LogPath(): Promise<string>;

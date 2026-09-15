@@ -33,6 +33,7 @@ export type AppState = {
   setup_done: boolean;
   mdns_name: string;
   docker: DockerStatus;
+  restore_pending: boolean;
 };
 
 /** One thing an earlier CARE Desktop left on this computer. */

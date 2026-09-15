@@ -5,6 +5,7 @@ import { ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Alert } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -61,18 +62,20 @@ function serializeBackend(rows: Row[]): CarePlugin[] {
 const CELL =
   "h-[30px] rounded-sm border-transparent bg-transparent px-2 font-mono text-[12.5px] hover:border-line focus-visible:border-brand focus-visible:bg-white";
 
-export function PluginTable() {
+export function PluginTable({ adminPassword }: { adminPassword: string }) {
   const { busy, runAction, log } = useCare();
   const [rows, setRows] = useState<Row[]>([]);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
   const nextUid = useRef(0);
+  const [problem, setProblem] = useState<string | null>(null);
 
   const take = () => nextUid.current++;
 
   const load = useCallback(async () => {
     setExpanded(new Set());
+    setProblem(null);
     try {
-      const raw = await bridge.ReadPlugins();
+      const raw = await bridge.ReadPlugins(adminPassword);
       setRows(
         raw.map((p) => ({
           uid: nextUid.current++,
@@ -85,10 +88,12 @@ export function PluginTable() {
           })),
         })),
       );
-    } catch {
+      setProblem("");
+    } catch (e) {
       setRows([]);
+      setProblem(errorText(e));
     }
-  }, []);
+  }, [adminPassword]);
 
   useEffect(() => {
     void load();
@@ -115,11 +120,11 @@ export function PluginTable() {
     });
 
   const save = async () => {
-    if (busy) return;
+    if (busy || problem !== "") return;
     try {
-      await bridge.SavePlugins(serializeBackend(rows));
+      await bridge.SavePlugins(serializeBackend(rows), adminPassword);
       toast("Rebuilding the backend");
-      await runAction("rebuild-backend");
+      await runAction("rebuild-backend", adminPassword);
     } catch (e) {
       log(`error saving plugins: ${errorText(e)}`);
       toast(firstLine(errorText(e)));
@@ -145,6 +150,12 @@ export function PluginTable() {
 
   return (
     <>
+      {problem ? (
+        <Alert variant="danger">
+          <span>{problem}</span>
+          <Button disabled={busy} onClick={() => void load()}>Retry</Button>
+        </Alert>
+      ) : null}
       <div>
         <div className="flex items-center gap-2.5 px-5 pb-2 text-[11.5px] font-bold tracking-[0.05em] text-faint uppercase">
           <span className="w-[190px] flex-none">Name</span>
@@ -263,7 +274,7 @@ export function PluginTable() {
       <div className="flex items-center gap-2.5">
         {/* Controlled with an always-empty value so the picker acts as a menu:
             choosing an entry adds a row and the trigger falls back to its label. */}
-        <Select value="" disabled={busy} onValueChange={addFromPicker}>
+        <Select value="" disabled={busy || problem !== ""} onValueChange={addFromPicker}>
           <SelectTrigger className="w-auto min-w-[190px]" aria-label="Add a plugin">
             <SelectValue placeholder="Add a plugin" />
           </SelectTrigger>
@@ -279,7 +290,7 @@ export function PluginTable() {
           </SelectContent>
         </Select>
         <span className="flex-1" />
-        <Button variant="primary" disabled={busy} onClick={() => void save()}>
+        <Button variant="primary" disabled={busy || problem !== ""} onClick={() => void save()}>
           Save and rebuild backend
         </Button>
       </div>

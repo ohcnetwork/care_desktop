@@ -1,7 +1,6 @@
 package mdns
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"regexp"
@@ -59,17 +58,44 @@ func (a *Advertiser) IPsChanged() bool {
 }
 
 func (a *Advertiser) Resolves() bool {
+	return a.resolves(hmdns.Query)
+}
+
+func (a *Advertiser) resolves(query func(*hmdns.QueryParam) error) bool {
 	if a == nil || a.stopped() {
 		return false
 	}
+	entries := make(chan *hmdns.ServiceEntry, 32)
+	params := hmdns.DefaultParams("_https._tcp")
+	params.Timeout = 2 * time.Second
+	params.DisableIPv6 = true
+	params.Entries = entries
+	result := make(chan error, 1)
+	go func() {
+		result <- query(params)
+		close(entries)
+	}()
+	found := false
+	for entry := range entries {
+		if a.matches(entry) {
+			found = true
+		}
+	}
+	return <-result == nil && found && !a.stopped()
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	addrs, err := net.DefaultResolver.LookupHost(ctx, a.name+".local")
-	if err != nil || len(addrs) == 0 {
+func (a *Advertiser) matches(entry *hmdns.ServiceEntry) bool {
+	if entry == nil || !strings.EqualFold(entry.Name, a.name+"._https._tcp.local.") ||
+		!strings.EqualFold(entry.Host, a.name+".local.") || entry.Port != 443 ||
+		len(entry.InfoFields) != 1 || entry.InfoFields[0] != "CARE Desktop" {
 		return false
 	}
-	return true
+	for _, ip := range a.ips {
+		if ip.Equal(entry.AddrV4) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Advertiser) stopped() bool {

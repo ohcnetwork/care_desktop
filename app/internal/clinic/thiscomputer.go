@@ -3,10 +3,9 @@ package clinic
 import (
 	"strings"
 
+	"github.com/ohcnetwork/care_desktop/app/internal/sys/elevate"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/hosts"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/trust"
-
-	"github.com/ohcnetwork/care_desktop/app/internal/sys/elevate"
 )
 
 func (e *Clinic) setUpThisComputer() {
@@ -21,22 +20,36 @@ func (e *Clinic) setUpThisComputer() {
 	if need {
 		steps = append(steps, step)
 	}
-	if len(steps) == 0 {
-		return
+	var err error
+	if len(steps) > 0 {
+		title, message := confirmPrompt(host, steps)
+		if e.Confirm == nil || !e.Confirm(title, message) {
+			e.logln("Skipped - other devices can still use the clinic, but this computer's own " +
+				"browser may not open https://" + host + "/. Starting CARE again will offer this once more.")
+			return
+		}
+		err = elevate.Steps(steps)
 	}
+	e.logln(localSetupResult(host, hosts.HasEntry(host), trust.HostTrusts(host), err))
+}
 
-	title, message := confirmPrompt(host, steps)
-	if e.Confirm == nil || !e.Confirm(title, message) {
-		e.logln("Skipped - other devices can still use the clinic, but this computer's own " +
-			"browser may not open https://" + host + "/. Starting CARE again will offer this once more.")
-		return
+func localSetupResult(host string, hostsReady, trustReady bool, err error) string {
+	var incomplete []string
+	if !hostsReady {
+		incomplete = append(incomplete, "the local hosts entry")
 	}
-	if err := elevate.Steps(steps); err != nil {
-		e.logln("Could not finish local setup (" + err.Error() +
-			"). Other devices are unaffected; open http://" + host + "/setup to do it by hand.")
-		return
+	if !trustReady {
+		incomplete = append(incomplete, "certificate trust")
 	}
-	e.logln("This computer can now open https://" + host + "/.")
+	if len(incomplete) == 0 {
+		return "This computer can now open https://" + host + "/."
+	}
+	detail := ""
+	if err != nil {
+		detail = " (" + err.Error() + ")"
+	}
+	return "Could not confirm " + strings.Join(incomplete, " and ") + detail +
+		". Other devices are unaffected; open http://localhost/setup to finish local setup by hand."
 }
 
 func confirmPrompt(host string, steps []elevate.Step) (title, message string) {

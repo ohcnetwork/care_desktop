@@ -56,7 +56,7 @@ func (r Runner) Run(name string, args ...string) error {
 func (r Runner) RunWith(extraEnv []string, name string, args ...string) error {
 	cmd := r.cmd(name, args...)
 	if len(extraEnv) > 0 {
-		cmd.Env = append(cmd.Env, extraEnv...)
+		cmd.Env = append(cmd.Environ(), extraEnv...)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -103,10 +103,13 @@ func (r Runner) Capture(name string, args ...string) (string, error) {
 }
 
 // Lines returns Capture's non-empty output lines, trimmed.
-func (r Runner) Lines(name string, args ...string) []string {
+func (r Runner) Lines(name string, args ...string) ([]string, error) {
 	out, err := r.Capture(name, args...)
-	if err != nil || out == "" {
-		return nil
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+	}
+	if out == "" {
+		return nil, nil
 	}
 	var lines []string
 	for _, ln := range strings.Split(out, "\n") {
@@ -114,7 +117,7 @@ func (r Runner) Lines(name string, args ...string) []string {
 			lines = append(lines, s)
 		}
 	}
-	return lines
+	return lines, nil
 }
 
 func AugmentedPath() string {

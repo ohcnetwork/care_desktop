@@ -1,11 +1,19 @@
 package clinic
 
+import "fmt"
+
 func (e *Clinic) RebuildBackend() error {
+	if err := e.Backups().RecoverRestore(); err != nil {
+		return err
+	}
 	if err := e.Builder().BuildBackend(); err != nil {
 		return err
 	}
-	if err := e.dc("up", "-d", "--wait", "--wait-timeout", "300", "backend"); err != nil {
+	if err := e.stopWorkers(); err != nil {
 		return err
+	}
+	if err := e.dc("up", "-d", "--wait", "--wait-timeout", "300", "backend"); err != nil {
+		return fmt.Errorf("backend startup failed; workers and the scheduler remain stopped: %w", err)
 	}
 	if err := e.migrate(); err != nil {
 		return err
@@ -18,6 +26,9 @@ func (e *Clinic) RebuildBackend() error {
 }
 
 func (e *Clinic) RebuildFrontend() error {
+	if err := e.Backups().RecoverRestore(); err != nil {
+		return err
+	}
 	if err := e.Builder().BuildFrontend(); err != nil {
 		return err
 	}

@@ -15,7 +15,7 @@ until curl -sf http://localhost:9000/minio/health/ready >/dev/null 2>&1; do
 	sleep 2
 done
 
-mc alias set local http://localhost:9000 "${MINIO_ACCESS_KEY:-minioadmin}" "${MINIO_SECRET_KEY:-minioadmin}"
+mc alias set local http://localhost:9000 "${MINIO_ROOT_USER:?MINIO_ROOT_USER not set}" "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD not set}"
 
 mc mb -p "local/$PATIENT"
 mc mb -p "local/$FACILITY"

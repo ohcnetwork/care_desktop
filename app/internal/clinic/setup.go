@@ -2,9 +2,14 @@ package clinic
 
 import (
 	"os"
+
+	"github.com/ohcnetwork/care_desktop/app/internal/backup"
 )
 
 func (e *Clinic) Setup() error {
+	if err := backup.CheckLocation(e.backupDir(), e.InstallDir); err != nil {
+		return err
+	}
 	if err := e.genSecret(); err != nil {
 		return err
 	}

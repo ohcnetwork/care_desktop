@@ -36,29 +36,36 @@ jobs:
         with:
           node-version: 20
 
-      # NSIS writes the version as X.X.X.X, so it has to be plain numbers — a
-      # workflow_dispatch run has no tag and gets 0.0.0 rather than a branch name.
-      - name: Resolve version
+      - name: Validate release identity
         id: v
         shell: bash
         run: |
-          case "$GITHUB_REF_NAME" in
-            v[0-9]*) version="${GITHUB_REF_NAME#v}" ;;
-            *)       version="0.0.0" ;;
-          esac
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      # wails.json is the only place the version reaches both Info.plist and the
-      # NSIS installer, so stamp the tag in before building.
-      - name: Stamp version
-        shell: bash
-        run: |
-          node -e '
-            const fs = require("fs"), p = "app/wails.json";
-            const j = JSON.parse(fs.readFileSync(p, "utf8"));
-            j.info.productVersion = process.argv[1];
-            fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
-          ' "${{ steps.v.outputs.version }}"
+          node <<'NODE'
+          const fs = require("fs");
+          const env = fs.readFileSync("deployments/.env", "utf8");
+          const value = key => {
+            const matches = [...env.matchAll(new RegExp(`^${key}=([^\\r\\n]+)$`, "gm"))];
+            if (matches.length !== 1) throw new Error(`Expected one ${key} in deployments/.env`);
+            return matches[0][1].trim();
+          };
+          const version = value("CARE_DESKTOP_VERSION");
+          if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(version)) {
+            throw new Error("Release installers require a numeric X.Y.Z version");
+          }
+          const metadata = JSON.parse(fs.readFileSync("app/wails.json", "utf8"));
+          if (metadata.info.productVersion !== version) {
+            throw new Error("wails.json productVersion must equal CARE_DESKTOP_VERSION");
+          }
+          if (process.env.GITHUB_REF.startsWith("refs/tags/") && process.env.GITHUB_REF_NAME !== `v${version}`) {
+            throw new Error(`Release tag must be v${version}`);
+          }
+          for (const key of ["CARE_BE_REF", "CARE_FE_REF"]) {
+            if (!/^[0-9a-f]{40}$/i.test(value(key))) {
+              throw new Error(`${key} must be a full commit SHA`);
+            }
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+          NODE
 
       # wails only warns and exits 0 when makensis is absent, so without this a
       # missing NSIS would produce a green build carrying no installer.
@@ -83,9 +90,6 @@ jobs:
             test -f "app/install/$f" || { echo "::error::staging missed $f"; exit 1; }
           done
 
-      # No -ldflags version: CARE_DESKTOP_VERSION in deployments/.env is the single
-      # source, embedded with the pins it describes. wails.json is stamped from the
-      # tag above only because Info.plist and NSIS need it in their own metadata.
       - name: Build
         working-directory: app
         run: wails build -platform ${{ matrix.platform }} -clean ${{ matrix.extra }}

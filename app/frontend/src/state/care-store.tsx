@@ -94,13 +94,15 @@ type CareStore = {
   trouble: boolean;
   version: string;
   backups: Backup[];
+  backupsError: string;
   autostart: boolean;
   refresh: () => Promise<void>;
   reloadBackups: () => Promise<void>;
-  runAction: (action: string) => Promise<void>;
+  runAction: (action: string, adminPassword?: string) => Promise<void>;
   setAutostart: (on: boolean) => Promise<void>;
-  restore: (backup: Backup, passphrase?: string) => Promise<void>;
-  uninstall: (removeImages: boolean, removeBackups: boolean) => Promise<void>;
+  restore: (backup: Backup, passphrase: string, adminPassword: string) => Promise<void>;
+  restoreFile: (path: string, passphrase: string, adminPassword: string) => Promise<void>;
+  uninstall: (removeImages: boolean, removeBackups: boolean, adminPassword: string) => Promise<void>;
   log: (line: string) => void;
 };
 
@@ -125,8 +127,10 @@ export function CareProvider({ children }: { children: ReactNode }) {
   const [system, setSystem] = useState<SystemState>("unknown");
   const [version, setVersion] = useState("");
   const [backups, setBackups] = useState<Backup[]>([]);
+  const [backupsError, setBackupsError] = useState("");
   const [autostart, setAutostartState] = useState(false);
   const [trouble, setTrouble] = useState(false);
+  const [bootError, setBootError] = useState<Error | null>(null);
 
   // Refs shadow the state the event handlers and the poll timer read, so they
   // never work from a stale closure and never need to re-subscribe.
@@ -222,16 +226,11 @@ export function CareProvider({ children }: { children: ReactNode }) {
       const health = await bridge.ClinicHealth();
       if (health.active) next = "running";
       else {
-        let ps = "";
-        try {
-          ps = await bridge.ClinicStatus();
-        } catch {
-          ps = "";
-        }
+        const ps = await bridge.ClinicStatus();
         next = ps.trim() ? "partial" : "stopped";
       }
     } catch {
-      next = "stopped";
+      next = "unknown";
     }
     setSystem(next);
 
@@ -245,13 +244,15 @@ export function CareProvider({ children }: { children: ReactNode }) {
   const reloadBackups = useCallback(async () => {
     try {
       setBackups(await bridge.ListBackups());
-    } catch {
-      setBackups([]);
+      setBackupsError("");
+    } catch (e) {
+      setBackupsError(firstLine(errorText(e)));
+      log(`backups: ${errorText(e)}`);
     }
-  }, []);
+  }, [log]);
 
   const runAction = useCallback(
-    async (action: string) => {
+    async (action: string, adminPassword = "") => {
       if (busyRef.current) return;
       // What the operator asked for, which is what makes a stopped clinic either
       // a fault or a choice. Not persisted: the panel starts the clinic on every
@@ -267,7 +268,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
       setBusy(true, ACTION_LABELS[action] ?? "Working");
       log(`\n$ care ${action}`);
       try {
-        await bridge.ClinicAction(action);
+        await bridge.ClinicAction(action, adminPassword);
       } catch (e) {
         log(`error: ${errorText(e)}`);
         setBusy(false);
@@ -298,7 +299,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
   );
 
   const restore = useCallback(
-    async (backup: Backup, passphrase = "") => {
+    async (backup: Backup, passphrase: string, adminPassword: string) => {
       if (busyRef.current) return;
       setBusy(true, "Restoring");
       log(
@@ -306,7 +307,22 @@ export function CareProvider({ children }: { children: ReactNode }) {
       );
       toast("Restore started — data will be replaced");
       try {
-        await bridge.RestoreBackup(backup.db_dump, backup.files_archive, passphrase);
+        await bridge.RestoreBackup(backup.db_dump, backup.files_archive, passphrase, adminPassword);
+      } catch (e) {
+        log(`error: ${errorText(e)}`);
+        setBusy(false);
+      }
+    },
+    [log, setBusy],
+  );
+
+  const restoreFile = useCallback(
+    async (path: string, passphrase: string, adminPassword: string) => {
+      if (busyRef.current) return;
+      setBusy(true, "Restoring");
+      log("\n$ care restore imported backup");
+      try {
+        await bridge.RestoreFromFile(path, passphrase, adminPassword);
       } catch (e) {
         log(`error: ${errorText(e)}`);
         setBusy(false);
@@ -316,14 +332,14 @@ export function CareProvider({ children }: { children: ReactNode }) {
   );
 
   const uninstall = useCallback(
-    async (removeImages: boolean, removeBackups: boolean) => {
+    async (removeImages: boolean, removeBackups: boolean, adminPassword: string) => {
       if (busyRef.current) return;
       setBusy(true, "Uninstalling");
       log(
         `\n$ care uninstall${removeImages ? " --images" : ""}${removeBackups ? " --backups" : ""} --yes`,
       );
       try {
-        await bridge.RunUninstall(removeImages, removeBackups);
+        await bridge.RunUninstall(removeImages, removeBackups, adminPassword);
       } catch (e) {
         log(`error: ${errorText(e)}`);
         setBusy(false);
@@ -337,28 +353,28 @@ export function CareProvider({ children }: { children: ReactNode }) {
     stoppedOnPurposeRef.current = false;
     downStreakRef.current = 0;
     setTrouble(false);
+    let restorePending = false;
     try {
       const state = await bridge.GetState();
       setMdnsName(state.mdns_name || "care.local");
-    } catch {
-      /* keep whatever the setup flow already told us */
+      restorePending = state.restore_pending;
+    } catch (e) {
+      setBootError(new Error(errorText(e)));
+      return;
     }
     setTab("overview");
     await reloadBackups();
     await refresh();
     await syncAutostart();
-    // Bring the clinic back up on any launch, not just an autostart one: the app
-    // quitting is what takes care.local off the network, so opening it again is
-    // the operator's way of putting the clinic back. Gated on health, never
-    // unconditional — restarting a stack that is already serving would drop the
-    // clinic for a minute in the middle of a consultation.
     try {
       const health = await bridge.ClinicHealth();
-      if (!health.active && !busyRef.current) {
+      if ((!health.active || restorePending) && !busyRef.current) {
         log(
-          (await bridge.WasAutostartLaunched())
-            ? "\nLaunched at startup — starting CARE..."
-            : "\nCARE isn't running — starting it...",
+          restorePending
+            ? "\nRecovering an unfinished restore..."
+            : (await bridge.WasAutostartLaunched())
+              ? "\nLaunched at startup — starting CARE..."
+              : "\nCARE isn't running — starting it...",
         );
         await runAction("start");
       }
@@ -414,14 +430,15 @@ export function CareProvider({ children }: { children: ReactNode }) {
   }, [setFlow, setRun]);
 
   const retryInstall = useCallback(async () => {
-    // Windows: wipe the half-staged install files so the retry re-stages clean. No-op elsewhere.
     try {
       await bridge.CleanupFailedInstall();
     } catch (e) {
-      console.log(`cleanup: ${errorText(e)}`);
+      log(`cleanup: ${errorText(e)}`);
+      toast(firstLine(errorText(e)));
+      return;
     }
     restartSetup();
-  }, [restartSetup]);
+  }, [log, restartSetup]);
 
   // --- host events ------------------------------------------------------
   useEffect(() => {
@@ -451,6 +468,13 @@ export function CareProvider({ children }: { children: ReactNode }) {
         setBusy(false);
         void refresh();
         void reloadBackups();
+        void bridge.GetState().then((state) => {
+          if (!state.setup_done) {
+            setStepsDone(NO_STEPS_DONE);
+            setOpenStep("checks");
+            setFlow("setup");
+          }
+        }).catch((e) => log(`state: ${errorText(e)}`));
       }),
       onCareEvent("setup-done", () => {
         const current = runRef.current;
@@ -468,7 +492,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
       }),
     ];
     return () => unsubscribes.forEach((off) => off?.());
-  }, [failInstall, log, refresh, reloadBackups, setBusy, setRun, setStepDone]);
+  }, [failInstall, log, refresh, reloadBackups, setBusy, setRun, setStepDone, setFlow]);
 
   // --- boot + status poll ----------------------------------------------
   useEffect(() => {
@@ -481,6 +505,8 @@ export function CareProvider({ children }: { children: ReactNode }) {
           setFlow("panel");
           await bootPanel();
         }
+      } catch (e) {
+        setBootError(new Error(errorText(e)));
       } finally {
         setReady(true);
       }
@@ -516,22 +542,25 @@ export function CareProvider({ children }: { children: ReactNode }) {
       trouble,
       version,
       backups,
+      backupsError,
       autostart,
       refresh,
       reloadBackups,
       runAction,
       setAutostart,
       restore,
+      restoreFile,
       uninstall,
       log,
     }),
     [
       ready, flow, mdnsName, openStep, stepsDone, setStepDone,
       run, startInstall, retryInstall, restartSetup, openPanel,
-      tab, busy, busyLabel, system, trouble, version, backups, autostart, refresh, reloadBackups,
-      runAction, setAutostart, restore, uninstall, log,
+      tab, busy, busyLabel, system, trouble, version, backups, backupsError, autostart, refresh, reloadBackups,
+      runAction, setAutostart, restore, restoreFile, uninstall, log,
     ],
   );
 
+  if (bootError) throw bootError;
   return <CareContext.Provider value={value}>{children}</CareContext.Provider>;
 }

@@ -49,14 +49,15 @@ Darwin)
   security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$PEM"
   ;;
 Linux)
-  # chmod: mktemp makes the copy 0600, but a CA anchor must be world-readable.
   if [ -d /usr/local/share/ca-certificates ]; then
-    cp "$PEM" /usr/local/share/ca-certificates/care-root.crt
-    chmod 644 /usr/local/share/ca-certificates/care-root.crt
+    ANCHOR=/usr/local/share/ca-certificates/care-root.crt
+    cp "$PEM" "$ANCHOR"
+    chmod 644 "$ANCHOR"
     update-ca-certificates >/dev/null
   elif [ -d /etc/pki/ca-trust/source/anchors ]; then
-    cp "$PEM" /etc/pki/ca-trust/source/anchors/care-root.crt
-    chmod 644 /etc/pki/ca-trust/source/anchors/care-root.crt
+    ANCHOR=/etc/pki/ca-trust/source/anchors/care-root.crt
+    cp "$PEM" "$ANCHOR"
+    chmod 644 "$ANCHOR"
     update-ca-trust
   else
     echo "Couldn't find this system's certificate directory. Install it by hand:" >&2
@@ -65,9 +66,15 @@ Linux)
   fi
   # Firefox and Chrome keep their own store, so the system one isn't enough.
   if [ -n "${SUDO_USER:-}" ] && command -v certutil >/dev/null 2>&1; then
-    for db in $(sudo -u "$SUDO_USER" sh -c 'ls -d ~/.pki/nssdb ~/.mozilla/firefox/*.default* 2>/dev/null' || true); do
-      sudo -u "$SUDO_USER" certutil -d "sql:$db" -A -t "C,," -n "CARE Desktop Local CA" -i "$PEM" 2>/dev/null || true
-    done
+    sudo -H -u "$SUDO_USER" sh -c '
+      for db in "$HOME/.pki/nssdb" "$HOME"/.mozilla/firefox/*.default*; do
+        [ -d "$db" ] || continue
+        if ! certutil -d "sql:$db" -A -t "C,," -n "CARE Desktop Local CA" -i "$1"; then
+          echo "System trust was updated, but browser certificate import failed for $db. Close the browser and run this installer again." >&2
+          exit 1
+        fi
+      done
+    ' sh "$ANCHOR"
   fi
   ;;
 *)

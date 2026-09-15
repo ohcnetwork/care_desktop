@@ -1,6 +1,8 @@
 package residue
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -33,42 +35,66 @@ type Options struct {
 	StoredSecret bool
 }
 
-func Scan(o Options) Report {
+func Scan(o Options) (Report, error) {
 	var traces []Trace
+	var failed []error
 	add := func(id, label, detail string) {
 		traces = append(traces, Trace{ID: id, Label: label, Detail: detail})
 	}
 
 	label := "label=com.docker.compose.project=" + o.Project
 
-	if n := len(o.Runner.Lines("docker", "ps", "-aq", "--filter", label)); n > 0 {
-		add("containers", "Clinic containers", plural(n, "container", "containers")+" from an earlier install")
+	for _, resource := range []struct {
+		id, label, one, many string
+		args                 []string
+	}{
+		{"containers", "Clinic containers", "container", "containers", []string{"ps", "-aq", "--filter", label}},
+		{"volumes", "Old clinic data", "data volume", "data volumes", []string{"volume", "ls", "-q", "--filter", label}},
+		{"networks", "Clinic network", "network", "networks", []string{"network", "ls", "-q", "--filter", label}},
+	} {
+		ids, err := o.Runner.Lines("docker", resource.args...)
+		if err != nil {
+			failed = append(failed, fmt.Errorf("could not inspect %s; start Docker and try again: %w", resource.label, err))
+		} else if len(ids) > 0 {
+			add(resource.id, resource.label, plural(len(ids), resource.one, resource.many)+" from an earlier install")
+		}
+	}
+	images, err := presentImages(o.Runner, o.Images)
+	if err != nil {
+		failed = append(failed, err)
+	} else if len(images) > 0 {
+		add("images", "Clinic images", plural(len(images), "Docker image", "Docker images")+" from an earlier install")
 	}
 
-	if n := len(o.Runner.Lines("docker", "volume", "ls", "-q", "--filter", label)); n > 0 {
-		add("volumes", "Old clinic data", plural(n, "data volume", "data volumes")+" from an earlier install")
-	}
-	if n := len(o.Runner.Lines("docker", "network", "ls", "-q", "--filter", label)); n > 0 {
-		add("networks", "Clinic network", plural(n, "network", "networks")+" from an earlier install")
-	}
-	if n := len(presentImages(o.Runner, o.Images)); n > 0 {
-		add("images", "Clinic images", plural(n, "Docker image", "Docker images")+" from an earlier install")
-	}
-
-	if hasComposeFile(o.InstallDir) {
+	if _, err := os.Stat(o.InstallDir); err == nil {
 		add("install-dir", "Installed files", o.InstallDir)
+	} else if !os.IsNotExist(err) {
+		failed = append(failed, fmt.Errorf("could not inspect installed files: %w", err))
 	}
-	if o.ConfigPath != "" && proc.FileExists(o.ConfigPath) {
-		add("config", "Saved settings", o.ConfigPath)
+	if o.ConfigPath != "" {
+		if _, err := os.Stat(o.ConfigPath); err == nil {
+			add("config", "Saved settings", o.ConfigPath)
+		} else if !os.IsNotExist(err) {
+			failed = append(failed, fmt.Errorf("could not inspect saved settings: %w", err))
+		}
 	}
 
-	if hosts.Present() {
+	hostsEntry, err := hosts.Inspect()
+	if err != nil {
+		failed = append(failed, err)
+	} else if hostsEntry {
 		add("hosts", "Hosts file entry", "this computer still resolves the old clinic address to itself")
 	}
-	if trust.Present() {
+	trusted, err := trust.Inspect()
+	if err != nil {
+		failed = append(failed, err)
+	} else if trusted {
 		add("certificate", "Security certificate", "this computer still trusts the old clinic's certificate")
 	}
-	if netfix.RulesPresent(o.Runner) {
+	firewall, err := netfix.InspectRules(o.Runner)
+	if err != nil {
+		failed = append(failed, err)
+	} else if firewall {
 		add("firewall", "Firewall rules", "the clinic's inbound rules are still in place")
 	}
 	if autostart.Enabled() {
@@ -78,34 +104,57 @@ func Scan(o Options) Report {
 		add("secret", "Saved backup password", "the old backup password is still in this computer's password store")
 	}
 
-	return Report{Clean: len(traces) == 0, Traces: traces}
+	return Report{Clean: len(traces) == 0 && len(failed) == 0, Traces: traces}, errors.Join(failed...)
 }
 
-func InstallDirFrom(run proc.Runner, project, configured string) string {
-	if hasComposeFile(configured) {
-		return configured
+func InstallDirFrom(run proc.Runner, project, configured string) (string, error) {
+	found, err := hasComposeFile(configured)
+	if err != nil || found {
+		return configured, err
 	}
-	for _, dir := range run.Lines("docker", "ps", "-a",
+	dirs, err := run.Lines("docker", "ps", "-a",
 		"--filter", "label=com.docker.compose.project="+project,
-		"--format", `{{index .Labels "com.docker.compose.project.working_dir"}}`) {
-		if dir = strings.TrimSpace(dir); hasComposeFile(dir) {
-			return dir
+		"--format", `{{index .Labels "com.docker.compose.project.working_dir"}}`)
+	if err != nil {
+		return configured, fmt.Errorf("could not locate the earlier installation; start Docker and try again: %w", err)
+	}
+	for _, dir := range dirs {
+		dir = strings.TrimSpace(dir)
+		found, err := hasComposeFile(dir)
+		if err != nil {
+			return configured, err
+		}
+		if found {
+			return dir, nil
 		}
 	}
-	return configured
+	return configured, nil
 }
 
-func hasComposeFile(dir string) bool {
+func hasComposeFile(dir string) (bool, error) {
 	if dir == "" {
-		return false
+		return false, nil
 	}
-	_, err := os.Stat(filepath.Join(dir, "docker-compose.yml"))
-	return err == nil
+	info, err := os.Stat(filepath.Join(dir, "docker-compose.yml"))
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.Mode().IsRegular() {
+		return false, fmt.Errorf("the compose file in %s is not a regular file", dir)
+	}
+	return true, nil
 }
 
-func presentImages(run proc.Runner, tags []string) []string {
+func presentImages(run proc.Runner, tags []string) ([]string, error) {
 	have := map[string]bool{}
-	for _, line := range run.Lines("docker", "images", "--format", "{{.Repository}}:{{.Tag}}") {
+	lines, err := run.Lines("docker", "images", "--format", "{{.Repository}}:{{.Tag}}")
+	if err != nil {
+		return nil, fmt.Errorf("could not inspect Docker images: %w", err)
+	}
+	for _, line := range lines {
 		have[strings.TrimSpace(line)] = true
 	}
 	var found []string
@@ -114,7 +163,7 @@ func presentImages(run proc.Runner, tags []string) []string {
 			found = append(found, t)
 		}
 	}
-	return found
+	return found, nil
 }
 
 func plural(n int, one, many string) string {

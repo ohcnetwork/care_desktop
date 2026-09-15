@@ -343,7 +343,9 @@ func (pr *Provisioner) waitForDocker(limit time.Duration) error {
 }
 
 func (pr *Provisioner) dockerDaemonUp() bool {
-	cmd := proc.Command("docker", "version", "--format", "{{.Server.Version}}")
+	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	defer cancel()
+	cmd := proc.CommandContext(ctx, "docker", "version", "--format", "{{.Server.Version}}")
 	cmd.Env = pr.run.Env
 	return cmd.Run() == nil
 }

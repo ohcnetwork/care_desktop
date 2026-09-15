@@ -3,11 +3,14 @@ package main
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 
+	"github.com/ohcnetwork/care_desktop/app/internal/backup"
 	"github.com/ohcnetwork/care_desktop/app/internal/health"
 	"github.com/ohcnetwork/care_desktop/app/internal/prereq"
+	"github.com/ohcnetwork/care_desktop/app/internal/sys/autostart"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/mdns"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/netfix"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/reboot"
@@ -16,20 +19,26 @@ import (
 )
 
 type AppState struct {
-	Version   string        `json:"version"`
-	SetupDone bool          `json:"setup_done"`
-	MDNSName  string        `json:"mdns_name"`
-	Docker    prereq.Status `json:"docker"`
+	Version        string        `json:"version"`
+	SetupDone      bool          `json:"setup_done"`
+	MDNSName       string        `json:"mdns_name"`
+	Docker         prereq.Status `json:"docker"`
+	RestorePending bool          `json:"restore_pending"`
 }
 
-func (a *App) GetState() AppState {
+func (a *App) GetState() (AppState, error) {
 	cfg := a.loadConfig()
-	return AppState{
-		Version:   a.pins.AppVersion,
-		SetupDone: cfg.SetupDone,
-		MDNSName:  cfg.MDNSName,
-		Docker:    prereq.DockerCheck(a.engine().Runner()),
+	pending, err := a.engine().Backups().PendingRestore()
+	if err != nil {
+		return AppState{}, err
 	}
+	return AppState{
+		Version:        a.pins.AppVersion,
+		SetupDone:      cfg.SetupDone && !cfg.Removing,
+		MDNSName:       cfg.MDNSName,
+		Docker:         prereq.DockerCheck(a.engine().Runner()),
+		RestorePending: pending,
+	}, nil
 }
 
 func (a *App) DockerStatus() prereq.Status { return prereq.DockerCheck(a.engine().Runner()) }
@@ -38,14 +47,36 @@ func (a *App) ClinicHealth() health.Health { return health.Ping() }
 
 func (a *App) NetworkStatus() netfix.Status { return netfix.Check(a.engine().Runner()) }
 
-func (a *App) FixNetwork() error { return netfix.Fix(a.engine().Log) }
+func (a *App) FixNetwork() error {
+	return a.withJob(func() error { return netfix.Fix(a.engine().Log) })
+}
 
 func (a *App) DockerPlan() prereq.ToolPlan { return a.provisioner().DockerPlan() }
 func (a *App) GitPlan() prereq.ToolPlan    { return a.provisioner().GitPlan() }
 
-func (a *App) InstallDocker() (string, error) { return a.provisioner().InstallDocker() }
-func (a *App) InstallGit() (string, error)    { return a.provisioner().InstallGit() }
-func (a *App) OpenDocker() error              { return a.provisioner().OpenDocker() }
+func (a *App) InstallDocker() (string, error) {
+	var result string
+	err := a.withJob(func() error {
+		var err error
+		result, err = a.provisioner().InstallDocker()
+		return err
+	})
+	return result, err
+}
+
+func (a *App) InstallGit() (string, error) {
+	var result string
+	err := a.withJob(func() error {
+		var err error
+		result, err = a.provisioner().InstallGit()
+		return err
+	})
+	return result, err
+}
+
+func (a *App) OpenDocker() error {
+	return a.withJob(func() error { return a.provisioner().OpenDocker() })
+}
 
 func (a *App) provisioner() *prereq.Provisioner {
 	e := a.engine()
@@ -55,11 +86,13 @@ func (a *App) provisioner() *prereq.Provisioner {
 func (a *App) RestartPlan() reboot.Plan { return reboot.Check() }
 
 func (a *App) RestartNow() error {
-	if err := a.SetAutostart(true); err != nil {
-		a.logln("note: couldn't set CARE Desktop to open after the restart (" + err.Error() +
-			") - open it yourself once the computer is back")
-	}
-	return reboot.Now()
+	return a.withJob(func() error {
+		if err := autostart.Set(true); err != nil {
+			a.logln("note: couldn't set CARE Desktop to open after the restart (" + err.Error() +
+				") - open it yourself once the computer is back")
+		}
+		return reboot.Now()
+	})
 }
 
 func (a *App) ValidatePassword(pw string) string {
@@ -78,6 +111,20 @@ func (a *App) ValidateDomain(name string) string {
 
 func (a *App) ValidateBackupDir(dir string) string {
 	dir = strings.TrimSpace(dir)
+	target := a.engine().BackupDirPath()
+	if dir != "" {
+		if !filepath.IsAbs(dir) {
+			return "Choose an absolute folder path for the backups."
+		}
+		target = filepath.Join(dir, "care-db-backups")
+	}
+	for _, protected := range []string{a.installDir(), a.log.Folder()} {
+		if protected != "" {
+			if err := backup.CheckLocation(target, protected); err != nil {
+				return err.Error()
+			}
+		}
+	}
 	if dir == "" {
 		return ""
 	}
@@ -111,13 +158,18 @@ func (a *App) SetMDNSName(name string) error {
 	if err := mdns.ValidateLabel(name); err != nil {
 		return err
 	}
-	cfg := a.loadConfig()
-	cfg.MDNSName = mdns.Label(name) + ".local"
-	if err := a.saveConfig(cfg); err != nil {
-		return err
-	}
-	a.restartAdvertise()
-	return nil
+	return a.withJob(func() error {
+		cfg := a.loadConfig()
+		if cfg.SetupDone || cfg.Removing {
+			return errors.New("the clinic address can only be chosen before installation")
+		}
+		cfg.MDNSName = mdns.Label(name) + ".local"
+		if err := a.saveConfig(cfg); err != nil {
+			return err
+		}
+		a.restartAdvertise()
+		return nil
+	})
 }
 
 func (a *App) VerifyAdminPassword(pw string) bool {

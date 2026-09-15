@@ -21,7 +21,12 @@ type App struct {
 	pins      *release.Pins
 	log       *applog.Logger
 
-	jobMu sync.Mutex
+	cfgMu      sync.RWMutex
+	cfg        Config
+	configFile string
+
+	jobMu   sync.Mutex
+	closing bool
 
 	advMu   sync.Mutex
 	adv     *mdns.Advertiser
@@ -38,7 +43,19 @@ func NewApp(installFS fs.FS, log *applog.Logger) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &App{installFS: installFS, pins: pins, log: log}, nil
+	path, err := configPath()
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := loadConfig(path)
+	if err != nil {
+		return nil, err
+	}
+	a := &App{installFS: installFS, pins: pins, log: log, cfg: cfg, configFile: path}
+	if _, err := a.engine().Backups().PendingRestore(); err != nil {
+		return nil, err
+	}
+	return a, nil
 }
 
 func (a *App) logln(msg string) {
@@ -48,14 +65,21 @@ func (a *App) logln(msg string) {
 	}
 }
 
+func (a *App) emit(event string, data ...any) {
+	if a.ctx != nil {
+		wruntime.EventsEmit(a.ctx, event, data...)
+	}
+}
+
 func (a *App) startAdvertise() {
 	a.advMu.Lock()
 	defer a.advMu.Unlock()
 	if a.adv != nil {
 		return
 	}
-	name := a.loadConfig().MDNSName
-	if name == "" {
+	cfg := a.loadConfig()
+	name := cfg.MDNSName
+	if name == "" || cfg.Removing {
 		return
 	}
 	adv, err := mdns.Advertise(name)
