@@ -13,17 +13,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { bridge } from "@/lib/bridge";
 import { errorText } from "@/lib/format";
 import { useCare } from "@/state/care-store";
-import type { Section } from "@/types";
 import { EnvEditor } from "./env-editor";
 import { PluginTable } from "./plugin-table";
 
 export function AdvancedTab() {
   const [adminPassword, setAdminPassword] = useState<string | null>(null);
-  const [section, setSection] = useState<Section>("backend");
 
   if (adminPassword === null) return <AdminGate onUnlock={setAdminPassword} />;
 
@@ -36,13 +33,12 @@ export function AdvancedTab() {
         <AccordionItem value="config">
           <AccordionTrigger>
             <SectionTitle
-              title="System configuration"
-              summary="Environment settings for the backend and the app"
+              title="Clinic settings"
+              summary="Backups, sign-in, SMS, email, and what staff see in the app"
             />
           </AccordionTrigger>
           <AccordionContent>
-            <SectionSwitch section={section} onChange={setSection} />
-            <EnvEditor key={section} section={section} adminPassword={adminPassword} />
+            <EnvEditor adminPassword={adminPassword} />
           </AccordionContent>
         </AccordionItem>
 
@@ -68,23 +64,6 @@ export function AdvancedTab() {
         </AccordionItem>
       </Accordion>
     </div>
-  );
-}
-
-function SectionSwitch({
-  section,
-  onChange,
-}: {
-  section: Section;
-  onChange: (section: Section) => void;
-}) {
-  return (
-    <Tabs value={section} onValueChange={(v) => onChange(v as Section)}>
-      <TabsList>
-        <TabsTrigger value="backend">Backend</TabsTrigger>
-        <TabsTrigger value="frontend">Frontend</TabsTrigger>
-      </TabsList>
-    </Tabs>
   );
 }
 
