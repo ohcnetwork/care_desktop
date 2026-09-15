@@ -106,7 +106,7 @@ func Scan(o Options) (Report, error) {
 
 	blocking := 0
 	for _, trace := range traces {
-		if trace.ID != "images" {
+		if trace.ID != "images" && trace.ID != "firewall" {
 			blocking++
 		}
 	}

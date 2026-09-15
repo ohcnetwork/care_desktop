@@ -99,7 +99,10 @@ function validate(s: Setting, v: string | undefined): string | null {
   switch (s.kind) {
     case "int": {
       const t = (v ?? "").trim();
-      if (t === "") return s.required ? "Enter a number." : null;
+      if (t === "") {
+        if (v === undefined) return null;
+        return s.required ? "Enter a number." : null;
+      }
       if (!/^-?\d+$/.test(t)) return "Enter a whole number.";
       const n = Number(t);
       if (s.min !== undefined && n < s.min) return `Must be at least ${s.min}.`;
