@@ -1,0 +1,303 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import { bridge } from "@/lib/bridge";
+import type { ToolPlan } from "@/types";
+
+export type CheckTone = "wait" | "ok" | "bad";
+export type CheckId = "residue" | "docker" | "git" | "mdns" | "clinic" | "network";
+
+/**
+ * Which prerequisites are worth testing.
+ *
+ * "setup" is the first-run wizard. "running" is the same machinery pointed at a
+ * clinic that is already installed and has stopped answering, so two rows drop
+ * out: residue (after setup those "leftovers" are the live install) and git
+ * (needed to fetch the software, not to serve it - a missing git blocks the next
+ * update, it does not take the clinic down). One row is added: the clinic itself.
+ */
+export type ChecksMode = "setup" | "running";
+
+/**
+ * What the operator can press on a failing row. The wizard is used by people who
+ * will not open a terminal, so a check that can't be acted on is a dead end -
+ * every failure that we know how to fix carries the fix.
+ *
+ * run resolves to a confirmation to show when the work succeeded, or nothing
+ * when there is none worth a dialog (opening Docker, opening a download page).
+ */
+export type CheckAction = {
+  label: string;
+  detail: string;
+  run: () => Promise<string | void>;
+};
+
+export type Check = {
+  id: CheckId;
+  title: string;
+  detail: string;
+  state: CheckTone;
+  how: string;
+  action?: CheckAction;
+};
+
+type Result = { state: CheckTone; how: string; action?: CheckAction };
+
+const WAITING: Result = { state: "wait", how: "" };
+
+function summarise(results: Result[]): CheckTone {
+  if (results.some((r) => r.state === "bad")) return "bad";
+  return results.some((r) => r.state === "wait") ? "wait" : "ok";
+}
+
+/**
+ * Turns a plan from the host into a button. "manual" means we can't do it here,
+ * so the button opens the vendor's download page instead of pretending.
+ */
+function actionFor(plan: ToolPlan, install: () => Promise<string | void>): CheckAction | undefined {
+  if (plan.action === "" || plan.label === "") return undefined;
+  if (plan.action === "manual") {
+    return {
+      label: plan.label,
+      detail: plan.detail,
+      run: () => bridge.OpenURL(plan.url),
+    };
+  }
+  return { label: plan.label, detail: plan.detail, run: install };
+}
+
+/**
+ * The prerequisites the app can't bundle, one row each. Docker and git are
+ * separate rows rather than one "runtime" row because they are fixed in
+ * different ways, and a row can only carry one button.
+ */
+export function useRequirementChecks(host: string, mode: ChecksMode = "setup") {
+  const inSetup = mode === "setup";
+  const [residue, setResidue] = useState<Result>(WAITING);
+  const [docker, setDocker] = useState<Result>(WAITING);
+  const [git, setGit] = useState<Result>(WAITING);
+  const [mdns, setMdns] = useState<Result>(WAITING);
+  const [clinic, setClinic] = useState<Result>(WAITING);
+  const [network, setNetwork] = useState<Result | null>(null);
+
+  /**
+   * Leftovers from an earlier CARE Desktop. This is a hard blocker rather than a
+   * warning: an old data volume still carrying the label gets re-attached by
+   * compose, so the "new" clinic comes up holding the previous one's patients.
+   *
+   * Docker-side traces are invisible while Docker is down, so this is
+   * deliberately re-run as part of recheckAll - once Docker goes green the scan
+   * sees the containers, volumes, and images it could not see before.
+   */
+  const checkResidue = useCallback(async (): Promise<Result> => {
+    setResidue(WAITING);
+    let result: Result;
+    try {
+      const report = await bridge.ScanResidue();
+      result = report.clean
+        ? { state: "ok", how: "" }
+        : {
+            state: "bad",
+            how: `Found ${report.traces.map((t) => t.label.toLowerCase()).join(", ")}. These must be removed before a new clinic can be set up.`,
+            action: {
+              label: "Remove old installation",
+              detail:
+                "Deletes the earlier installation's clinic data, images, and settings from this computer. Backups are kept.",
+              run: () => bridge.PurgeResidue(),
+            },
+          };
+    } catch (e) {
+      result = { state: "bad", how: String(e) };
+    }
+    setResidue(result);
+    return result;
+  }, []);
+
+  const checkDocker = useCallback(async (): Promise<Result> => {
+    setDocker(WAITING);
+    let result: Result;
+    try {
+      const status = await bridge.DockerStatus();
+      if (status.ok) {
+        result = { state: "ok", how: "" };
+      } else {
+        const plan = await bridge.DockerPlan();
+        result = {
+          state: "bad",
+          how: status.message,
+          action: actionFor(plan, () =>
+            plan.action === "open" ? bridge.OpenDocker() : bridge.InstallDocker(),
+          ),
+        };
+      }
+    } catch (e) {
+      result = { state: "bad", how: String(e) };
+    }
+    setDocker(result);
+    return result;
+  }, []);
+
+  const checkGit = useCallback(async (): Promise<Result> => {
+    setGit(WAITING);
+    let result: Result;
+    try {
+      const status = await bridge.GitStatus();
+      if (status.ok) {
+        result = { state: "ok", how: "" };
+      } else {
+        const plan = await bridge.GitPlan();
+        result = {
+          state: "bad",
+          how: status.message,
+          action: actionFor(plan, () => bridge.InstallGit()),
+        };
+      }
+    } catch (e) {
+      result = { state: "bad", how: String(e) };
+    }
+    setGit(result);
+    return result;
+  }, []);
+
+  /**
+   * Is the clinic actually serving? Only meaningful once it is installed, which
+   * is why it carries a Start button rather than an install one.
+   */
+  const checkClinic = useCallback(async (): Promise<Result> => {
+    setClinic(WAITING);
+    let result: Result;
+    try {
+      const health = await bridge.ClinicHealth();
+      result = health.active
+        ? { state: "ok", how: "" }
+        : {
+            state: "bad",
+            how: health.detail || "The clinic isn't answering on this computer.",
+            action: {
+              label: "Start clinic",
+              detail: "Starts the clinic software. This takes about a minute.",
+              run: () => bridge.ClinicAction("start", ""),
+            },
+          };
+    } catch (e) {
+      result = { state: "bad", how: String(e) };
+    }
+    setClinic(result);
+    return result;
+  }, []);
+
+  const checkMDNS = useCallback(async (): Promise<Result> => {
+    setMdns(WAITING);
+    let result: Result;
+    try {
+      const status = await bridge.MDNSStatus();
+      result = {
+        state: status.ok ? "ok" : "bad",
+        how: status.ok ? "" : status.message,
+      };
+    } catch (e) {
+      result = { state: "bad", how: String(e) };
+    }
+    setMdns(result);
+    return result;
+  }, []);
+
+  // Windows-only gate; elsewhere the host reports it as not applicable and the
+  // row is hidden rather than shown as passing.
+  const checkNetwork = useCallback(async (): Promise<Result | null> => {
+    let result: Result | null;
+    try {
+      const status = await bridge.NetworkStatus();
+      result = status.applicable
+        ? {
+            state: status.ok ? "ok" : "bad",
+            how: status.ok ? "" : status.how || status.message,
+            action:
+              status.ok || !status.fixable
+                ? undefined
+                : {
+                    label: "Fix automatically",
+                    detail:
+                      "Windows has this network locked down. It will be updated so other devices on this WiFi can reach the clinic on this computer.",
+                    run: () => bridge.FixNetwork(),
+                  },
+          }
+        : null;
+    } catch {
+      result = null;
+    }
+    setNetwork(result);
+    return result;
+  }, []);
+
+  const recheckAll = useCallback(async (): Promise<CheckTone> => {
+    const [r, d, g, m, c, n] = await Promise.all([
+      inSetup ? checkResidue() : null,
+      checkDocker(),
+      inSetup ? checkGit() : null,
+      checkMDNS(),
+      inSetup ? null : checkClinic(),
+      checkNetwork(),
+    ]);
+    return summarise([r, d, g, m, c, n].filter((x): x is Result => x !== null));
+  }, [inSetup, checkResidue, checkDocker, checkGit, checkMDNS, checkClinic, checkNetwork]);
+
+  useEffect(() => {
+    void recheckAll();
+  }, [recheckAll]);
+
+  const checks = useMemo<Check[]>(() => {
+    const list: Check[] = [];
+    if (inSetup) {
+      list.push({
+        id: "residue",
+        title: "A clean computer",
+        detail: "Nothing left from an earlier CARE Desktop",
+        ...residue,
+      });
+    }
+    list.push({
+      id: "docker",
+      title: "Docker",
+      detail: "Runs the clinic software on this computer",
+      ...docker,
+    });
+    if (inSetup) {
+      list.push({
+        id: "git",
+        title: "Git",
+        detail: "Downloads the clinic software",
+        ...git,
+      });
+    }
+    list.push({
+      id: "mdns",
+      title: "Network name",
+      detail: `${host} on the clinic WiFi`,
+      ...mdns,
+    });
+    if (!inSetup) {
+      list.push({
+        id: "clinic",
+        title: "Clinic software",
+        detail: "Serving the clinic to your staff",
+        ...clinic,
+      });
+    }
+    if (network) {
+      list.push({
+        id: "network",
+        title: "Network profile",
+        detail: "Other devices can reach this computer",
+        ...network,
+      });
+    }
+    return list;
+  }, [inSetup, clinic, docker, git, host, mdns, network, residue]);
+
+  const overall = useMemo(
+    () => summarise(checks.map((c) => ({ state: c.state, how: c.how }))),
+    [checks],
+  );
+
+  return { checks, overall, recheckAll, checkMDNS };
+}

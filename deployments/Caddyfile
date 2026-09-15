@@ -1,0 +1,92 @@
+{
+	auto_https disable_redirects
+	order coraza_waf first
+
+	servers {
+		protocols h1 h2
+	}
+
+	pki {
+		ca local {
+			name "CARE Desktop"
+			root_cn "CARE Desktop Local CA"
+			intermediate_cn "CARE Desktop Local CA - Intermediate"
+		}
+	}
+}
+
+(bootstrap) {
+	handle_path /setup* {
+		root * /setup
+		@installer path /install-cert.sh /install-cert.ps1
+		header @installer Content-Disposition "attachment"
+		header @installer Content-Type "application/octet-stream"
+		file_server {
+			index index.html
+		}
+	}
+
+	handle /root.crt {
+		@direct {
+			not query ok=1
+			not header Referer *example.local*
+		}
+		route {
+			redir @direct /setup 302
+			header Content-Type application/x-x509-ca-cert
+			root * /data/caddy/pki/authorities/local
+			file_server
+		}
+	}
+}
+
+
+(site) {
+	encode gzip
+
+	header -Strict-Transport-Security
+
+	handle /api/* {
+		coraza_waf {
+			load_owasp_crs
+			directives `
+				Include @coraza.conf-recommended
+				Include @crs-setup.conf.example
+				Include @owasp_crs/*.conf
+				Include /etc/caddy/waf-mode.conf
+			`
+		}
+		reverse_proxy backend:9000
+	}
+	@backend path /static/* /ping/* /health/*
+	handle @backend {
+		reverse_proxy backend:9000
+	}
+
+	@buckets path /{$FILE_UPLOAD_BUCKET:patient-bucket}/* /{$FACILITY_S3_BUCKET:facility-bucket}/*
+	handle @buckets {
+		reverse_proxy minio:9000
+	}
+
+	handle {
+		reverse_proxy frontend:80
+	}
+}
+
+:80 {
+	import bootstrap
+	handle {
+		redir https://{host}{uri} permanent
+	}
+}
+
+example.local:443 {
+	tls internal
+	import bootstrap
+	import site
+}
+
+localhost:443 {
+	tls internal
+	reverse_proxy /ping/* backend:9000
+}

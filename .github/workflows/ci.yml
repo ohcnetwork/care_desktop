@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: app/go.mod
+          cache-dependency-path: app/go.sum
+
+      # No staging step on purpose. app/install/.gitkeep is tracked, so
+      # //go:embed all:install resolves straight from the checkout - and if that
+      # placeholder ever stops being tracked, this job must fail the way a fresh
+      # clone does rather than paper over it with a runner-local file.
+      - name: Build (host)
+        run: go build ./...
+
+      # internal/ must stay free of Wails so the engine is testable and portable.
+      # The CLI used to prove this by compiling; assert it directly instead.
+      - name: internal/ must not import Wails
+        run: |
+          if grep -rq "wailsapp/wails" internal/; then
+            echo "internal/ must not import Wails - keep UI concerns in app/*.go"
+            grep -rn "wailsapp/wails" internal/
+            exit 1
+          fi
+
+      - name: Cross-compile
+        run: |
+          GOOS=windows GOARCH=amd64 go build ./...
+          GOOS=darwin  GOARCH=arm64 go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      # -race because the log sink is written from several goroutines at once,
+      # and the redaction test is the only guard on credentials reaching a file
+      # that gets emailed to support.
+      - name: Test
+        run: go test -race ./...
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: app
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/frontend/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run build

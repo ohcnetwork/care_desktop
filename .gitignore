@@ -5,11 +5,5 @@
 .idea/
 .vscode/
 
-# Source clones — when the CLI `care setup` runs from the repo root, the engine
-# clones the backend/frontend here (CARE_BE_DIR/CARE_FE_DIR default to <kit>/care*).
-# Anchored with a leading slash so it never matches app/internal/care.
-/care/
-/care_fe/
-
-# Default backup dir if BACKUP_DIR is unset and compose runs from here.
-/db-backups/
+# Default backup dir if BACKUP_DIR is unset and compose runs from there.
+/deployments/db-backups/

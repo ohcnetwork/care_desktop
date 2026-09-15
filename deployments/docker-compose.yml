@@ -1,0 +1,125 @@
+name: care-desktop
+
+networks:
+  default:
+    name: care-desktop
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  caddy-data:
+  caddy-config:
+
+services:
+  db:
+    image: ${POSTGRES_IMAGE:?POSTGRES_IMAGE not set - .env is missing from this directory}
+    restart: unless-stopped
+    env_file: ./backend.env
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: ${REDIS_IMAGE:?REDIS_IMAGE not set - .env is missing from this directory}
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+
+  minio:
+    image: ${MINIO_IMAGE:?MINIO_IMAGE not set - .env is missing from this directory}
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      FILE_UPLOAD_BUCKET: ${FILE_UPLOAD_BUCKET:-patient-bucket}
+      FACILITY_S3_BUCKET: ${FACILITY_S3_BUCKET:-facility-bucket}
+    volumes:
+      - minio-data:/data
+      - ./minio/entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    # No host port: browsers reach files through Caddy on :80 (/patient-bucket,
+    # /facility-bucket). One port to bind, and same-origin with the app.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
+      interval: 10s
+      retries: 5
+
+  backend:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE not set - .env is missing from this directory}
+    restart: unless-stopped
+    env_file: ./backend.env
+    entrypoint: ["bash", "start.sh"]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  celery-worker:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE not set - .env is missing from this directory}
+    restart: unless-stopped
+    env_file: ./backend.env
+    entrypoint: ["bash", "celery_worker.sh"]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  celery-beat:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE not set - .env is missing from this directory}
+    restart: unless-stopped
+    env_file: ./backend.env
+    entrypoint: ["bash", "celery_beat.sh"]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  frontend:
+    image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE not set - .env is missing from this directory}
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  caddy:
+    image: ${CADDY_WAF_IMAGE:?CADDY_WAF_IMAGE not set - .env is missing from this directory}
+    restart: unless-stopped
+    environment:
+      CORAZA_MODE: ${CORAZA_MODE:-Off}
+      FILE_UPLOAD_BUCKET: ${FILE_UPLOAD_BUCKET:-patient-bucket}
+      FACILITY_S3_BUCKET: ${FACILITY_S3_BUCKET:-facility-bucket}
+    command:
+      - /bin/sh
+      - -c
+      - printf 'SecRuleEngine %s\n' "$$CORAZA_MODE" > /etc/caddy/waf-mode.conf &&
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./setup:/setup:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - backend
+      - frontend
+      - minio
+
+  backup:
+    image: ${BACKUP_IMAGE:?BACKUP_IMAGE not set - .env is missing from this directory}   # postgres + openssl, built by `care setup`
+    restart: unless-stopped
+    env_file: ./backend.env
+    volumes:
+      - ./scripts/backup.sh:/backup.sh:ro
+      - ${BACKUP_DIR:-./db-backups}:/backups
+      - ./keys:/keys:ro
+      - minio-data:/minio-data:ro
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    depends_on:
+      db: {condition: service_healthy}

@@ -1,0 +1,22 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - misspell
+
+  settings:
+    staticcheck:
+      # ST1005: error strings are shown verbatim in the UI, so they are
+      # capitalised and punctuated on purpose.
+      checks: ["all", "-ST1005"]
+
+formatters:
+  enable:
+    - gofmt

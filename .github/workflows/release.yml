@@ -17,7 +17,6 @@ jobs:
       matrix:
         include:
           - { os: macos-latest,   platform: "darwin/universal", name: macos,   extra: "" }
-          - { os: ubuntu-22.04,   platform: "linux/amd64",      name: linux,   extra: "" }
           - { os: windows-latest, platform: "windows/amd64",    name: windows, extra: "-nsis" }
     runs-on: ${{ matrix.os }}
     # Signing is opt-in: absent secrets (fork PRs, untagged runs) fall back to ad-hoc.
@@ -26,43 +25,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # go-version-file, not a literal: go.mod already declares the toolchain, and a
+      # pin here that falls behind it only builds because GOTOOLCHAIN=auto silently
+      # downloads the right one on every job.
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version-file: app/go.mod
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # NSIS writes the version as X.X.X.X, so it has to be plain numbers — a
-      # workflow_dispatch run has no tag and gets 0.0.0 rather than a branch name.
-      - name: Resolve version
+      - name: Validate release identity
         id: v
         shell: bash
         run: |
-          case "$GITHUB_REF_NAME" in
-            v[0-9]*) version="${GITHUB_REF_NAME#v}" ;;
-            *)       version="0.0.0" ;;
-          esac
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      # wails.json is the only place the version reaches both Info.plist and the
-      # NSIS installer, so stamp the tag in before building.
-      - name: Stamp version
-        shell: bash
-        run: |
-          node -e '
-            const fs = require("fs"), p = "app/wails.json";
-            const j = JSON.parse(fs.readFileSync(p, "utf8"));
-            j.info.productVersion = process.argv[1];
-            fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
-          ' "${{ steps.v.outputs.version }}"
-
-      - name: Install Linux build deps
-        if: matrix.name == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+          node <<'NODE'
+          const fs = require("fs");
+          const env = fs.readFileSync("deployments/.env", "utf8");
+          const value = key => {
+            const matches = [...env.matchAll(new RegExp(`^${key}=([^\\r\\n]+)$`, "gm"))];
+            if (matches.length !== 1) throw new Error(`Expected one ${key} in deployments/.env`);
+            return matches[0][1].trim();
+          };
+          const version = value("CARE_DESKTOP_VERSION");
+          if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(version)) {
+            throw new Error("Release installers require a numeric X.Y.Z version");
+          }
+          const metadata = JSON.parse(fs.readFileSync("app/wails.json", "utf8"));
+          if (metadata.info.productVersion !== version) {
+            throw new Error("wails.json productVersion must equal CARE_DESKTOP_VERSION");
+          }
+          if (process.env.GITHUB_REF.startsWith("refs/tags/") && process.env.GITHUB_REF_NAME !== `v${version}`) {
+            throw new Error(`Release tag must be v${version}`);
+          }
+          for (const key of ["CARE_BE_REF", "CARE_FE_REF"]) {
+            if (!/^[0-9a-f]{40}$/i.test(value(key))) {
+              throw new Error(`${key} must be a full commit SHA`);
+            }
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+          NODE
 
       # wails only warns and exits 0 when makensis is absent, so without this a
       # missing NSIS would produce a green build carrying no installer.
@@ -77,6 +80,15 @@ jobs:
 
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+
+      - name: Stage the deployment kit
+        shell: bash
+        run: |
+          cp -R deployments/. app/install/
+          for f in .env docker-compose.yml Caddyfile scripts/backup.sh; do
+            test -f "app/install/$f" || { echo "::error::staging missed $f"; exit 1; }
+          done
 
       - name: Build
         working-directory: app
@@ -211,18 +223,6 @@ jobs:
           fi
           mv "$installer" "CARE-Desktop-$VERSION-windows-amd64-setup.exe"
 
-      - name: Package Linux .deb
-        if: matrix.name == 'linux'
-        shell: bash
-        env:
-          VERSION: ${{ steps.v.outputs.version }}
-        run: |
-          # wails names the binary from outputfilename ("CARE Desktop"); dpkg wants a
-          # path-friendly one.
-          mv "$(find app/build/bin -maxdepth 1 -type f | head -1)" app/build/bin/care-desktop
-          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.41.3
-          nfpm package --config packaging/nfpm.yaml --packager deb --target app/build/bin/
-
       - name: Remove signing keychain
         if: always() && matrix.name == 'macos' && env.SIGN_MACOS == 'true'
         run: security delete-keychain "${SIGNING_KEYCHAIN:-}" 2>/dev/null || true
@@ -238,7 +238,6 @@ jobs:
           path: |
             app/build/bin/*.dmg
             app/build/bin/*-setup.exe
-            app/build/bin/*.deb
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
@@ -249,4 +248,3 @@ jobs:
           files: |
             app/build/bin/*.dmg
             app/build/bin/*-setup.exe
-            app/build/bin/*.deb

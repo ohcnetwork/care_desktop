@@ -1,0 +1,330 @@
+import { Database, FolderOpen, HardDrive } from "lucide-react";
+import { Fragment, useEffect, useState } from "react";
+
+import { InfoButton } from "@/components/field";
+import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/sonner";
+import { bridge } from "@/lib/bridge";
+import { errorText, firstLine, megabytes } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { useCare } from "@/state/care-store";
+import type { ImportedBackup } from "@/types";
+
+const RESTORE_INFO =
+  "Restoring replaces today's data with the chosen copy. CARE pauses for a moment while it restores, and you confirm before anything changes.";
+
+export function BackupsTab() {
+  const { backups, backupsError, busy, restorePending, runAction, reloadBackups, restore } = useCare();
+  const [showInfo, setShowInfo] = useState(false);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [passphrase, setPassphrase] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+
+  return (
+    <div className="flex flex-col gap-3">
+      <BackupFolderRow />
+
+      <div className="flex items-center gap-[11px]">
+        <Button
+          variant="primary"
+          disabled={busy || restorePending}
+          onClick={() => void runAction("backup-now")}
+        >
+          Back up now
+        </Button>
+        <span className="text-[13px] text-muted-foreground">Automatic, daily</span>
+        <InfoButton
+          title="Restoring replaces current data"
+          pressed={showInfo}
+          onClick={() => setShowInfo((v) => !v)}
+        />
+        <span className="flex-1" />
+        <span className="text-[13px] text-muted-foreground">
+          {!backupsError && backups.length ? `${backups.length} kept` : ""}
+        </span>
+        <Button
+          disabled={busy}
+          onClick={() => {
+            setConfirming(null);
+            void reloadBackups();
+          }}
+        >
+          Refresh
+        </Button>
+      </div>
+
+      {showInfo ? <Alert>{RESTORE_INFO}</Alert> : null}
+
+      <div className="overflow-hidden rounded-xl border border-line bg-card shadow-card">
+        {backupsError ? (
+          <Alert variant="danger">Could not read the backup folder: {backupsError}</Alert>
+        ) : backups.length === 0 ? (
+          <div className="p-5 text-center text-[13px] text-faint">
+            No backups yet. Click <b>Back up now</b> or wait for the daily backup.
+          </div>
+        ) : (
+          backups.map((backup, i) => {
+            const meta = [
+              megabytes(backup.size_bytes),
+              backup.files_archive ? "database and files" : "database only",
+              backup.encrypted ? "encrypted" : "",
+            ]
+              .filter(Boolean)
+              .join("  ·  ");
+            return (
+              <Fragment key={backup.db_dump}>
+                <div
+                  className={cn(
+                    "flex items-center gap-[13px] px-4 py-3.5",
+                    i > 0 && "border-t border-hair",
+                  )}
+                >
+                  <span className="flex size-[30px] flex-none items-center justify-center rounded-sm bg-hair text-muted-foreground">
+                    <Database className="size-[15px]" strokeWidth={2} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-mono text-[13.5px] font-semibold text-ink">
+                      {backup.label}
+                    </div>
+                    <div className="mt-0.5 text-[12.5px] text-muted-foreground">{meta}</div>
+                  </div>
+                  <Badge variant={backup.manual ? "plainOk" : "plain"} size="sm">
+                    {backup.manual ? "Manual" : "Automatic"}
+                  </Badge>
+                  <Button disabled={busy || restorePending} onClick={() => {
+                      setPassphrase("");
+                      setAdminPassword("");
+                      setConfirming(backup.db_dump);
+                    }}>
+                    Restore
+                  </Button>
+                </div>
+                {confirming === backup.db_dump ? (
+                  <div className="flex flex-col gap-3 border-t border-danger-bg bg-danger-tint px-4 py-[13px] text-[12.5px] text-danger-ink">
+                    <label className="flex items-center gap-3">
+                      <span className="flex-none">Admin password</span>
+                      <input
+                        type="password"
+                        autoComplete="current-password"
+                        value={adminPassword}
+                        onChange={(e) => setAdminPassword(e.target.value)}
+                        className="min-w-0 flex-1 rounded-sm border border-danger-bg bg-white px-2 py-1 font-mono text-[12.5px] text-ink"
+                      />
+                    </label>
+                    {backup.encrypted ? (
+                      <label className="flex items-center gap-3">
+                        <span className="flex-none">Backup password</span>
+                        <input
+                          autoFocus
+                          type="password"
+                          value={passphrase}
+                          onChange={(e) => setPassphrase(e.target.value)}
+                          placeholder="Leave blank to use the saved password"
+                          className="min-w-0 flex-1 rounded-sm border border-danger-bg bg-white px-2 py-1 font-mono text-[12.5px] text-ink"
+                        />
+                      </label>
+                    ) : null}
+                    <div className="flex items-center gap-3">
+                      <span className="flex-1">
+                        Replace current data with this copy? This cannot be undone.
+                      </span>
+                      <Button onClick={() => setConfirming(null)}>Cancel</Button>
+                      <Button
+                        variant="destructive"
+                        disabled={busy || !adminPassword}
+                        onClick={() => {
+                          setConfirming(null);
+                          void restore(backup, passphrase, adminPassword);
+                          setAdminPassword("");
+                          setPassphrase("");
+                        }}
+                      >
+                        Yes, restore
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+              </Fragment>
+            );
+          })
+        )}
+      </div>
+
+      <ImportCard />
+    </div>
+  );
+}
+
+/** Where backups are written, and how to point them somewhere else (a USB drive). */
+function BackupFolderRow() {
+  const { busy, restorePending, log } = useCare();
+  const [dir, setDir] = useState("");
+  const [problem, setProblem] = useState("");
+  const [working, setWorking] = useState(false);
+
+  useEffect(() => {
+    void bridge.GetBackupDir().then(setDir, () => setDir(""));
+  }, []);
+
+  const change = async () => {
+    const chosen = await bridge.ChooseFolder("Choose where backups should go");
+    if (!chosen) return;
+    setWorking(true);
+    setProblem("");
+    try {
+      setDir(await bridge.SetBackupDir(chosen));
+      toast("Backups will go to the new folder");
+    } catch (e) {
+      setProblem(firstLine(errorText(e)));
+      log(`backup folder: ${errorText(e)}`);
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="flex items-center gap-3 rounded-xl border border-line bg-card px-4 py-3.5 shadow-card">
+        <span className="flex size-[30px] flex-none items-center justify-center rounded-sm bg-brand-bg text-brand-ink">
+          <HardDrive className="size-4" strokeWidth={2} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-semibold tracking-[0.04em] text-muted-foreground uppercase">
+            Backups are saved to
+          </div>
+          <div className="truncate font-mono text-[13.5px] font-semibold text-ink">
+            {dir || "…"}
+          </div>
+        </div>
+        <Button disabled={busy || working || restorePending} onClick={() => void change()}>
+          {working ? "Switching…" : "Change"}
+        </Button>
+      </div>
+      {problem ? (
+        <div className="-mt-1 text-[12.5px] leading-[1.5] text-danger-ink">{problem}</div>
+      ) : null}
+    </>
+  );
+}
+
+/** Restore a backup that came from another computer, chosen with the file picker. */
+function ImportCard() {
+  const { busy, restorePending, restoreFile } = useCare();
+  const [found, setFound] = useState<ImportedBackup | null>(null);
+  const [problem, setProblem] = useState("");
+  const [passphrase, setPassphrase] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
+
+  const pick = async () => {
+    const path = await bridge.ChooseBackupFile();
+    if (!path) return;
+    setProblem("");
+    setConfirming(false);
+    setPassphrase("");
+    setAdminPassword("");
+    try {
+      setFound(await bridge.InspectBackupFile(path));
+    } catch (e) {
+      setFound(null);
+      setProblem(firstLine(errorText(e)));
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-line bg-card p-4 shadow-card">
+      <div className="flex items-center gap-3">
+        <span className="flex size-[30px] flex-none items-center justify-center rounded-sm bg-hair text-muted-foreground">
+          <FolderOpen className="size-4" strokeWidth={2} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13.5px] font-semibold text-ink">
+            Restore from a file
+          </div>
+          <div className="mt-px text-[12.5px] text-muted-foreground">
+            For a backup brought from another computer, on a USB drive.
+          </div>
+        </div>
+        <Button disabled={busy || restorePending} onClick={() => void pick()}>
+          Choose file
+        </Button>
+      </div>
+
+      {problem ? (
+        <div className="text-[12.5px] leading-[1.5] text-danger-ink">{problem}</div>
+      ) : null}
+
+      {found ? (
+        <div className="flex flex-col gap-2.5 rounded-lg border border-line bg-background px-3.5 py-3">
+          <div className="font-mono text-[13px] font-semibold text-ink">{found.db_dump}</div>
+          <div className="text-[12.5px] text-muted-foreground">
+            {found.files_archive
+              ? "Database and uploaded files."
+              : "Database only — this backup has no uploaded files with it."}
+          </div>
+          {found.encrypted && !found.has_key ? (
+            <Alert variant="danger">
+              No recovery key (<span className="font-mono">backup-key.pem.enc</span>) next to
+              that file. This computer&apos;s own key will be tried, which only works if the
+              backup came from this clinic. Copy the whole backup folder across instead.
+            </Alert>
+          ) : null}
+          {found.encrypted ? (
+            <label className="flex items-center gap-3 text-[12.5px]">
+              <span className="flex-none text-muted-foreground">Backup password</span>
+              <input
+                type="password"
+                value={passphrase}
+                onChange={(e) => setPassphrase(e.target.value)}
+                placeholder="Leave blank to use the saved password"
+                className="min-w-0 flex-1 rounded-sm border border-line bg-white px-2 py-1 font-mono text-[12.5px] text-ink"
+              />
+            </label>
+          ) : null}
+          <label className="flex items-center gap-3 text-[12.5px]">
+            <span className="flex-none text-muted-foreground">Admin password</span>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={adminPassword}
+              onChange={(e) => setAdminPassword(e.target.value)}
+              className="min-w-0 flex-1 rounded-sm border border-line bg-white px-2 py-1 font-mono text-[12.5px] text-ink"
+            />
+          </label>
+
+          {confirming ? (
+            <div className="flex items-center gap-3 rounded-lg border border-danger-bg bg-danger-tint px-3.5 py-[11px] text-[12.5px] text-danger-ink">
+              <span className="flex-1">
+                Replace this clinic&apos;s data with that file? This cannot be undone.
+              </span>
+              <Button onClick={() => setConfirming(false)}>Cancel</Button>
+              <Button
+                variant="destructive"
+                disabled={busy || !adminPassword}
+                onClick={() => {
+                  setConfirming(false);
+                  void restoreFile(found.path, passphrase, adminPassword);
+                  setAdminPassword("");
+                  setPassphrase("");
+                }}
+              >
+                Yes, restore
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="destructive"
+              className="self-start"
+              disabled={busy}
+              onClick={() => setConfirming(true)}
+            >
+              Restore this file
+            </Button>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}

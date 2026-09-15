@@ -1,0 +1,31 @@
+package main
+
+import "github.com/ohcnetwork/care_desktop/app/internal/plugins"
+
+func (a *App) ReadPlugins(adminPassword string) ([]plugins.Plugin, error) {
+	var list []plugins.Plugin
+	err := a.withJob(func() error {
+		if err := a.requireAdmin(adminPassword); err != nil {
+			return err
+		}
+		if err := a.requireSetup(); err != nil {
+			return err
+		}
+		var err error
+		list, err = plugins.New(a.installDir()).ReadPlugins()
+		return err
+	})
+	return list, err
+}
+
+func (a *App) SavePlugins(pluginList []plugins.Plugin, adminPassword string) error {
+	return a.withJob(func() error {
+		if err := a.requireAdmin(adminPassword); err != nil {
+			return err
+		}
+		if err := a.requireStableClinic(); err != nil {
+			return err
+		}
+		return plugins.New(a.installDir()).WritePlugins(pluginList)
+	})
+}
