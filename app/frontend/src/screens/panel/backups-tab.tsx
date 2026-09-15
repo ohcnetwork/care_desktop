@@ -16,7 +16,7 @@ const RESTORE_INFO =
   "Restoring replaces today's data with the chosen copy. CARE pauses for a moment while it restores, and you confirm before anything changes.";
 
 export function BackupsTab() {
-  const { backups, backupsError, busy, runAction, reloadBackups, restore } = useCare();
+  const { backups, backupsError, busy, restorePending, runAction, reloadBackups, restore } = useCare();
   const [showInfo, setShowInfo] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [passphrase, setPassphrase] = useState("");
@@ -27,7 +27,11 @@ export function BackupsTab() {
       <BackupFolderRow />
 
       <div className="flex items-center gap-[11px]">
-        <Button variant="primary" disabled={busy} onClick={() => void runAction("backup-now")}>
+        <Button
+          variant="primary"
+          disabled={busy || restorePending}
+          onClick={() => void runAction("backup-now")}
+        >
           Back up now
         </Button>
         <span className="text-[13px] text-muted-foreground">Automatic, daily</span>
@@ -89,7 +93,7 @@ export function BackupsTab() {
                   <Badge variant={backup.manual ? "plainOk" : "plain"} size="sm">
                     {backup.manual ? "Manual" : "Automatic"}
                   </Badge>
-                  <Button disabled={busy} onClick={() => {
+                  <Button disabled={busy || restorePending} onClick={() => {
                       setPassphrase("");
                       setAdminPassword("");
                       setConfirming(backup.db_dump);
@@ -155,7 +159,7 @@ export function BackupsTab() {
 
 /** Where backups are written, and how to point them somewhere else (a USB drive). */
 function BackupFolderRow() {
-  const { busy, log } = useCare();
+  const { busy, restorePending, log } = useCare();
   const [dir, setDir] = useState("");
   const [problem, setProblem] = useState("");
   const [working, setWorking] = useState(false);
@@ -194,7 +198,7 @@ function BackupFolderRow() {
             {dir || "…"}
           </div>
         </div>
-        <Button disabled={busy || working} onClick={() => void change()}>
+        <Button disabled={busy || working || restorePending} onClick={() => void change()}>
           {working ? "Switching…" : "Change"}
         </Button>
       </div>
@@ -207,7 +211,7 @@ function BackupFolderRow() {
 
 /** Restore a backup that came from another computer, chosen with the file picker. */
 function ImportCard() {
-  const { busy, restoreFile } = useCare();
+  const { busy, restorePending, restoreFile } = useCare();
   const [found, setFound] = useState<ImportedBackup | null>(null);
   const [problem, setProblem] = useState("");
   const [passphrase, setPassphrase] = useState("");
@@ -243,7 +247,7 @@ function ImportCard() {
             For a backup brought from another computer, on a USB drive.
           </div>
         </div>
-        <Button disabled={busy} onClick={() => void pick()}>
+        <Button disabled={busy || restorePending} onClick={() => void pick()}>
           Choose file
         </Button>
       </div>

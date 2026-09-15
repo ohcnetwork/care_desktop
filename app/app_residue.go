@@ -20,14 +20,29 @@ func (a *App) ScanResidue() (residue.Report, error) {
 	if err != nil {
 		return residue.Report{}, err
 	}
+	configPath := ""
+	if cfg := a.loadConfig(); cfg.SetupDone || cfg.Removing || cfg.AdminPwHash != "" || cfg.BackupDir != "" {
+		configPath = a.configPath()
+	}
 	return residue.Scan(residue.Options{
 		Runner:       e.Runner(),
 		Project:      e.Project(),
 		InstallDir:   dir,
-		ConfigPath:   a.configPath(),
+		ConfigPath:   configPath,
 		Images:       e.Images(),
 		StoredSecret: stored,
 	})
+}
+
+func (a *App) keepChosenName(before Config) error {
+	if before.SetupDone || before.Removing || before.MDNSName == "" {
+		return nil
+	}
+	if err := a.saveConfig(Config{MDNSName: before.MDNSName}); err != nil {
+		return err
+	}
+	a.restartAdvertise()
+	return nil
 }
 
 func (a *App) PurgeResidue() error {
@@ -93,6 +108,9 @@ func (a *App) PurgeResidue() error {
 			return err
 		}
 		if err := a.forgetConfig(); err != nil {
+			return err
+		}
+		if err := a.keepChosenName(cfg); err != nil {
 			return err
 		}
 		after, err := a.ScanResidue()

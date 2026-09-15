@@ -18,7 +18,7 @@ const PANEL_TABS: { id: PanelTab; label: string }[] = [
 ];
 
 export const Rail = memo(function Rail() {
-  const { flow, openStep, stepsDone, tab, setTab, busy, busyLabel, system, version } =
+  const { flow, openStep, stepsDone, tab, setTab, busy, busyLabel, system, systemDetail, version } =
     useCare();
   const inPanel = flow === "panel";
   // Everything past the setup form is "install and start" as far as the rail
@@ -103,7 +103,9 @@ export const Rail = memo(function Rail() {
 
       <div className="flex-1" />
 
-      {inPanel ? <RailStatus busy={busy} busyLabel={busyLabel} system={system} /> : null}
+      {inPanel ? (
+        <RailStatus busy={busy} busyLabel={busyLabel} system={system} unreachable={!!systemDetail} />
+      ) : null}
     </aside>
   );
 });
@@ -112,10 +114,12 @@ function RailStatus({
   busy,
   busyLabel,
   system,
+  unreachable,
 }: {
   busy: boolean;
   busyLabel: string;
   system: SystemState;
+  unreachable: boolean;
 }) {
   const dot = busy
     ? "bg-[#fdba8c]"
@@ -131,7 +135,9 @@ function RailStatus({
       : system === "partial"
         ? "Starting…"
         : system === "unknown"
-          ? "checking…"
+          ? unreachable
+            ? "Can't check"
+            : "checking…"
           : "Stopped";
 
   return (

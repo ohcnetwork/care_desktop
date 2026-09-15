@@ -2,6 +2,8 @@ package mdns
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"regexp"
 	"strings"
@@ -70,6 +72,7 @@ func (a *Advertiser) resolves(query func(*hmdns.QueryParam) error) bool {
 	params.Timeout = 2 * time.Second
 	params.DisableIPv6 = true
 	params.Entries = entries
+	params.Logger = log.New(io.Discard, "", 0)
 	result := make(chan error, 1)
 	go func() {
 		result <- query(params)

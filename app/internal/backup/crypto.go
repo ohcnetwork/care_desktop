@@ -197,6 +197,54 @@ func (s *Store) PreserveRecoveryKey() error {
 	return nil
 }
 
+func (s *Store) ForeignRecoveryData() (bool, error) {
+	encrypted, err := s.hasEncryptedBackups()
+	if err != nil {
+		return false, err
+	}
+	existing, err := os.ReadFile(filepath.Join(s.BackupDir, s.encKeyName()))
+	if os.IsNotExist(err) {
+		return encrypted, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	key, err := s.readKey()
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return !bytes.Equal(existing, key), nil
+}
+
+func (s *Store) DiscardUnusedRecoveryKey() error {
+	encrypted, err := s.hasEncryptedBackups()
+	if err != nil || encrypted {
+		return err
+	}
+	copyPath := filepath.Join(s.BackupDir, s.encKeyName())
+	existing, err := os.ReadFile(copyPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	key, err := s.readKey()
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(existing, key) {
+		return nil
+	}
+	return os.Remove(copyPath)
+}
+
 func CheckLocation(dir, protected string) error {
 	resolve := func(path string) (string, error) {
 		if !filepath.IsAbs(path) {

@@ -276,7 +276,8 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword, backupDir string
 
 func (a *App) CleanupFailedInstall() error {
 	return a.withJob(func() error {
-		if a.loadConfig().SetupDone {
+		cfg := a.loadConfig()
+		if cfg.SetupDone {
 			return errors.New("this clinic is installed; use Uninstall instead of failed-install cleanup")
 		}
 		e := a.engine()
@@ -284,6 +285,9 @@ func (a *App) CleanupFailedInstall() error {
 			return err
 		}
 		if err := e.Backups().PreserveRecoveryKey(); err != nil {
+			return err
+		}
+		if err := e.Backups().DiscardUnusedRecoveryKey(); err != nil {
 			return err
 		}
 		if err := a.beginRemoval(); err != nil {
@@ -299,7 +303,7 @@ func (a *App) CleanupFailedInstall() error {
 			return err
 		}
 		a.restartAdvertise()
-		return nil
+		return a.keepChosenName(cfg)
 	})
 }
 

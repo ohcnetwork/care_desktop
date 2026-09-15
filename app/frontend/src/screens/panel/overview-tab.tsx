@@ -1,4 +1,5 @@
 import { Spinner } from "@/components/spinner";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { toast } from "@/components/ui/sonner";
@@ -6,7 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { bridge } from "@/lib/bridge";
 import { shortDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { useCare, type SystemState } from "@/state/care-store";
+import { RESTORE_PENDING_NOTICE, useCare, type SystemState } from "@/state/care-store";
 
 const SYSTEM: Record<
   Exclude<SystemState, "unknown">,
@@ -35,6 +36,8 @@ const SYSTEM: Record<
 export function OverviewTab() {
   const {
     system,
+    systemDetail,
+    restorePending,
     busy,
     busyLabel,
     autostart,
@@ -49,6 +52,7 @@ export function OverviewTab() {
   const running = system === "running";
   const partial = system === "partial";
   const stopped = !running && !partial;
+  const unreachable = system === "unknown" && systemDetail !== "";
   const latest = backups[0];
 
   const copyAddress = () =>
@@ -59,21 +63,32 @@ export function OverviewTab() {
 
   return (
     <div className="flex flex-col gap-3">
+      {restorePending ? (
+        <Alert variant="danger">
+          {RESTORE_PENDING_NOTICE} Recovery data is kept until CARE starts successfully.
+        </Alert>
+      ) : null}
       <Card className="flex items-center gap-4 p-5">
         <span
           className={cn(
             "flex size-10 flex-none items-center justify-center rounded-full text-base font-bold",
-            busy ? "bg-warn-bg text-warn-ink" : view.tone,
+            busy ? "bg-warn-bg text-warn-ink" : unreachable ? "bg-danger-bg text-danger-ink" : view.tone,
           )}
         >
-          {busy ? <Spinner /> : view.glyph}
+          {busy ? <Spinner /> : unreachable ? "!" : view.glyph}
         </span>
         <div className="min-w-0 flex-1">
           <div className="text-[17px] font-bold text-ink">
-            {busy ? `${busyLabel}…` : system === "unknown" ? "checking…" : view.label}
+            {busy
+              ? `${busyLabel}…`
+              : system === "unknown"
+                ? unreachable
+                  ? "Can't check the clinic"
+                  : "checking…"
+                : view.label}
           </div>
           <div className="mt-0.5 text-[13.5px] text-muted-foreground">
-            {busy ? "Please wait a moment." : system === "unknown" ? "" : view.sub}
+            {busy ? "Please wait a moment." : system === "unknown" ? systemDetail : view.sub}
           </div>
         </div>
         <div className="flex flex-none items-center gap-2">
@@ -87,7 +102,10 @@ export function OverviewTab() {
           <Button disabled={busy || stopped} onClick={() => void runAction("stop")}>
             Stop
           </Button>
-          <Button disabled={busy || stopped} onClick={() => void runAction("restart")}>
+          <Button
+            disabled={busy || stopped || restorePending}
+            onClick={() => void runAction("restart")}
+          >
             Restart
           </Button>
           <label className="ml-1.5 flex cursor-pointer items-center gap-[9px] text-[13px] font-semibold text-ink2 select-none">
@@ -142,7 +160,11 @@ export function OverviewTab() {
           <div className="min-h-3.5 flex-1" />
           <div className="flex gap-2">
             <Button onClick={() => setTab("backups")}>View backups</Button>
-            <Button variant="soft" disabled={busy} onClick={() => void runAction("backup-now")}>
+            <Button
+              variant="soft"
+              disabled={busy || restorePending}
+              onClick={() => void runAction("backup-now")}
+            >
               Back up now
             </Button>
           </div>

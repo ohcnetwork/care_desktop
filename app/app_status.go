@@ -125,6 +125,15 @@ func (a *App) ValidateBackupDir(dir string) string {
 			}
 		}
 	}
+	e := a.engine()
+	e.BackupDir = target
+	foreign, err := e.Backups().ForeignRecoveryData()
+	if err != nil {
+		return "Couldn't check that folder for earlier backups: " + err.Error()
+	}
+	if foreign {
+		return "That folder already holds backups or a recovery key from another CARE installation. Choose a different folder, and leave that one as it is so those backups stay restorable."
+	}
 	if dir == "" {
 		return ""
 	}

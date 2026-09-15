@@ -104,8 +104,16 @@ func Scan(o Options) (Report, error) {
 		add("secret", "Saved backup password", "the old backup password is still in this computer's password store")
 	}
 
-	return Report{Clean: len(traces) == 0 && len(failed) == 0, Traces: traces}, errors.Join(failed...)
+	blocking := 0
+	for _, trace := range traces {
+		if trace.ID != "images" {
+			blocking++
+		}
+	}
+	return Report{Clean: blocking == 0 && len(failed) == 0, Traces: traces}, errors.Join(failed...)
 }
+
+const workingDirFormat = `{{.Label "com.docker.compose.project.working_dir"}}`
 
 func InstallDirFrom(run proc.Runner, project, configured string) (string, error) {
 	found, err := hasComposeFile(configured)
@@ -114,7 +122,7 @@ func InstallDirFrom(run proc.Runner, project, configured string) (string, error)
 	}
 	dirs, err := run.Lines("docker", "ps", "-a",
 		"--filter", "label=com.docker.compose.project="+project,
-		"--format", `{{index .Labels "com.docker.compose.project.working_dir"}}`)
+		"--format", workingDirFormat)
 	if err != nil {
 		return configured, fmt.Errorf("could not locate the earlier installation; start Docker and try again: %w", err)
 	}

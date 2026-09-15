@@ -57,14 +57,32 @@ export function SetupScreen({
   const adminStrength = usePasswordStrength(form.adminPassword);
   const backupStrength = usePasswordStrength(form.backupPassword);
 
+  const pushHost = useCallback(async (raw: string): Promise<boolean> => {
+    const trimmed = raw.trim();
+    const problem = await bridge.ValidateDomain(trimmed);
+    if (problem) {
+      setHostProblem(problem);
+      return false;
+    }
+    try {
+      await bridge.SetMDNSName(normaliseHost(trimmed));
+    } catch (e) {
+      setHostProblem(errorText(e));
+      return false;
+    }
+    setHostProblem("");
+    return true;
+  }, []);
+
   // Every re-check asks about the restart, not just the one straight after an
   // install: the operator can put the restart off, and until they do it Docker
   // cannot start, so pressing "Check again" has to keep saying so.
   const verify = useCallback(async () => {
+    await pushHost(form.hostInput);
     await recheckAll();
     const plan = await bridge.RestartPlan();
     setRestart(plan.needed ? plan : null);
-  }, [recheckAll]);
+  }, [pushHost, form.hostInput, recheckAll]);
 
   const hostOk = hostProblem === "";
   const adminDone =
@@ -85,22 +103,9 @@ export function SetupScreen({
   const hostTimer = useRef(0);
   const applyHost = useCallback(
     async (raw: string) => {
-      const trimmed = raw.trim();
-      const problem = await bridge.ValidateDomain(trimmed);
-      if (problem) {
-        setHostProblem(problem);
-        return;
-      }
-      try {
-        await bridge.SetMDNSName(normaliseHost(trimmed));
-      } catch (e) {
-        setHostProblem(errorText(e));
-        return;
-      }
-      setHostProblem("");
-      void checkMDNS();
+      if (await pushHost(raw)) void checkMDNS();
     },
-    [checkMDNS],
+    [pushHost, checkMDNS],
   );
 
   // Apply the form's own default once, so the address the operator sees in the

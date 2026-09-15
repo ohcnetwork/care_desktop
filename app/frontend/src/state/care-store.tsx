@@ -57,6 +57,9 @@ const ACTION_LABELS: Record<string, string> = {
   "backup-now": "Backing up",
 };
 
+export const RESTORE_PENDING_NOTICE =
+  "An earlier restore is unfinished. Start CARE to recover it before doing anything else.";
+
 // Docker Desktop needs about a minute after a reboot before it can answer, and
 // the panel starts the clinic itself on launch. Nothing is wrong until then.
 const GRACE_MS = 90_000;
@@ -90,8 +93,10 @@ type CareStore = {
   busy: boolean;
   busyLabel: string;
   system: SystemState;
+  systemDetail: string;
   /** The clinic is down and nobody asked for that - the panel says so. */
   trouble: boolean;
+  restorePending: boolean;
   version: string;
   backups: Backup[];
   backupsError: string;
@@ -125,6 +130,8 @@ export function CareProvider({ children }: { children: ReactNode }) {
   const [busy, setBusyState] = useState(false);
   const [busyLabel, setBusyLabel] = useState("");
   const [system, setSystem] = useState<SystemState>("unknown");
+  const [systemDetail, setSystemDetail] = useState("");
+  const [restorePending, setRestorePending] = useState(false);
   const [version, setVersion] = useState("");
   const [backups, setBackups] = useState<Backup[]>([]);
   const [backupsError, setBackupsError] = useState("");
@@ -137,6 +144,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
   const flowRef = useRef<Flow>("setup");
   const runRef = useRef<RunState>(IDLE_RUN);
   const busyRef = useRef(false);
+  const restorePendingRef = useRef(false);
   // Buffered so the fail screen can show the real build error rather than just
   // "exit status 1". Kept out of React state: the install emits thousands of
   // lines and only a step change needs to repaint.
@@ -222,6 +230,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     if (busyRef.current || flowRef.current !== "panel") return;
     let next: SystemState;
+    let detail = "";
     try {
       const health = await bridge.ClinicHealth();
       if (health.active) next = "running";
@@ -229,10 +238,14 @@ export function CareProvider({ children }: { children: ReactNode }) {
         const ps = await bridge.ClinicStatus();
         next = ps.trim() ? "partial" : "stopped";
       }
-    } catch {
+    } catch (e) {
       next = "unknown";
+      detail = firstLine(errorText(e));
+      const docker = await bridge.DockerStatus().catch(() => null);
+      if (docker && !docker.ok) detail = docker.message;
     }
     setSystem(next);
+    setSystemDetail(detail);
 
     downStreakRef.current = next === "running" ? 0 : downStreakRef.current + 1;
     const settled = Date.now() - panelSinceRef.current > GRACE_MS;
@@ -254,6 +267,10 @@ export function CareProvider({ children }: { children: ReactNode }) {
   const runAction = useCallback(
     async (action: string, adminPassword = "") => {
       if (busyRef.current) return;
+      if (restorePendingRef.current && action !== "start" && action !== "stop") {
+        toast(RESTORE_PENDING_NOTICE);
+        return;
+      }
       // What the operator asked for, which is what makes a stopped clinic either
       // a fault or a choice. Not persisted: the panel starts the clinic on every
       // launch, so the intent dies with the session, same as the state it describes.
@@ -301,6 +318,10 @@ export function CareProvider({ children }: { children: ReactNode }) {
   const restore = useCallback(
     async (backup: Backup, passphrase: string, adminPassword: string) => {
       if (busyRef.current) return;
+      if (restorePendingRef.current) {
+        toast(RESTORE_PENDING_NOTICE);
+        return;
+      }
       setBusy(true, "Restoring");
       log(
         `\n$ care restore ${backup.db_dump}${backup.files_archive ? ` ${backup.files_archive}` : ""}`,
@@ -319,6 +340,10 @@ export function CareProvider({ children }: { children: ReactNode }) {
   const restoreFile = useCallback(
     async (path: string, passphrase: string, adminPassword: string) => {
       if (busyRef.current) return;
+      if (restorePendingRef.current) {
+        toast(RESTORE_PENDING_NOTICE);
+        return;
+      }
       setBusy(true, "Restoring");
       log("\n$ care restore imported backup");
       try {
@@ -358,6 +383,8 @@ export function CareProvider({ children }: { children: ReactNode }) {
       const state = await bridge.GetState();
       setMdnsName(state.mdns_name || "care.local");
       restorePending = state.restore_pending;
+      restorePendingRef.current = restorePending;
+      setRestorePending(restorePending);
     } catch (e) {
       setBootError(new Error(errorText(e)));
       return;
@@ -469,6 +496,8 @@ export function CareProvider({ children }: { children: ReactNode }) {
         void refresh();
         void reloadBackups();
         void bridge.GetState().then((state) => {
+          restorePendingRef.current = state.restore_pending;
+          setRestorePending(state.restore_pending);
           if (!state.setup_done) {
             setStepsDone(NO_STEPS_DONE);
             setOpenStep("checks");
@@ -539,7 +568,9 @@ export function CareProvider({ children }: { children: ReactNode }) {
       busy,
       busyLabel,
       system,
+      systemDetail,
       trouble,
+      restorePending,
       version,
       backups,
       backupsError,
@@ -556,7 +587,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
     [
       ready, flow, mdnsName, openStep, stepsDone, setStepDone,
       run, startInstall, retryInstall, restartSetup, openPanel,
-      tab, busy, busyLabel, system, trouble, version, backups, backupsError, autostart, refresh, reloadBackups,
+      tab, busy, busyLabel, system, systemDetail, trouble, restorePending, version, backups, backupsError, autostart, refresh, reloadBackups,
       runAction, setAutostart, restore, restoreFile, uninstall, log,
     ],
   );

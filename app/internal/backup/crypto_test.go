@@ -219,3 +219,81 @@ func TestProtectedKeyCanRecoverItsCertificate(t *testing.T) {
 	}
 	run("pkey", "-in", filepath.Join(s.BackupDir, s.encKeyName()), "-passin", "env:PASS", "-noout")
 }
+
+func TestUnusedRecoveryKeyCopyIsDiscardedOnlyWhenProvablyOurs(t *testing.T) {
+	s := keyStore(t)
+	copyPath := filepath.Join(s.BackupDir, s.encKeyName())
+	if err := os.WriteFile(copyPath, []byte("foreign key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DiscardUnusedRecoveryKey(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(copyPath); err != nil {
+		t.Fatal("a copy that cannot be matched to this installation was removed")
+	}
+	if err := os.WriteFile(s.encKeyPath(), []byte("foreign key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.BackupDir, "care-20260101-010101.dump.enc"), []byte("dump"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DiscardUnusedRecoveryKey(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(copyPath); err != nil {
+		t.Fatal("the key protecting an encrypted backup was removed")
+	}
+	if err := os.Remove(filepath.Join(s.BackupDir, "care-20260101-010101.dump.enc")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DiscardUnusedRecoveryKey(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(copyPath); !os.IsNotExist(err) {
+		t.Fatalf("an unused copy of this installation's key was kept: %v", err)
+	}
+	if err := s.DiscardUnusedRecoveryKey(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestForeignRecoveryDataIsDetectedBeforeSetup(t *testing.T) {
+	s := keyStore(t)
+	check := func(want bool, why string) {
+		t.Helper()
+		foreign, err := s.ForeignRecoveryData()
+		if err != nil || foreign != want {
+			t.Fatalf("%s: foreign = %v, err = %v", why, foreign, err)
+		}
+	}
+	check(false, "empty folder")
+	if err := os.Remove(s.BackupDir); err != nil {
+		t.Fatal(err)
+	}
+	check(false, "missing folder")
+	if err := os.MkdirAll(s.BackupDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	copyPath := filepath.Join(s.BackupDir, s.encKeyName())
+	if err := os.WriteFile(copyPath, []byte("their key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check(true, "key copy with no installation key")
+	if err := os.WriteFile(s.encKeyPath(), []byte("our key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check(true, "key copy that differs from ours")
+	if err := os.WriteFile(copyPath, []byte("our key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check(false, "our own key copy")
+	if err := os.WriteFile(filepath.Join(s.BackupDir, "care-20260101-010101.dump.enc"), []byte("dump"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check(false, "our own backups beside our key")
+	if err := os.Remove(copyPath); err != nil {
+		t.Fatal(err)
+	}
+	check(true, "encrypted backups without a matching key")
+}
