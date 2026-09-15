@@ -2,11 +2,15 @@ package main
 
 import (
 	"errors"
-	"net/url"
+	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"slices"
 
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/autostart"
+	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -32,11 +36,23 @@ func (a *App) WasAutostartLaunched() bool {
 func (a *App) LogPath() string { return a.log.Path() }
 
 func (a *App) OpenLogFolder() error {
-	dir := a.log.Folder()
-	if dir == "" {
+	path := a.log.Path()
+	if path == "" {
 		return errors.New("this run isn't writing a log file - the log folder couldn't be opened for writing")
 	}
-	wruntime.BrowserOpenURL(a.ctx, (&url.URL{Scheme: "file", Path: dir}).String())
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = proc.Command("open", "-R", path)
+	case "windows":
+		cmd = proc.Command("explorer.exe", "/select,"+path)
+	default:
+		cmd = proc.Command("xdg-open", filepath.Dir(path))
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("couldn't open the log folder: %w", err)
+	}
+	go func() { _ = cmd.Wait() }()
 	return nil
 }
 
