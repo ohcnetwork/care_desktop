@@ -4,7 +4,7 @@ import "github.com/ohcnetwork/care_desktop/app/internal/plugins"
 
 func (a *App) ReadPlugins(adminPassword string) ([]plugins.Plugin, error) {
 	var list []plugins.Plugin
-	err := a.withJob(func() error {
+	err := a.withReadJob(func() error {
 		if err := a.requireAdmin(adminPassword); err != nil {
 			return err
 		}

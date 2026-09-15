@@ -1,16 +1,20 @@
 # `app/` — the CARE Desktop control app (Go / Wails)
 
-One Go codebase that drives the whole clinic stack on macOS, Linux, and Windows —
-**no shell, no Rust**. The Wails GUI is a thin binding layer over the engine
-packages under `internal/`, which never import Wails.
+The Go/Wails application operates the clinic through Docker Compose and native
+system tools. The engine packages under `internal/` never import Wails.
 
 ```bash
-wails dev      # hot-reload dev (needs a display)
-wails build    # → build/bin/CARE Desktop(.app/.exe/binary)
+wails dev
+wails build
 ```
 
-## Full docs
-- **How it works:** [`../docs/architecture.md`](../docs/architecture.md)
-- **Layout, building, releases:** [`../docs/building.md`](../docs/building.md)
-- **Settings:** [`../docs/configuration.md`](../docs/configuration.md)
-- **What must not change:** [`../docs/behaviour-contract.md`](../docs/behaviour-contract.md)
+See [Development and release](../docs/development-and-release.md) for preparing
+a fresh checkout, embedded assets, build prerequisites, and platform packaging.
+Running a development app can operate an existing clinic on this computer.
+
+## Backend documentation
+
+Start at the [documentation index](../docs/README.md), then read the
+[architecture](../docs/architecture.md), [file map](../docs/repository-map.md),
+[Wails API](../docs/wails-application.md), and
+[configuration guide](../docs/configuration-and-settings.md).

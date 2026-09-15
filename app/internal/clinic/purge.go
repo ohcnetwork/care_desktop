@@ -56,5 +56,5 @@ func (e *Clinic) Purge() error {
 	if err := errors.Join(failed...); err != nil {
 		return err
 	}
-	return e.removeInstallFiles()
+	return e.removeInstallFiles(false)
 }

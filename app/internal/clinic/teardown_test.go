@@ -49,10 +49,71 @@ func TestInstallRemovalRejectsUnownedDirectories(t *testing.T) {
 	if err := os.WriteFile(path, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := (&Clinic{InstallDir: root}).removeInstallFiles(); err == nil {
+	if err := (&Clinic{InstallDir: root}).removeInstallFiles(false); err == nil {
 		t.Fatal("an unowned directory was accepted for removal")
 	}
 	if data, err := os.ReadFile(path); err != nil || string(data) != "keep" {
 		t.Fatal("unrelated files were changed")
+	}
+}
+
+func TestInstallRemovalHandlesUnusedRecoveryKeyAfterExport(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		removeUnusedKey  bool
+		encryptedBackups bool
+		wantKey          bool
+	}{
+		{"failed setup without backups", true, false, false},
+		{"failed setup with backups", true, true, true},
+		{"normal uninstall", false, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			e := &Clinic{
+				InstallDir: filepath.Join(root, "care-desktop", "install"),
+				BackupDir:  filepath.Join(root, "backups"),
+				Pins:       &release.Pins{},
+			}
+			keys := filepath.Join(e.InstallDir, "keys")
+			if err := os.MkdirAll(keys, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(keys, "backup-key.pem.enc"), []byte("protected key"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.Backups().PreserveRecoveryKey(); err != nil {
+				t.Fatal(err)
+			}
+			dump := filepath.Join(e.BackupDir, "care-20260101-010101.dump.enc")
+			if tc.encryptedBackups {
+				if err := os.WriteFile(dump, []byte("encrypted backup"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := e.removeInstallFiles(tc.removeUnusedKey); err != nil {
+				t.Fatal(err)
+			}
+			key, err := os.ReadFile(filepath.Join(e.BackupDir, "backup-key.pem.enc"))
+			if tc.wantKey {
+				if err != nil || string(key) != "protected key" {
+					t.Fatalf("recovery key was not retained: %q, %v", key, err)
+				}
+			} else if !os.IsNotExist(err) {
+				t.Fatalf("unused recovery key still blocks retry: %v", err)
+			}
+			if _, err := os.Stat(e.InstallDir); !os.IsNotExist(err) {
+				t.Fatalf("installed files were not removed: %v", err)
+			}
+			foreign, err := e.Backups().ForeignRecoveryData()
+			if err != nil || foreign != tc.wantKey {
+				t.Fatalf("unexpected recovery state after removal: %v, %v", foreign, err)
+			}
+			if tc.encryptedBackups {
+				if data, err := os.ReadFile(dump); err != nil || string(data) != "encrypted backup" {
+					t.Fatalf("encrypted backup was changed: %q, %v", data, err)
+				}
+			}
+		})
 	}
 }

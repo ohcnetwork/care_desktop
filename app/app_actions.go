@@ -76,6 +76,17 @@ func (a *App) withJob(fn func() error) error {
 	return fn()
 }
 
+func (a *App) withReadJob(fn func() error) error {
+	if !a.jobMu.TryRLock() {
+		return errors.New("something else is still running - wait for it to finish")
+	}
+	defer a.jobMu.RUnlock()
+	if a.closing {
+		return errors.New("CARE Desktop is closing")
+	}
+	return fn()
+}
+
 func (a *App) requireSetup() error {
 	cfg := a.loadConfig()
 	if cfg.Removing {
@@ -287,13 +298,13 @@ func (a *App) CleanupFailedInstall() error {
 		if err := e.Backups().PreserveRecoveryKey(); err != nil {
 			return err
 		}
-		if err := e.Backups().DiscardUnusedRecoveryKey(); err != nil {
-			return err
-		}
 		if err := a.beginRemoval(); err != nil {
 			return err
 		}
-		if err := e.Uninstall(clinic.UninstallOptions{RemoveInstallDir: true}); err != nil {
+		if err := e.Uninstall(clinic.UninstallOptions{
+			RemoveInstallDir:        true,
+			RemoveUnusedRecoveryKey: true,
+		}); err != nil {
 			return err
 		}
 		if err := backup.ForgetPassword(); err != nil {

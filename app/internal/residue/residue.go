@@ -36,6 +36,10 @@ type Options struct {
 }
 
 func Scan(o Options) (Report, error) {
+	return scan(o, systemTraces)
+}
+
+func scan(o Options, inspectSystem func(proc.Runner) ([]Trace, error)) (Report, error) {
 	var traces []Trace
 	var failed []error
 	add := func(id, label, detail string) {
@@ -79,26 +83,10 @@ func Scan(o Options) (Report, error) {
 		}
 	}
 
-	hostsEntry, err := hosts.Inspect()
+	system, err := inspectSystem(o.Runner)
+	traces = append(traces, system...)
 	if err != nil {
 		failed = append(failed, err)
-	} else if hostsEntry {
-		add("hosts", "Hosts file entry", "this computer still resolves the old clinic address to itself")
-	}
-	trusted, err := trust.Inspect()
-	if err != nil {
-		failed = append(failed, err)
-	} else if trusted {
-		add("certificate", "Security certificate", "this computer still trusts the old clinic's certificate")
-	}
-	firewall, err := netfix.InspectRules(o.Runner)
-	if err != nil {
-		failed = append(failed, err)
-	} else if firewall {
-		add("firewall", "Firewall rules", "the clinic's inbound rules are still in place")
-	}
-	if autostart.Enabled() {
-		add("autostart", "Start at login", "CARE Desktop is set to open when this computer starts")
 	}
 	if o.StoredSecret {
 		add("secret", "Saved backup password", "the old backup password is still in this computer's password store")
@@ -111,6 +99,36 @@ func Scan(o Options) (Report, error) {
 		}
 	}
 	return Report{Clean: blocking == 0 && len(failed) == 0, Traces: traces}, errors.Join(failed...)
+}
+
+func systemTraces(run proc.Runner) ([]Trace, error) {
+	var traces []Trace
+	var failed []error
+	add := func(id, label, detail string) {
+		traces = append(traces, Trace{ID: id, Label: label, Detail: detail})
+	}
+	hostsEntry, err := hosts.Inspect()
+	if err != nil {
+		failed = append(failed, err)
+	} else if hostsEntry {
+		add("hosts", "Hosts file entry", "this computer still resolves the old clinic address to itself")
+	}
+	trusted, err := trust.Inspect()
+	if err != nil {
+		failed = append(failed, err)
+	} else if trusted {
+		add("certificate", "Security certificate", "this computer still trusts the old clinic's certificate")
+	}
+	firewall, err := netfix.InspectRules(run)
+	if err != nil {
+		failed = append(failed, err)
+	} else if firewall {
+		add("firewall", "Firewall rules", "the clinic's inbound rules are still in place")
+	}
+	if autostart.Enabled() {
+		add("autostart", "Start at login", "CARE Desktop is set to open when this computer starts")
+	}
+	return traces, errors.Join(failed...)
 }
 
 const workingDirFormat = `{{.Label "com.docker.compose.project.working_dir"}}`

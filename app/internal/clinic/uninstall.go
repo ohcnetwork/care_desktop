@@ -13,9 +13,10 @@ import (
 )
 
 type UninstallOptions struct {
-	RemoveImages     bool
-	RemoveInstallDir bool
-	RemoveBackups    bool
+	RemoveImages            bool
+	RemoveInstallDir        bool
+	RemoveBackups           bool
+	RemoveUnusedRecoveryKey bool
 }
 
 func (e *Clinic) Uninstall(opts UninstallOptions) error {
@@ -71,7 +72,7 @@ func (e *Clinic) Uninstall(opts UninstallOptions) error {
 		}
 	}
 	if opts.RemoveInstallDir {
-		if err := e.removeInstallFiles(); err != nil {
+		if err := e.removeInstallFiles(opts.RemoveUnusedRecoveryKey); err != nil {
 			return err
 		}
 	}
@@ -79,7 +80,7 @@ func (e *Clinic) Uninstall(opts UninstallOptions) error {
 	return nil
 }
 
-func (e *Clinic) removeInstallFiles() error {
+func (e *Clinic) removeInstallFiles(removeUnusedKey bool) error {
 	if looksLikeSourceRepo(e.InstallDir) {
 		e.logln("Install dir looks like a source checkout - left in place: " + e.InstallDir)
 		return fmt.Errorf("the source checkout at %s was kept; its files must not be deleted automatically", e.InstallDir)
@@ -88,6 +89,11 @@ func (e *Clinic) removeInstallFiles() error {
 	if !filepath.IsAbs(dir) || !strings.EqualFold(filepath.Base(dir), "install") ||
 		!strings.EqualFold(filepath.Base(filepath.Dir(dir)), "care-desktop") {
 		return fmt.Errorf("refusing to delete an unrecognized installation directory: %s", dir)
+	}
+	if removeUnusedKey {
+		if err := e.Backups().DiscardUnusedRecoveryKey(); err != nil {
+			return err
+		}
 	}
 	e.logln("Removing installed files " + dir)
 	return os.RemoveAll(dir)

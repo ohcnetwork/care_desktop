@@ -25,7 +25,7 @@ type App struct {
 	cfg        Config
 	configFile string
 
-	jobMu   sync.Mutex
+	jobMu   sync.RWMutex
 	closing bool
 
 	advMu   sync.Mutex

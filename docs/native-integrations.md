@@ -1,0 +1,1291 @@
+[Documentation index](README.md)
+
+# Native integrations and machine readiness
+
+This guide explains how CARE Desktop interacts with the computer running the
+clinic: child processes, files, logs, administrator approval, local name
+resolution, certificates, LAN discovery, Windows networking, prerequisite tools,
+login startup, and restart detection. It also explains what the health checks
+actually prove.
+
+**CARE Desktop is the native Wails management application.** Its Go backend
+installs and manages the clinic and performs these operating-system operations.
+The **CARE frontend** is the clinical web application served through Caddy and
+opened in a browser, including browsers on other devices. Trusting a certificate
+or adding a hosts entry on the server computer does not configure every browser
+or every remote device.
+
+Read [Architecture](architecture.md) for the overall boundaries and
+[The Wails application](wails-application.md) for bridge methods, dialogs,
+events, and application lifetime. See [Clinic lifecycle](clinic-lifecycle.md)
+for when installation and start operations call these helpers, and
+[Cleanup and uninstall](cleanup-and-uninstall.md) for teardown orchestration.
+This guide describes the current source, not the older behavior recorded in
+`design.md`.
+
+## Contents
+
+- [Architecture and ownership](#architecture-and-ownership)
+- [Operating-system behavior matrix](#operating-system-behavior-matrix)
+- [Running programs with proc](#running-programs-with-proc)
+- [Replacing files with atomicfile](#replacing-files-with-atomicfile)
+- [Diagnostic logging with applog](#diagnostic-logging-with-applog)
+- [Administrator approval and local hosts setup](#administrator-approval-and-local-hosts-setup)
+- [Certificate trust and device bootstrap](#certificate-trust-and-device-bootstrap)
+- [LAN names and mDNS](#lan-names-and-mdns)
+- [Windows network repair](#windows-network-repair)
+- [Docker and Git prerequisites](#docker-and-git-prerequisites)
+- [Health and port checks](#health-and-port-checks)
+- [Login startup and restart detection](#login-startup-and-restart-detection)
+- [Error handling and ownership rules](#error-handling-and-ownership-rules)
+- [Source-file role inventory](#source-file-role-inventory)
+- [Verification boundaries and historical differences](#verification-boundaries-and-historical-differences)
+
+## Architecture and ownership
+
+The native layer exists so clinic orchestration does not need to contain
+platform-specific shell quoting, registry commands, certificate-store layouts,
+or network-interface filtering.
+
+```mermaid
+flowchart TD
+    UI["CARE Desktop embedded management UI"] --> App["Wails Go application bridge"]
+    App --> Clinic["Clinic orchestration"]
+    App --> Ready["prereq and health"]
+    App --> Native["sys packages"]
+    Clinic --> Local["thiscomputer.go"]
+    Clinic --> Export["caddyroot.go and devicescripts.go"]
+    Local --> Native
+    Export --> Native
+    Ready --> Proc["sys/proc"]
+    Native --> OS["Host files, processes, trust stores, and networking"]
+    Export --> Caddy["Running Caddy container"]
+    Caddy --> Browser["Browser CARE frontend and device setup"]
+```
+
+There are three different kinds of ownership:
+
+1. **Application lifetime:** the Wails layer owns the in-memory mDNS advertiser,
+   its renewal loop, log delivery to the desktop, and second-instance behavior.
+2. **Clinic data and generated files:** the clinic layer owns the installation
+   directory and chooses when to extract Caddy's root certificate and generate
+   device installers. It passes ordinary logging and confirmation callbacks to
+   native helpers rather than making those helpers depend on Wails.
+3. **Host integration artifacts:** each native package identifies the files,
+   certificate names, registry values, or firewall names it can change. Removal
+   must use those ownership identifiers, not a broad assumption that everything
+   on the machine belongs to CARE.
+
+`proc.Runner` is a shared process-execution context, not a job scheduler.
+`elevate.Step` is a description of a privileged action, not a transaction.
+`health.Health`, `prereq.Status`, `netfix.Status`, `mdns.NameStatus`, and
+`reboot.Plan` are small result types that the application can expose through its
+bridge. Their boolean fields have different meanings; one green result does not
+replace the other checks.
+
+## Operating-system behavior matrix
+
+These are implemented branches, not a claim that every distribution, desktop
+environment, browser, or architecture is supported or has been integration-tested.
+
+| Concern | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| Child process windows | Console-hiding helper is a no-op. | `HideWindow` and `CREATE_NO_WINDOW` prevent ordinary child-console flashes. OS approval dialogs still appear. | Console-hiding helper is a no-op. |
+| GUI PATH repair | Login-shell PATH, then Homebrew and standard executable directories. | Docker and Git installation directories, then inherited PATH; no login-shell probe. | Login-shell PATH, then the same Unix directory list, including Homebrew paths even if absent. |
+| Batched administrator approval | AppleScript `do shell script ... with administrator privileges`. | One elevated PowerShell child through `Start-Process -Verb RunAs`. | `pkexec sh -c`; requires the relevant policy/desktop support. |
+| Server hosts file | `/etc/hosts`. | `%WINDIR%\System32\drivers\etc\hosts`; path helper falls back to `C:\Windows`. | `/etc/hosts`. |
+| Local certificate installation | Try login keychain first, then offer System keychain installation. | Try machine `Root` through `certutil`, then offer elevation. | Try system anchors/bundle update first, then offer elevation. |
+| Downloadable trust installer | Installs in System keychain using `sudo` when needed. | Imports into `Cert:\LocalMachine\Root` after UAC approval. | Debian-style or Fedora-style anchors; conditional browser NSS imports. |
+| mDNS | Shared IPv4 address-selection and response-probing implementation. | Same implementation; firewall/profile repair is separate. | Same implementation; no Linux firewall manager is configured here. |
+| Network repair | `netfix` reports not applicable; no repair. | Public profiles can become Private; three owned inbound rules cover HTTP, HTTPS, and mDNS on Private and Domain profiles. | `netfix` reports not applicable; no repair. |
+| Atomic replacement | Rename within the destination directory, then sync that directory. | `MoveFileEx` with replacement and write-through flags. | Same Unix replacement implementation as macOS. |
+| Login startup | Per-user LaunchAgent plist. | Per-user `HKCU` Run value. | Per-user `.desktop` autostart file under `~/.config`. |
+| Restart detection/action | No pending-restart detection; `Now` returns an unsupported error. | Two registry-key probes; restart action schedules `shutdown /r` after five seconds. | No pending-restart detection; `Now` returns an unsupported error. |
+| Automated Docker setup | Download architecture-selected Docker Desktop DMG. | Prefer `winget`, otherwise download the amd64 installer. | Package-manager commands plus `systemctl` and `usermod`. |
+| Automated Git setup | Launch Command Line Tools installer with `xcode-select --install`. | `winget`, otherwise a manual-download plan. | Supported package manager, otherwise a manual plan. |
+
+Other `GOOS` values are not a general supported-platform promise. For example,
+some helpers have default branches, but `atomicfile` only supplies replacement
+files for Darwin, Linux, and Windows.
+
+## Running programs with proc
+
+Source: [proc.go](../app/internal/sys/proc/proc.go),
+[console_windows.go](../app/internal/sys/proc/console_windows.go), and
+[console_other.go](../app/internal/sys/proc/console_other.go).
+
+### Why one process wrapper exists
+
+Docker, Git, platform utilities, and installers need a predictable working
+directory and environment when launched from a GUI. They also need to avoid
+flashing console windows on Windows. The wrapper centralizes these mechanics
+without deciding whether a particular command is an installation, a diagnostic,
+or a teardown.
+
+| API or field | Actual contract |
+| --- | --- |
+| `Runner.Dir` | Assigned to the command's working directory. Empty means inherit the current process directory. Compose callers must provide the intended project context; the runner does not discover it. |
+| `Runner.Env` | Assigned to the child environment. `nil` inherits the process environment; a non-nil slice supplies an explicit environment rather than automatically merging with the parent. |
+| `Runner.Log` | Optional `func(string)` sink. `Run` can call it concurrently from stdout and stderr reader goroutines. |
+| `Command` | Constructs `exec.Command` and applies the platform console settings. It does not start the command. |
+| `CommandContext` | Same wrapper around `exec.CommandContext`; the caller supplies cancellation and deadlines. |
+| `Run` / `RunWith` | Start the command, stream stdout and stderr, wait for both readers and process completion, and return an error on failure. |
+| `RunWith(extraEnv, ...)` | Starts from `cmd.Environ()` and appends the additional entries, preserving inherited environment when `Runner.Env` is nil. Later duplicate environment keys take precedence in the child. |
+| `Capture` | Returns trimmed stdout plus the command error, without live streaming. Stderr is not part of the returned string. |
+| `Lines` | Returns non-empty, trimmed stdout lines. A failed command is an error, not an empty successful list; the error includes command context. Successful empty output returns no lines and no error. |
+| `Exists` / `FileExists` | Executable lookup on PATH, or a successful `os.Stat`, respectively. `FileExists` does not establish that a path is a regular file. |
+
+Executable lookup is performed when Go constructs the command, using the
+application's process PATH. Putting a different PATH only in `Runner.Env` is not
+a replacement for repairing the application's own PATH before command lookup.
+
+`RunWith` drains stdout and stderr separately, so their relative ordering is not
+guaranteed. Empty lines are not logged. Its buffer size is `64 * 1024` bytes:
+for an overlong line it logs the first chunk and a truncation notice, discarding
+the remaining chunks of that line. Reader errors themselves are not exposed as
+a separate API result; the final process result comes from `Wait`.
+
+Neither `Runner.Run` nor `Runner.Capture` has a context argument or an automatic
+timeout. Use the bounded `CommandContext` pattern where cancellation is required.
+Go's default command cancellation targets the child process; this wrapper adds
+no process-group or descendant-tree cancellation guarantee.
+
+### GUI PATH repair
+
+`FixPath` widens the **current process** PATH. The application invokes it during
+construction; see the integration point in [app.go](../app/app.go).
+
+- On Unix, a login-shell probe runs `$SHELL -lc`, falling back to `/bin/zsh` when
+  `SHELL` is unset. It has a three-second context deadline. The command emits a
+  line prefixed with `__care_path__`, so unrelated shell startup output is not
+  mistaken for PATH. Failure simply omits this part.
+- `AugmentedPath` prepends `/opt/homebrew/bin`, `/opt/homebrew/sbin`,
+  `/usr/local/bin`, `/usr/bin`, `/bin`, `/usr/sbin`, and `/sbin` on Unix.
+- On Windows it prepends
+  `C:\Program Files\Docker\Docker\resources\bin`,
+  `C:\Program Files\Git\bin`, and `C:\Program Files\Git\cmd`.
+- The existing PATH is appended. The login-shell result, when available, precedes
+  the augmented path. There is no directory-existence check or deduplication.
+
+This addresses GUI launches that cannot find installed tools. It does not install
+them, prove that Docker is running, or validate a minimum tool version.
+
+The Windows console helper preserves existing `SysProcAttr` settings and adds
+`HideWindow = true` plus creation flag `0x08000000`. It is not a request to hide
+UAC or to suppress an installer application's intentional UI.
+
+## Replacing files with atomicfile
+
+Source: [atomicfile.go](../app/internal/sys/atomicfile/atomicfile.go) and its
+[Darwin](../app/internal/sys/atomicfile/replace_darwin.go),
+[Linux](../app/internal/sys/atomicfile/replace_linux.go), and
+[Windows](../app/internal/sys/atomicfile/replace_windows.go) replacement helpers.
+
+`Write(path, data, mode)` exists to avoid truncating a live state file before its
+replacement is ready. It:
+
+1. Creates missing parent directories with mode `0700`.
+2. Creates a uniquely named sibling file, using `.` plus the destination base
+   name as its prefix.
+3. Applies the requested file mode, writes the bytes, syncs the file, and closes
+   it, checking each of those errors.
+4. Replaces the destination using the platform implementation.
+5. Attempts to remove the staging file on every return path.
+
+Staging beside the destination avoids a cross-filesystem move from an unrelated
+temporary directory. It also means a pre-replacement write or sync failure does
+not require first deleting the old destination.
+
+The limits matter:
+
+- On Darwin and Linux, replacement is `os.Rename`, followed by opening, syncing,
+  and closing the destination directory. Directory sync/close errors are joined.
+  **An error at this final stage can occur after the new file is already visible.**
+  An error is not a promise that the old bytes remain installed.
+- On Windows, the implementation converts both paths to UTF-16 and calls
+  `MoveFileEx` with `MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH`.
+  It does not delete the destination first or retry sharing violations. Another
+  process holding an incompatible open handle can prevent replacement.
+- This is a single-file replacement helper, not a multi-file transaction,
+  inter-process lock, compare-and-swap operation, or universal crash-proof storage
+  guarantee. Actual filesystem and OS behavior still applies.
+- Existing parent-directory permissions are not rewritten. Replacement creates
+  the destination from the staged file; it does not preserve arbitrary metadata,
+  ownership, or ACLs from an older destination.
+- Staging cleanup is best effort: the deferred `os.Remove` result is ignored.
+
+Do not infer that every native file write uses `atomicfile`. In this scope,
+autostart registrations and device installer scripts use `os.WriteFile`, logs are
+appended, and Unix hosts removal deliberately rewrites the existing hosts inode.
+See [Configuration and settings](configuration-and-settings.md) and
+[Backups and restore](backups-and-restore.md) for higher-level persistence users.
+
+## Diagnostic logging with applog
+
+Source: [applog.go](../app/internal/sys/applog/applog.go),
+[dir.go](../app/internal/sys/applog/dir.go), and
+[rotate.go](../app/internal/sys/applog/rotate.go).
+
+The file log makes a GUI application's operation trace available after the
+window closes. `Logger` serializes access with a mutex and also provides the
+method shape Wails expects from its logger.
+
+### Location, format, and limits
+
+| Platform | Default folder |
+| --- | --- |
+| macOS | `~/Library/Logs/care-desktop` |
+| Windows | `%LOCALAPPDATA%\care-desktop\logs`; if unset, `~/AppData/Local/care-desktop/logs` |
+| Linux/default branch | `$XDG_STATE_HOME/care-desktop`; if unset, `~/.local/state/care-desktop` |
+
+The active filename is `care-log.log`. The code first needs `os.UserHomeDir` to
+succeed, even before checking the Windows or XDG overrides. A failed home lookup
+produces an empty log directory.
+
+- Opening creates the directory with mode `0755` and the file with mode `0644`,
+  subject to platform permissions and umask.
+- Each write removes trailing CR/LF, adds a millisecond timestamp with a timezone
+  offset, and appends a newline.
+- Input longer than `8 << 10` bytes is cut to 8 KiB plus a truncation marker.
+  The timestamp and marker are additional bytes; this is not a strict 8 KiB
+  on-disk record limit.
+- Rotation is triggered when the current size plus the next record would exceed
+  `10 << 20` bytes, or 10 MiB.
+- `maxFiles = 5` means the active log plus normally four numbered archives,
+  `care-log.1.log` through `care-log.4.log`. Rotation briefly uses slot 5 before
+  removing it. Treat approximately 50 MiB as an intended normal bound, not an
+  enforced quota when renames or deletes fail.
+
+`Open` appends a session separator. `Header(version, installDir, clinicName)`
+records version, OS/architecture, Go version, install directory, clinic name, and
+log path. Its placeholder helper displays `(none yet)` and `(unset)` for empty
+values. **This helper does not itself enumerate release pins.** Pin handling
+belongs to the release/application layer.
+
+### Failure behavior and the Wails boundary
+
+`Open` returns `*Logger`, not `(*Logger, error)`. An empty directory, failed
+directory creation, or failed file open leaves an inert logger whose `Path()` is
+empty. Writes become no-ops. There is no alternate temporary log or automatic
+stderr fallback in this package.
+
+Ordinary write errors are deliberately not propagated. Rotation rename, close,
+and removal errors are also ignored, and a failed reopen leaves the file sink
+unavailable. A previously assigned path can remain non-empty even after a later
+write or rotation problem. `Close` closes the file without an explicit `Sync`
+and ignores the close error.
+
+The application boundaries are distinct:
+
+- [main.go](../app/main.go) opens the file logger, passes it to Wails, and supplies
+  `OnFatal` so a Wails fatal can use the application's fatal-reporting path.
+- Wails `Print`, `Trace`, `Debug`, `Info`, `Warning`, `Error`, and `Fatal` messages
+  get a `wails ` prefix and, where applicable, a level tag.
+- [app.go](../app/app.go) sends application log messages to the file and emits
+  the separate `care-log` desktop event when a Wails context exists. The file
+  logger itself knows nothing about that event.
+- [app_ui.go](../app/app_ui.go) returns an explicit error if `OpenLogFolder`
+  finds no log path. Otherwise it starts `open -R`, `explorer.exe /select,`, or
+  `xdg-open` as appropriate. A launch failure is returned; later opener exit
+  status is ignored.
+
+`Logger.Fatal` is exceptional: it writes a fatal line and invokes `OnFatal` when
+set. Without that hook it closes the logger and calls `os.Exit(1)`. Do not confuse
+this with ordinary `Error`, which only records a line.
+
+`PurgeFolder` closes the sink, removes the **whole log folder**, and opens a new
+session log there. It is not limited to deleting numbered files, and successful
+purge does not mean the folder stays absent. `RemoveAll` errors are returned;
+failure to reopen the fresh log is not. Do not store unrelated files in this
+application-owned directory.
+
+The logger and process runner do not provide automatic secret redaction.
+Environment-variable names in this guide are not credential examples. Never
+log, paste, or attach real secrets merely to diagnose a PATH or readiness issue.
+
+## Administrator approval and local hosts setup
+
+Sources: [elevate.go](../app/internal/sys/elevate/elevate.go),
+[hosts.go](../app/internal/sys/hosts/hosts.go), and
+[thiscomputer.go](../app/internal/clinic/thiscomputer.go).
+
+### Approval is a boundary, not evidence of success
+
+`elevate.Step` contains a human description (`What`), a Unix shell form (`Sh`),
+and a PowerShell form (`PS`). Callers can collect only the remaining actions and
+explain them in one confirmation dialog before requesting native elevation.
+
+`ShQuote`, `PSQuote`, and `OSAQuote` escape different interpreter syntaxes. They
+are not interchangeable. `elevate.Run(sh, false)` executes `sh -c`; its elevated
+Unix routes are AppleScript on macOS and `pkexec` otherwise. Windows batched work
+uses `Steps` and its PowerShell path, not a Windows-aware version of `Run(sh, ...)`.
+
+Current batching preserves failures:
+
+- Empty step lists return without elevation.
+- Unix steps are independently grouped in subshells and joined with `&&`, so a
+  failing step prevents subsequent steps from running.
+- Windows sets `$ErrorActionPreference = 'Stop'`, runs each step in a script
+  block, and checks `$?` after each block.
+- The elevated Windows child is started with `-Wait -PassThru`; the parent exits
+  using the child's `ExitCode`.
+
+This is not rollback. If hosts modification succeeds and trust installation
+fails, the hosts change remains. Moreover, some specialized removal and generated
+installer wrappers elsewhere still use their own PowerShell launch form. Do not
+extend the `Steps` exit-code guarantee to every `Start-Process` in the repository.
+
+### Finishing setup on the server computer
+
+`setUpThisComputer` is an optional, local-browser finish operation. It obtains the
+clinic host, tries hosts setup, reads the Caddy root, and prepares trust setup.
+Both helpers can attempt an unprivileged change **before** the combined
+confirmation. The one-prompt design applies to the remaining privileged hosts
+and trust steps, not every prerequisite installation or Windows network repair.
+
+```mermaid
+flowchart TD
+    Begin["setUpThisComputer: use clinic host"] --> Hosts["Check hosts; try unprivileged append if needed"]
+    Hosts --> Trust["Read root and prepare trust; try without elevation"]
+    Trust --> Needed{"Any privileged steps remain?"}
+    Needed -- No --> Verify["Re-read hosts and perform verified local TLS handshake"]
+    Needed -- Yes --> Confirm{"Confirm callback exists and approves?"}
+    Confirm -- No --> Skipped["Log optional setup skipped; do not stop clinic"]
+    Confirm -- Yes --> Elevate["Run one elevated batch; retain error"]
+    Elevate --> Verify
+    Verify --> Ready{"Hosts and TLS trust both verified?"}
+    Ready -- Yes --> Success["Report that this computer can open the clinic"]
+    Ready -- No --> Pending["Log incomplete hosts and/or trust; offer localhost setup"]
+    Success --> Cleanup["Attempt temporary certificate cleanup"]
+    Pending --> Cleanup
+    Skipped --> Cleanup
+```
+
+Important result rules:
+
+- A missing or declining confirmation callback skips the privileged work and
+  returns normally with a log message.
+- When work is attempted, the function checks `hosts.HasEntry(host)` and
+  `trust.HostTrusts(host)` afterwards, even if there were no queued steps.
+- Both checks must pass for the positive message. Verified state wins even if an
+  earlier command reported an error.
+- Otherwise it names the unconfirmed hosts entry, certificate trust, or both,
+  includes an elevation error when available, and points to
+  `http://localhost/setup`.
+- This method returns no error to stop clinic startup. Its warning that other
+  devices are unaffected means these **local changes** do not configure or
+  disable them; it is not proof that LAN access or remote trust already works.
+
+### Hosts entries and their ownership marker
+
+The owned line has the form:
+
+```text
+127.0.0.1 <clinic-label>.local # care-desktop
+```
+
+The fixed marker is `# care-desktop`. It is the cleanup handle, including after
+a clinic-name change. The host in examples such as `care.local` is illustrative;
+these helpers receive the configured host rather than establishing a universal
+default name.
+
+`HasEntry` parses actual address/hostname fields, ignoring comments and matching
+the hostname case-insensitively. A loopback mapping, including `::1`, counts even
+if it has no CARE marker. Any matching non-loopback mapping makes the result
+false, including when a correct loopback line also exists. A hostname mentioned
+only in a comment does not count.
+
+`Step` first checks this state, tries an ordinary append if necessary, and
+re-reads before deciding to request elevation. It does not rewrite unowned
+conflicting mappings. Repeated appends cannot repair an existing non-loopback
+conflict by themselves; the final verification remains incomplete.
+
+The entry makes the clinic name point back to the server for that computer's own
+browser. It does **not** advertise a DNS record, answer mDNS for the LAN, modify
+another device, or prove that the `.local` name works beyond this machine.
+
+Removal is intentionally marker-based:
+
+- It removes every line containing the marker, not just the hostname passed to
+  `Remove`. Unmarked user-managed lines are not claimed.
+- Unix removal filters into a scratch file and uses `cat` back into the original
+  file, preserving its inode and associated ownership/mode rather than renaming
+  a replacement over it. This is not an atomic replacement.
+- A `grep` status of 1 is allowed: all lines might have been owned, leaving an
+  empty result. Other filter errors and the final write failure remain failures.
+  A trap attempts scratch-file cleanup.
+- Unix removal tries without elevation first, then re-reads. If a line remains,
+  it can ask for elevation; this removal helper permits elevation when the
+  confirmation callback is nil, unlike `setUpThisComputer`.
+- Windows uses an elevated PowerShell read/filter/write operation. Its wrapper
+  does not use the batching helper's `-PassThru` contract; remaining state is
+  checked afterwards.
+
+`Leftover` returns either an empty string, an explanation that a marked line
+remains, or an explicit inspection-error sentence. A missing file is absence;
+an unreadable file is not successful removal. `Inspect` exposes `(bool, error)`,
+while `Present` conservatively returns true when inspection errors.
+
+## Certificate trust and device bootstrap
+
+Sources: [trust.go](../app/internal/sys/trust/trust.go),
+[installer.go](../app/internal/sys/trust/installer.go),
+[caddyroot.go](../app/internal/clinic/caddyroot.go), and
+[devicescripts.go](../app/internal/clinic/devicescripts.go). The adjacent serving
+contract is in [Caddyfile](../deployments/Caddyfile) and the Caddy service in
+[docker-compose.yml](../deployments/docker-compose.yml).
+
+### Public root versus private CA material
+
+Caddy's internal PKI creates the certificate authority used for clinic HTTPS.
+The configured identities are:
+
+| Identity or path | Meaning |
+| --- | --- |
+| `CARE Desktop Local CA` | Root Common Name, also `trust.CommonName`. |
+| `CARE Desktop Local CA - Intermediate` | Intermediate Common Name in the Caddyfile. |
+| `/data/caddy/pki/authorities/local/root.crt` | Public root certificate read by `caddyRootPEM`. |
+| Caddy `/data` | Backed by the Compose `caddy-data` volume; contains Caddy state, including private PKI material. |
+| `<InstallDir>/setup/install-cert.sh` and `install-cert.ps1` | Generated download scripts containing the public root certificate. |
+
+A root certificate is public material, not its private signing key. Remote
+devices need the public root to verify the clinic's certificate chain. They do
+not need Caddy's private keys or a copy of the full `/data` volume.
+
+The bootstrap Caddy routes expose `/setup` and the exact `/root.crt` resource,
+not the entire private PKI directory. The root-download route redirects a direct
+request to setup unless the request satisfies its query/referrer conditions.
+That is a setup-flow guard, not authentication: do not treat it as protection
+for private material. Generated installers are served as attachments from the
+read-only setup-directory mount.
+
+The HTTP bootstrap avoids a circular dependency on certificate trust. The server
+computer can use `http://localhost/setup`; another device can use
+`http://<clinic-label>.local/setup` when name resolution works, or
+`http://<server-LAN-IPv4>/setup` when its address is known. `localhost` on a tablet
+means the tablet, not the clinic server. Reaching setup by IP does not make an
+HTTPS certificate valid for that IP or repair the clinic hostname's resolution.
+
+### Root extraction is deliberately non-fatal
+
+`caddyRootPEM` first tries `docker compose exec -T caddy cat` on the root path.
+It accepts successful output containing `BEGIN CERTIFICATE`. If that fails, it
+creates a scratch `.crt` file, uses `docker compose cp` from the same container
+path, and reads the result. It attempts to remove the scratch file on return.
+
+This helper returns `""`, not an error, if extraction cannot be completed. It
+checks for the certificate marker, not full certificate validity. Fingerprint
+helpers and native import tools do more validation later. It neither exports
+private keys nor generates a replacement CA when Caddy is unavailable.
+
+`writeDeviceSetupScripts` returns without writing when no root is available or
+the setup directory cannot be statted. Otherwise it computes the SHA-256
+fingerprint, generates both scripts, and writes them with mode `0644`. Individual
+write failures are logged as notes and do not abort startup. The function does
+not create the setup directory, use atomic replacement, or remove an older
+script when it cannot obtain a new root. Do not assume scripts were refreshed
+merely because the clinic otherwise started.
+
+```mermaid
+flowchart TD
+    Caddy["Caddy internal CA in private volume"] --> Root["Read public root.crt: exec, then cp fallback"]
+    Root --> Available{"Root available?"}
+    Available -- No --> Deferred["Skip script refresh; trust preparation may warn"]
+    Available -- Yes --> Local["trust.Step for server computer"]
+    Available -- Yes --> Scripts["Write two setup scripts with embedded public root"]
+    Scripts --> Download["Remote operator obtains setup files"]
+    Download --> Compare["Compare SHA-256 using an independently trusted source"]
+    Compare --> Approve["Approve trust installation on that device"]
+    Approve --> Store["Update that device's supported certificate stores"]
+    Store --> Browser["Reopen browser and test the clinic URL"]
+    Local --> LocalCheck["Verified TLS to loopback using clinic hostname"]
+```
+
+Fingerprint comparison in this flow is an operator responsibility. The scripts
+display the supplied fingerprint as a comment; they do not independently verify
+that the embedded CA belongs to the intended physical clinic. In particular,
+downloading a root over the HTTP bootstrap route is not an authenticated trust
+decision by itself.
+
+### Verifying this computer's trust
+
+`HostTrusts(host)` performs a real TLS handshake to **`127.0.0.1:443`**, with
+`ServerName` set to the clinic hostname and a four-second dialer timeout.
+Certificate-chain and hostname verification remain enabled.
+
+This separates trust verification from DNS: it does not depend on mDNS or the
+hosts file to find the server. It also does not prove that either mechanism
+works. A stopped Caddy, wrong hostname certificate, inaccessible listener, or
+untrusted certificate can all make it false.
+
+On Linux, every call builds a fresh certificate pool from these files:
+
+- `/etc/ssl/certs/ca-certificates.crt`
+- `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem`
+- `/etc/pki/tls/certs/ca-bundle.crt`
+
+Fresh reads allow a long-running desktop process to notice newly installed or
+removed roots. Missing/unreadable files and unusable PEM blocks are skipped by
+this pool loader; they do not become trusted certificates. This differs from the
+explicit inspection APIs used during removal, which return read errors.
+
+On macOS and Windows the normal platform trust path is used. `HostTrusts` does
+not pin the handshake to `CommonName` or a particular fingerprint: it asks whether
+the presented chain is trusted for that hostname. It is not a test of every
+browser's separate certificate database.
+
+### Preparing and installing local trust
+
+`trust.Step` first calls `HostTrusts`. If it already passes, no action is needed.
+If a root is unavailable or a scratch certificate cannot be created, written,
+or closed, it logs a preparation warning and returns no step. Therefore
+`need == false` means **no step was scheduled**, not necessarily that trust is
+ready. The caller's final handshake is essential.
+
+When preparation succeeds, it creates a temporary public PEM file, tries
+installation without elevation, and checks the TLS handshake again:
+
+| Platform | First attempt | Privileged step if verification still fails |
+| --- | --- | --- |
+| macOS | `security add-trusted-cert` in `$HOME/Library/Keychains/login.keychain-db`. | Add a trusted root to `/Library/Keychains/System.keychain` with `-d -r trustRoot`. |
+| Windows | `certutil -addstore -f Root`, without the `-user` flag. It is not automatically a per-user-store installation. | Same import through the elevated batch. |
+| Linux | Copy to the Debian-style anchor and update certificates, with a Fedora-style copy/update fallback. | The same shell action through elevation. |
+
+The Linux anchor paths are
+`/usr/local/share/ca-certificates/care-root.crt` and
+`/etc/pki/ca-trust/source/anchors/care-root.crt`. The local helper assumes these
+layouts and their update tools; it is not a universal distribution adapter.
+
+The return value includes a **cleanup function** because the PEM file must still
+exist when a later privileged batch runs. The caller defers that cleanup until
+after confirmation, elevation, and final verification. Deleting it inside
+`Step` would make the privileged command unusable. Creation uses Go's restrictive
+temporary-file defaults; the content is public, but access under a different
+elevated identity is still an OS-dependent concern. Cleanup errors are ignored.
+
+### What the downloadable installers do
+
+These scripts configure the computer on which they are run. They do not use the
+Wails bridge, change the server's hosts file, set up mDNS, repair the remote
+network, or install CARE Desktop.
+
+**Unix installer**
+
+- Uses `set -eu`, re-executes through `sudo` when not root, and writes an embedded
+  root into a temporary PEM file with cleanup traps.
+- On macOS, installs in the System keychain.
+- On Linux, selects the Debian-style anchor directory first, otherwise the
+  Fedora-style directory, and runs its certificate-update command. Unsupported
+  layouts produce instructions and an error.
+- Sets the Linux anchor's mode to `0644`. This matters because the subsequent
+  browser import runs as the original user and must be able to read the
+  certificate; it reads the persistent public anchor, not the root-only
+  temporary file.
+- If `SUDO_USER` is set and the NSS `certutil` command is available, it checks
+  existing `$HOME/.pki/nssdb` and `$HOME/.mozilla/firefox/*.default*` directories
+  as that user and imports with nickname `CARE Desktop Local CA`.
+- A failed attempted NSS import produces an explicit error, advises closing the
+  browser and retrying, and prevents the final success message. It does not undo
+  the already-updated system store.
+- Missing NSS tooling, absent matching profiles, running directly as root
+  without `SUDO_USER`, or browsers with different storage models mean those
+  browser stores are not handled. A script success is not universal browser
+  coverage.
+
+**Windows installer**
+
+- Checks administrator membership and, when needed, relaunches its file with
+  UAC, `-NoProfile`, and `-ExecutionPolicy Bypass`.
+- Writes the embedded root as ASCII to `%TEMP%\care-root.crt`, imports with
+  `Import-Certificate` into `Cert:\LocalMachine\Root`, and attempts deletion in
+  a `finally` block around the import.
+- Uses a fixed scratch filename, unlike the uniquely named Go scratch files.
+  It is not designed as a concurrent-installer coordination mechanism.
+- Reports completion and waits for Enter in the elevated instance. Its outer
+  self-elevation wrapper waits but does not use `-PassThru` to propagate that
+  instance's exit code.
+
+Neither generated installer performs `HostTrusts`, validates the clinic's HTTP
+response, or installs a new mDNS resolver. Native iOS/Android certificate
+installation is not implemented by these scripts; device-specific setup and
+browser behavior remain separate. See the setup serving context in
+[Clinic lifecycle](clinic-lifecycle.md).
+
+### Fingerprints, stable identity, and removal
+
+`SHA1Hex` parses an X.509 `CERTIFICATE` PEM block and returns an uppercase SHA-1
+digest without separators. This is an identifier accepted by platform removal
+tools, not the recommended display fingerprint. `SHA256Colons` also validates
+the certificate and returns uppercase, colon-separated SHA-256 bytes for
+operator comparison. Both return an empty string for invalid certificate data.
+
+The constant `CARE Desktop Local CA` is a cleanup compatibility identifier:
+fresh installations can produce different certificates and fingerprints while
+retaining the same Common Name. Changing it without a migration can strand
+older trusted roots. A matching Common Name is an ownership convention, not
+cryptographic proof; avoid reusing it for unrelated certificates.
+
+`Untrust` combines the removal result with a new `Inspect` call:
+
+- **macOS:** enumerate roots by Common Name in the login and System keychains,
+  adding the current fingerprint when found. Delete login entries first.
+  System entries require the confirmation callback and administrator approval.
+  Keychain-command failures are inspection errors, not assumed empty stores.
+- **Windows:** inspect the machine `Root` store using `certutil`, look for the
+  Common Name or current fingerprint, then request elevated deletion by the
+  available fingerprint and by Common Name. The specialized removal wrapper
+  is not the `elevate.Steps` wrapper; final store inspection is important.
+- **Linux:** inspect both known anchor paths, including symlink presence, and
+  scan the configured generated bundles for the root Common Name. Remove the
+  known anchors and run whichever of `update-ca-certificates` and
+  `update-ca-trust` are available; at least one updater must run. A remaining
+  bundle entry is still trust residue even if an anchor was deleted.
+
+Linux first attempts removal without elevation and rechecks. If trust remains,
+it needs approval for the elevated retry, then checks again. It does not
+arbitrarily edit a generated trust bundle to delete an unknown source entry.
+
+Unlike local setup's positive state-only result, `Untrust` retains a removal
+command error even if subsequent inspection finds no root. It returns explanatory
+text for incomplete or unclean removal; surviving trust and inspection failures
+must not be reported as a clean uninstall. `Present` is conservative on errors.
+
+Automatic inspection/removal is limited to these system/keychain locations. It
+does not enumerate all browser NSS databases or reach into other devices. The
+Windows advice string mentions `certmgr.msc`, while the automatic commands target
+the machine Root store; manual support must inspect the matching store rather
+than assuming that any certificate-management window is showing it.
+
+## LAN names and mDNS
+
+Source: [advertise.go](../app/internal/sys/mdns/advertise.go). Renewal is an
+application-lifetime responsibility at the integration boundary in
+[app.go](../app/app.go), not a background loop inside this package.
+
+### Why this is separate from hosts and trust
+
+Other devices need a route to the server's LAN address. A server-only loopback
+hosts entry cannot provide one. The advertiser uses `github.com/hashicorp/mdns`
+to answer for an HTTPS service in the multicast `local.` domain:
+
+| Record property | Value |
+| --- | --- |
+| Service type | `_https._tcp` |
+| Instance | `<label>._https._tcp.local.` |
+| Hostname | `<label>.local.` |
+| Port | `443` |
+| TXT information | Exactly one field, `CARE Desktop` |
+| Advertised addresses | Selected usable interface IPv4 addresses |
+
+`Label` trims surrounding whitespace/dots, lowercases, removes a final `.local`,
+and trims dots again. `ValidateLabel` requires 1-63 characters, ASCII letters,
+digits, and internal hyphens, with an alphanumeric first and last character.
+`Advertise` normalizes and rejects an empty result but does **not** itself call
+the full validator. Callers accepting user input must retain validation.
+
+### Selecting addresses
+
+`lanIPv4s` examines interfaces that are up and excludes loopback, point-to-point,
+and interfaces whose names begin, case-insensitively, with:
+
+```text
+docker  br-  veth  virbr  vboxnet  vmnet  utun  tun  tap
+```
+
+It keeps IPv4 addresses that are neither loopback nor link-local unicast. This
+avoids advertising a Docker bridge, VPN tunnel, or self-assigned link-local
+address as if a tablet could use it.
+
+This is a heuristic, not complete topology discovery:
+
+- It does not restrict addresses to private RFC 1918 ranges.
+- It does not prove routing, inspect WiFi client isolation, or rank a preferred
+  interface.
+- Failures reading one interface's addresses are skipped; failure enumerating
+  interfaces is returned. No surviving address produces
+  `no usable LAN IPv4 address found`.
+- Address filtering is distinct from explicitly binding the responder to an
+  interface list; the server is created with its zone, without such a list.
+- Address selection and the response probe are IPv4-oriented. Do not assume an
+  IPv6-only LAN works merely because the host OS supports IPv6.
+
+### A genuine response probe
+
+`Resolves` does not call the ordinary system hostname resolver. It runs a bounded
+mDNS query for `_https._tcp` using a two-second timeout, IPv6 disabled for that
+query, a buffered entry channel, and a discarded library logger.
+
+For success, the query must finish without error, the advertiser must still be
+running, and at least one response must match **all** of:
+
+1. The expected instance name and hostname, case-insensitively.
+2. Port 443.
+3. Exactly the `CARE Desktop` TXT information.
+4. One of the advertiser's recorded IPv4 addresses.
+
+A hosts-file loopback result, another HTTPS service, a stale address, or a query
+error is not success. A nil/stopped advertiser does not query. Shutdown during
+the query also prevents a positive result.
+
+The distinction from the old system-resolver approach is important: hosts could
+make the server resolve its own name while no multicast response reached the
+LAN. This implementation checks actual service responses. Even so, a successful
+probe **from this computer** is not an end-to-end test from another WiFi client,
+nor is the TXT marker a security authentication mechanism.
+
+### Renewal and shutdown
+
+`Advertiser` records its initial addresses and holds an mDNS server under a
+mutex. `Stop` is nil-safe and idempotent; it attempts library shutdown and clears
+the server pointer, ignoring a shutdown error.
+
+`IPsChanged` re-enumerates addresses and compares their length and membership;
+reordering alone does not trigger a change. If enumeration fails, including a
+loss of all usable addresses, it returns false rather than an error. False is
+therefore not proof that the network is unchanged.
+
+The application watches every **30 seconds**. It attempts to start a missing
+advertiser, restarts immediately when the address comparison reports a change,
+and restarts after **two consecutive failed response probes**. A successful
+probe clears the miss count. The watcher and advertiser must be stopped with
+application shutdown. The package itself does not automatically restart after
+a WiFi roam, dock change, or firewall change.
+
+```mermaid
+flowchart TD
+    Tick["Application watcher: every 30 seconds"] --> Have{"Advertiser exists?"}
+    Have -- No --> Start["Try Advertise with current usable IPv4 addresses"]
+    Have -- Yes --> Changed{"IPsChanged reports a change?"}
+    Changed -- Yes --> Renew["Stop old responder and start a new one"]
+    Changed -- No --> Probe["Query genuine HTTPS mDNS service responses"]
+    Probe --> Match{"Matching response, no query error, still running?"}
+    Match -- Yes --> Reset["Reset miss count"]
+    Match -- No --> Misses{"Two consecutive misses?"}
+    Misses -- No --> Later["Keep responder and wait for next tick"]
+    Misses -- Yes --> Renew
+    Start --> Later
+    Renew --> Later
+```
+
+Container lifetime and native advertiser lifetime are different. A running
+clinic stack is not by itself an mDNS responder from this package; the desktop
+process owns that service. See [The Wails application](wails-application.md) for
+hide, close, quit, and second-instance behavior.
+
+## Windows network repair
+
+Source: [netfix.go](../app/internal/sys/netfix/netfix.go).
+
+This package changes Windows profile/firewall settings that can prevent phones
+and tablets from reaching the server. It does not disable Windows Firewall, and
+its success is a settings check rather than a packet test from a remote device.
+
+### Inspection before repair
+
+`Status` has `Applicable`, `OK`, `Message`, `How`, and `Fixable` fields. On other
+operating systems, `Check` returns `Applicable: false`, `OK: true`; `Fix` and
+`Undo` are no-ops. That means this repair is not needed **by this implementation**,
+not that every macOS/Linux firewall is already correct.
+
+On Windows, `Check` first reads all connection profiles:
+
+- `Private` and `DomainAuthenticated` are acceptable categories.
+- Any `Public` profile makes the state incomplete and fixable.
+- Empty output, an unexpected category, or a command error is unknown/incomplete
+  and not automatically fixable. Even output containing `Private` is rejected
+  when the command itself failed.
+
+If profiles are acceptable, it reads matching firewall rules from `ActiveStore`
+as JSON. Malformed JSON or failed inspection produces an incomplete status, not
+a reassuring default.
+
+The ownership prefix is `CARE Desktop `, with a trailing space. Readiness needs
+exactly one rule for each of:
+
+| Display name | Protocol | Local port | Required scope |
+| --- | --- | --- | --- |
+| `CARE Desktop mDNS` | UDP, or protocol number 17 | 5353 | Enabled, inbound, allow, Private and Domain |
+| `CARE Desktop HTTPS` | TCP, or protocol number 6 | 443 | Enabled, inbound, allow, Private and Domain |
+| `CARE Desktop HTTP` | TCP, or protocol number 6 | 80 | Enabled, inbound, allow, Private and Domain |
+
+HTTP matters because bootstrap/setup is available before HTTPS trust is
+installed. Current code requires all three rules, not just HTTPS and mDNS.
+
+The exact profile mask is `3` for Private plus Domain. Disabled, outbound,
+blocking, wrong-protocol, wrong-port, multiple-port, duplicate, Public,
+Private-only, and Any-profile variants do not satisfy readiness. Unrelated rule
+names do not satisfy missing CARE rules.
+
+### Scope of the actual changes
+
+`Fix` requests one elevated PowerShell invocation that:
+
+1. Changes **all currently returned Public connection profiles** to Private.
+   It does not limit this change to one WiFi adapter or remember a previous
+   category for rollback.
+2. For each exact required display name, inspects active rules and leaves a
+   single valid rule alone.
+3. If that named set is missing, duplicated, or invalid, removes matching rules
+   from `PersistentStore` and creates one enabled inbound allow rule there,
+   scoped to `Private,Domain` and the single protocol/port.
+4. Propagates the elevated child's exit code and, if the command succeeds,
+   performs `Check` again. An incomplete or unreadable result is an error.
+
+Rules are port/profile-scoped, not executable-scoped. The generated commands
+do not specify a remote-address or subnet restriction. The checker does not
+audit every firewall filter, policy conflict, overriding block rule, or network
+route. Domain policy can prevent the requested persistent rule from becoming
+the required effective active rule.
+
+```mermaid
+flowchart TD
+    Check["Check Windows profiles and owned active rules"] --> Known{"Inspection succeeded?"}
+    Known -- No --> Unknown["Report unconfirmed; do not claim LAN success"]
+    Known -- Yes --> Ready{"Private or Domain profiles and three valid rules?"}
+    Ready -- Yes --> Configured["Settings check passes"]
+    Ready -- No --> Approval["Operator chooses repair and approves elevation"]
+    Approval --> Change["Make Public profiles Private; repair exact named rules"]
+    Change --> Exit{"Elevated command succeeded?"}
+    Exit -- No --> Error["Return repair error; changes may be partial"]
+    Exit -- Yes --> Again["Re-run Check"]
+    Again --> Verified{"Inspection confirms readiness?"}
+    Verified -- No --> Error
+    Verified -- Yes --> Configured
+    Configured --> Remote["Still test mDNS, routing, and browser trust from a remote device"]
+```
+
+### Removing owned rules
+
+`Undo` removes persistent rules whose display names begin with `CARE Desktop `.
+Its scope is broader than fixing the three exact current names so older or
+incomplete CARE rules can also be removed. It does **not** restore profiles to
+Public: the profile is shared machine/network state, not a per-application
+artifact with a recorded former value.
+
+After a successful elevated removal, it counts every owned rule in `ActiveStore`,
+including disabled or otherwise invalid rules. Any positive count is residue.
+Command failure, malformed/negative count, or failed inspection is an error;
+none becomes a false clean result. `InspectRules` returns `(bool, error)`, and
+`RulesPresent` conservatively returns true on inspection errors.
+
+## Docker and Git prerequisites
+
+Sources: [check.go](../app/internal/prereq/check.go) and
+[provision.go](../app/internal/prereq/provision.go).
+
+The package separates **readiness**, **the offered next action**, and **executing
+an installer**. A tool binary existing is not the same as a usable Docker daemon,
+and an installer finishing is not always the end of setup.
+
+### Readiness checks
+
+Each explicit probe uses `cmdTimeout = 5 * time.Second` and
+`proc.CommandContext`. It applies `Runner.Env` but does not set `Runner.Dir`.
+
+| Probe | Evidence checked | Limits |
+| --- | --- | --- |
+| `DockerCheck` | `docker version --format "{{.Server.Os}}/{{.Server.Version}}"` succeeds; server OS is Linux or empty; `docker compose version` succeeds. | No minimum Docker version, capacity, virtualization, or registry-access test. Empty OS output is accepted by the helper. |
+| `hasCompose` | Compose v2-style subcommand can run. | Does not validate the clinic's Compose files or pull images. |
+| `GitCheck` | `git --version` succeeds. | Any failure yields the generic "Git is not installed" status, even if another execution error caused it. |
+| `dockerDaemonUp` | A bounded `docker version` request for the server version succeeds. | Used to choose an action; not the complete OS/Compose readiness check. |
+
+`DockerCheck` distinguishes a not-found executable using error-message substrings,
+reports other command failures as installed-but-not-running advice, and explicitly
+warns about a non-Linux container mode. These are actionable summaries, not a full
+diagnostic classification of every possible Docker error.
+
+The environment is preserved, so Docker's configured context or environment can
+affect which daemon answers. The helper does not force a local Docker endpoint.
+Meanwhile the clinic's HTTP health probe is explicitly local.
+
+A successful Docker check can use two sequential five-second probes. Five
+seconds is a per-command deadline, not a guaranteed total duration for every
+status request.
+
+### Plans and follow-up checks
+
+`ToolPlan` carries `Action`, `Label`, `Detail`, and `URL`; actions are `""`,
+`install`, `open`, and `manual`.
+
+- If a tool is ready, its plan offers no action.
+- If Docker's daemon is not answering but an installation is detected, the plan
+  offers to open/start Docker.
+- Otherwise Docker gets an install plan, or a manual plan on an unsupported
+  platform/package-manager combination.
+- Git uses installation plans where implemented; Windows without `winget` and
+  Linux without a supported package manager get manual guidance.
+
+Plan selection is deliberately small. For example, an already-running daemon
+with the wrong container mode or missing Compose can still lead to an install
+plan, while the readiness message explains the more specific problem.
+
+```mermaid
+flowchart LR
+    Inspect["Check readiness"] --> OK{"Ready?"}
+    OK -- Yes --> Continue["Continue clinic workflow"]
+    OK -- No --> Plan["Choose open, install, or manual plan"]
+    Plan --> Action["Operator follows the offered action"]
+    Action --> Pending["May require download, approval, logout, or restart"]
+    Pending --> Inspect
+```
+
+### Provisioning by platform
+
+**macOS Docker**
+
+The downloader chooses
+`https://desktop.docker.com/mac/main/arm64/Docker.dmg` for an arm64 build and
+`https://desktop.docker.com/mac/main/amd64/Docker.dmg` otherwise. It downloads the
+DMG, requests administrator approval, attaches it without browsing, invokes
+`/Volumes/Docker/Docker.app/Contents/MacOS/install` with license acceptance and
+the current user, then detaches it.
+
+The shell sequence is joined with `&&`. On failure it also attempts an ordinary
+detach so the image is not intentionally left mounted. Downloaded media is
+removed on return. It then launches Docker using `open -a Docker` and waits for
+readiness.
+
+**Windows Docker**
+
+It first tries `winget install -e --id Docker.DockerDesktop` with package/source
+agreement acceptance. If that command fails, it logs the fallback and downloads
+`https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe`.
+There is no architecture-selection branch for that Windows download.
+
+The direct installer runs elevated with `install --quiet --accept-license
+--backend=wsl-2`; this helper waits and propagates the installer exit code.
+After either installation route, it launches Docker Desktop and waits.
+`afterWindowsDockerInstall` does not itself edit group membership or inspect
+restart registry keys. It reports a start failure with advice that Windows may
+need a WSL 2 restart.
+
+Docker Desktop executable lookup checks `ProgramFiles`, `ProgramW6432`, and
+`C:\Program Files`, each with `Docker\Docker\Docker Desktop.exe`.
+
+**Linux Docker**
+
+Package managers are considered in order: `apt` via `apt-get`, `dnf`, `zypper`,
+then `pacman`. The installed Docker/Compose package names are:
+
+| Manager | Docker and Compose packages requested |
+| --- | --- |
+| apt | `docker.io docker-compose-plugin`, after updating the package index |
+| dnf | `docker docker-compose-plugin` |
+| zypper | `docker docker-compose` |
+| pacman | `docker docker-compose`, with a package-database sync |
+
+The privileged sequence then runs `systemctl enable --now docker` and adds the
+current user to the `docker` group with `usermod -aG docker`. This grants
+substantial host control through Docker, not merely a cosmetic login preference.
+The package assumes those packages, systemd commands, group tools, and `pkexec`
+are available. Distribution repositories vary; these commands are not proof of
+universal Linux installation support.
+
+It waits up to the nominal 30-second Linux post-install limit. A newly added
+group may not apply to the current desktop process until logout/login. An error
+at this stage can mean Docker is installed but not usable by this session, not
+that every installation step was rolled back.
+
+**Git**
+
+- macOS launches `xcode-select --install` and returns instructions to finish the
+  separate system dialog. It does not use Homebrew or wait for all tools to
+  finish installing.
+- Windows invokes `winget` for `Git.Git`; there is no automatic downloaded
+  installer fallback in this implementation.
+- Linux installs `git` with the selected package manager under elevation.
+
+Manual information URLs are `https://www.docker.com/products/docker-desktop/`
+and `https://git-scm.com/downloads`.
+
+### Waiting, downloads, and side effects
+
+`OpenDocker` launches Docker Desktop on macOS/Windows. On Linux it elevates
+`systemctl start docker`. It then uses `dockerReadyTimeout = 3 * time.Minute`,
+checking full `DockerCheck` readiness and sleeping three seconds between
+unsuccessful checks. Poll deadlines are checked between probes; they are not
+hard cancellation deadlines for the whole operation.
+
+The HTTP downloader uses a cloned default Go HTTP transport, ordinary TLS
+verification, and:
+
+- `downloadHeaderTimeout = 30 * time.Second` for response headers.
+- `downloadStallTimeout = 2 * time.Minute` to cancel when progress stops.
+- No overall `http.Client.Timeout` cap for a long but progressing download.
+- A stall timer reset whenever a body read returns positive bytes.
+- Progress logs at crossed 10-percent steps when content length is known.
+- HTTP 200 as the required response; other status codes are errors.
+
+Successful downloads return a temporary path whose caller must remove after
+use. Copy/read and file-close failures remove the incomplete download before
+returning an error. There is no persistent installer cache or additional
+application-level checksum/signature verification in this downloader.
+
+Readiness checks do not download tools or request elevation. Installation
+normally needs internet access to vendor/package sources, and may need native
+approval, additional OS components, login renewal, or restart. Opening an
+already-installed tool is different from downloading one. These helpers do not
+establish whether subsequent clinic image pulls, repository clones, or external
+services are reachable; see [Clinic lifecycle](clinic-lifecycle.md).
+
+## Health and port checks
+
+Source: [health.go](../app/internal/health/health.go). The Caddy contract includes
+a dedicated `localhost:443` block proxying `/ping/*` to `backend:9000`, separate
+from the clinic hostname's browser site.
+
+### What each check establishes
+
+| Check | Target and verification | What success does not establish |
+| --- | --- | --- |
+| `health.Ping` | GET `https://localhost/ping/`, three-second client timeout, **TLS certificate verification disabled**, HTTP status 200 required. | Trusted certificate, correct CA identity, hosts/mDNS, remote reachability, or full clinical functionality. |
+| `trust.HostTrusts(host)` | TLS to `127.0.0.1:443`, verification enabled with the clinic hostname as `ServerName`. | DNS resolution, HTTP application health, or trust in every browser/device. |
+| `hosts.HasEntry(host)` | Parse this computer's hosts file for a consistent loopback mapping. | Multicast advertisement or resolution from any other computer. |
+| `Advertiser.Resolves` | Bounded matching mDNS service-response query. | A remote client's WiFi path, HTTPS request, or trust decision. |
+| `netfix.Check` | Windows profile and selected effective firewall-rule properties. | Absence of other blocks, router/client isolation, or actual remote packet delivery. |
+| `DockerCheck` | Responding configured daemon, acceptable container OS, and usable Compose command. | A started or healthy CARE stack. |
+
+`Health` has `Active`, `Code`, and `Detail` fields. A request error returns
+inactive/code 0 with "nothing answering on :443". A non-200 response returns
+inactive with the received HTTP status. The response body is closed but not
+validated for an application-specific marker.
+
+Using localhost and skipping certificate verification is intentional for this
+**local readiness probe**: startup should not appear dead merely because name
+advertising or root installation is pending. It is not a pattern to copy into
+authenticated remote requests or the verified trust check. An HTTP 200 alone
+also does not authenticate that the responding process is the expected clinic.
+
+`Wait(log, timeout)` repeatedly calls `Ping`, logs unsuccessful attempts, and
+sleeps three seconds. It returns an error including the last detail after the
+deadline is exceeded. The deadline is tested after probes, so the actual elapsed
+time can exceed the nominal timeout by probe/sleep time. This is an operation
+error, not a call to the fatal logger.
+
+### Refusing an obvious port conflict
+
+`EnsurePortFree(run, host)` avoids starting the clinic on top of an existing
+listener:
+
+1. It first asks the configured Compose project for running service names. If
+   `caddy` is listed, it treats the listeners as the clinic's own and skips
+   conflict probes.
+2. Otherwise it attempts TCP connections to `127.0.0.1:80` and
+   `127.0.0.1:443`, each with a 700-millisecond timeout.
+3. A successful connection means that port is busy. It returns an actionable
+   error naming the port and, when available, its process.
+4. On macOS/Linux it tries `lsof` for a listener command name. Windows has no
+   implemented occupant-name branch, and missing `lsof` simply omits the name.
+
+Connecting instead of binding avoids asking a non-root GUI to bind a privileged
+port just to inspect it. It is still a preflight heuristic: it does not reserve
+ports, prevent a later race, find every LAN-only/IPv6-only listener, or prove the
+running Compose `caddy` owns every relevant socket. Connection failure is treated
+as not busy. The Compose capture and `lsof` calls do not gain the TCP probe's
+700-millisecond timeout.
+
+## Login startup and restart detection
+
+### autostart: own one per-user launch registration
+
+Source: [autostart.go](../app/internal/sys/autostart/autostart.go).
+
+Autostart registers the current executable with `--autostart`. It starts the
+native desktop application, not a new clinical web frontend, a Docker daemon
+configuration, or a system-wide CARE service.
+
+| Platform | Owned registration | Enabled/disabled behavior |
+| --- | --- | --- |
+| macOS | `~/Library/LaunchAgents/ohc.care-desktop.plist` with label `ohc.care-desktop` | Writes `ProgramArguments` for the current executable and `--autostart`, with `RunAtLoad`. Disabling removes the file. There is no `launchctl` load/unload or `KeepAlive` operation here. |
+| Windows | Value `CARE Desktop` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` | Uses `reg add` with a quoted executable path and `--autostart`; disabling uses `reg delete`. It does not delete the whole Run key. |
+| Linux | `~/.config/autostart/care-desktop.desktop` | Writes a desktop entry with a quoted executable path, `--autostart`, and `X-GNOME-Autostart-enabled=true`; disabling removes the file. This path does not honor `XDG_CONFIG_HOME`. |
+
+The Unix registration directories are created with `0755` and files with `0644`.
+Writes are not atomic. `Set` obtains `os.Executable` before dispatching even for
+disable operations and returns relevant write/command errors. Moving the
+executable later does not automatically rewrite the recorded path.
+
+`Enabled` only checks file existence or whether `reg query` succeeds. It does not
+parse a registration, validate its executable path, prove it has been loaded, or
+verify a successful login launch. Its false result can include inspection
+failure. Unix removal treats any initial stat error as already absent; Windows
+can return an error when deleting a nonexistent value. These APIs are not as
+strict as the explicit hosts/trust/firewall residue inspectors.
+
+The second-instance boundary matters. [main.go](../app/main.go) configures
+Wails' single-instance lock; [app_lifecycle.go](../app/app_lifecycle.go) responds
+to a second launch by unminimizing/showing the existing application when its
+context exists. It does not inspect that launch's arguments. An autostart launch
+while CARE Desktop is already running can therefore reveal the existing
+window rather than start another independent backend. The bridge's
+`WasAutostartLaunched` reports the original process arguments, not a replacement
+set from that second launch. Detailed window/start behavior belongs to
+[The Wails application](wails-application.md).
+
+### reboot: detect a pending Windows restart, not its exact cause
+
+Source: [reboot.go](../app/internal/sys/reboot/reboot.go).
+
+`Check` returns a `Plan` containing `Needed`, `Title`, `Detail`, and `Label`. On
+Windows it probes these registry keys with `reg query`:
+
+```text
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired
+```
+
+Either successful query produces a restart plan. The message is framed around
+finishing Docker/WSL 2 setup, but the keys are general Windows servicing/update
+indicators. They do not prove that Docker caused the restart requirement.
+Query failures are treated as no positive signal; there is no separate
+inspection-error status or exhaustive restart detection.
+
+`Now` is implemented only on Windows. It invokes `shutdown /r /t 5` with a CARE
+setup explanation, scheduling an actual machine restart after five seconds.
+It returns the command result, not proof that the restart finished. Other
+platforms return an unsupported error.
+
+The application bridge attempts to enable CARE login startup before requesting
+a restart and logs a warning if that fails; see
+[app_status.go](../app/app_status.go). `reboot` itself does not persist restart
+continuation or create an autostart registration. The plan's promise to reopen
+must be understood alongside that possible registration failure.
+
+## Error handling and ownership rules
+
+### Classify the outcome before displaying success
+
+| Situation | Contract to preserve |
+| --- | --- |
+| Tool readiness is false | Return actionable status and a plan; do not treat a failed probe as an installed-and-ready tool. |
+| Installer returned an error after changing the machine | Report the error and recheck. Installation, service startup, group membership, and restart readiness are not one rollback transaction. |
+| Root unavailable or device-script write fails | Local/device trust setup can remain pending; the clinic workflow is not automatically fatal. An older script may still exist. |
+| Local hosts/trust approval declined | Log skipped optional setup. Do not claim both checks passed, and do not claim remote devices were configured. |
+| Privileged command succeeded | Inspect the requested outcome. This is mandatory for local setup and Windows network repair. |
+| Privileged command failed but local hosts/trust now verify | `localSetupResult` reports verified readiness. This is a deliberate local result rule, not the rule used by every cleanup function. |
+| Hosts/trust/firewall inspection failed | Preserve unknown/error; their conservative presence helpers must not report a clean removal. |
+| mDNS probe failed | Report name advertising unconfirmed and let the application retry; do not substitute a hosts lookup. |
+| Atomic replacement returned an error | Handle it, but allow that the replacement may already have occurred before directory-sync failure. |
+| Ordinary log open/write failed | File logging degrades silently; opening the log location has its own bridge error. Logging success is not part of operation success. |
+| Health wait timed out or a busy port was found | Return an operation error with context; this is not a process-fatal logging call. |
+
+`bool` APIs have different conservatism. `hosts.Present`, `trust.Present`, and
+`netfix.RulesPresent` count inspection errors as possible residue. In contrast,
+`autostart.Enabled` and reboot detection can return false on inspection failures,
+and `IPsChanged` returns false on an address-enumeration error. Do not generalize
+one package's boolean into another's guarantee.
+
+### Artifact ownership and lifetime
+
+| Artifact | Owner and removal boundary |
+| --- | --- |
+| Child process | Its immediate caller; ordinary `Runner` methods wait, but provide no application-wide cancellation tree. |
+| Atomic staging file | One `atomicfile.Write` call; attempt cleanup on every return. |
+| Diagnostic log folder | `applog`; purge removes the whole folder and then attempts to recreate logging. |
+| Hosts marker `# care-desktop` | CARE-managed hosts lines across clinic names; preserve unmarked lines. |
+| Root Common Name and known anchors | CARE trust integration on this computer; do not infer that browser-specific or remote trust is gone. |
+| Temporary root PEM | The extraction/preparation operation; preserve it until its consumer has finished, then attempt removal. |
+| Public device installers | The clinic setup directory; useful beyond the call that generated them, so they are not scratch files to delete immediately. |
+| mDNS responder | Application lifetime; renew after detected address changes/probe failures and stop on shutdown. |
+| `CARE Desktop ` firewall prefix | CARE-owned rule namespace. Repair exact current names; removal can sweep the prefix. |
+| Windows network category | Shared profile state, not an owned rule; no previous-category rollback is recorded. |
+| Autostart plist/value/desktop file | One per-user CARE registration; removing it is not the same as stopping a running application. |
+| Downloaded installer | Provisioning operation; remove media after use without confusing it with the installed tool. |
+
+For broad cleanup sequencing, retained volumes, backups, and manual residue
+reporting, use [Cleanup and uninstall](cleanup-and-uninstall.md) rather than
+calling native removal helpers ad hoc. Native operations can be partial and
+often affect shared machine state; a setup helper is not a safe test fixture for
+the real host.
+
+## Source-file role inventory
+
+This is the complete file inventory for this guide's native/readiness scope,
+including tests. Test descriptions identify source coverage, not tests executed
+while writing this documentation. Parent application and deployment files linked
+above are integration boundaries, not additional files owned by these packages.
+For the rest of the repository, use [Repository map](repository-map.md).
+
+### Shared native infrastructure
+
+| Source file | Role |
+| --- | --- |
+| [sys/proc/proc.go](../app/internal/sys/proc/proc.go) | Command constructors, runner environment/directory/output handling, PATH repair, and existence helpers. |
+| [sys/proc/console_windows.go](../app/internal/sys/proc/console_windows.go) | Windows-only hidden-console process attributes. |
+| [sys/proc/console_other.go](../app/internal/sys/proc/console_other.go) | Non-Windows no-op console helper. |
+| [sys/proc/proc_test.go](../app/internal/sys/proc/proc_test.go) | POSIX command fixtures distinguish failed versus empty `Lines` output and verify inherited environment in `RunWith`; skipped on Windows. |
+| [sys/atomicfile/atomicfile.go](../app/internal/sys/atomicfile/atomicfile.go) | Stage/write/sync/close/replace workflow and Unix directory-sync implementation. |
+| [sys/atomicfile/replace_darwin.go](../app/internal/sys/atomicfile/replace_darwin.go) | Darwin dispatch to Unix replacement. |
+| [sys/atomicfile/replace_linux.go](../app/internal/sys/atomicfile/replace_linux.go) | Linux dispatch to Unix replacement. |
+| [sys/atomicfile/replace_windows.go](../app/internal/sys/atomicfile/replace_windows.go) | UTF-16 path conversion and Windows `MoveFileEx` replacement. |
+| [sys/atomicfile/atomicfile_test.go](../app/internal/sys/atomicfile/atomicfile_test.go) | Replacement contents, non-Windows permissions, failed directory replacement, and staging-file cleanup in test directories. |
+| [sys/applog/applog.go](../app/internal/sys/applog/applog.go) | Mutex-protected file logger, record limits, session header, purge/reopen, and Wails-compatible log methods/fatal hook. |
+| [sys/applog/dir.go](../app/internal/sys/applog/dir.go) | Platform log-folder selection and fixed folder/file names. |
+| [sys/applog/rotate.go](../app/internal/sys/applog/rotate.go) | Size-triggered numbered rotation and reopening. |
+| [sys/elevate/elevate.go](../app/internal/sys/elevate/elevate.go) | Interpreter quoting, privileged Unix execution, fail-fast step batching, and elevated Windows child exit-code propagation. |
+| [sys/elevate/elevate_test.go](../app/internal/sys/elevate/elevate_test.go) | POSIX step failure/grouping fixtures, generated Windows error-propagation assertions, and empty-batch behavior. |
+
+### Host identity and LAN integration
+
+| Source file | Role |
+| --- | --- |
+| [sys/hosts/hosts.go](../app/internal/sys/hosts/hosts.go) | Hosts-file parsing, local append planning, marker-scoped removal, and explicit residue inspection. |
+| [sys/hosts/hosts_test.go](../app/internal/sys/hosts/hosts_test.go) | Loopback/conflicting-entry parsing; POSIX removal fixtures preserve unowned lines, empty output, write errors, scratch cleanup, and state-based/unknown results. |
+| [sys/trust/trust.go](../app/internal/sys/trust/trust.go) | Local root preparation/install/removal, verified loopback TLS, store/bundle inspection, stable CA identity, and SHA-1 identification. |
+| [sys/trust/installer.go](../app/internal/sys/trust/installer.go) | Validated SHA-256 display fingerprint and generated Unix/Windows remote-device trust installers. |
+| [sys/trust/trust_test.go](../app/internal/sys/trust/trust_test.go) | Generated certificate fixtures test Linux anchor/bundle residue, partial removal, approval/retry, unreadable bundles, and fresh trust-pool loading. |
+| [sys/trust/installer_test.go](../app/internal/sys/trust/installer_test.go) | Redirected POSIX installer fixtures verify readable Debian/Fedora public anchors, NSS profile imports including spaces, and visible NSS failures; not live trust-store installation. |
+| [sys/mdns/advertise.go](../app/internal/sys/mdns/advertise.go) | DNS label handling, usable IPv4 selection, responder lifetime, address comparison, and genuine service-response probing. |
+| [sys/mdns/advertise_test.go](../app/internal/sys/mdns/advertise_test.go) | Injected query results test exact multicast identity, stale/loopback rejection, time-bounded query parameters, stopped state, and address-order/change comparisons. |
+| [sys/netfix/netfix.go](../app/internal/sys/netfix/netfix.go) | Windows profile/rule readiness, scoped repair, verified prefix-owned removal, and non-Windows no-op entry points. |
+| [sys/netfix/netfix_test.go](../app/internal/sys/netfix/netfix_test.go) | Profile/rule validation, malformed/failed reads, repair-script scope, residue counts, and verified removal via string assertions and POSIX command fixtures. |
+| [sys/autostart/autostart.go](../app/internal/sys/autostart/autostart.go) | Per-user login registration presence and writes/removal for plist, registry Run value, and desktop entry. |
+| [sys/reboot/reboot.go](../app/internal/sys/reboot/reboot.go) | Windows pending-restart key probes, explanatory plan, and delayed restart command. |
+
+### Readiness and clinic-side integration
+
+| Source file | Role |
+| --- | --- |
+| [prereq/check.go](../app/internal/prereq/check.go) | Five-second Docker/Git readiness probes, container-mode/Compose checks, and operator advice. |
+| [prereq/provision.go](../app/internal/prereq/provision.go) | Tool plans, platform installers/openers, Docker waits, vendor downloads, and stall/progress handling. |
+| [prereq/provision_test.go](../app/internal/prereq/provision_test.go) | POSIX Docker-command fixture verifies environment preservation and bounded up/down/hung daemon probing; skipped on Windows. |
+| [health/health.go](../app/internal/health/health.go) | Local insecure HTTPS readiness, wait loop, Compose-aware port preflight, and optional listener naming. |
+| [clinic/thiscomputer.go](../app/internal/clinic/thiscomputer.go) | Assemble optional hosts/trust work, confirm once, elevate, verify final local usability, and report partial setup. |
+| [clinic/thiscomputer_test.go](../app/internal/clinic/thiscomputer_test.go) | Pure result-message tests require both hosts and trust, cover errors and verified state despite command failure, and prevent false success. |
+| [clinic/caddyroot.go](../app/internal/clinic/caddyroot.go) | Best-effort public root extraction from running Caddy through exec/copy fallback. |
+| [clinic/devicescripts.go](../app/internal/clinic/devicescripts.go) | Best-effort generation of public-root-bearing device installers under the existing setup directory. |
+
+## Verification boundaries and historical differences
+
+The included tests cover important error and ownership decisions, but many use
+injected queries, generated command strings, redirected filesystem fixtures, or
+fake executables. They are not evidence of real UAC, macOS keychain, LAN
+multicast, Docker Desktop installation, or distribution-wide browser support.
+This scope has no separate test files for `applog`, `autostart`, `reboot`,
+`health`, root extraction, or device-script writing. The documentation work does
+not require running installers, native removal scripts, or broad test suites.
+
+When comparing the implementation with older design notes, retain these
+corrections:
+
+1. `atomicfile` now provides staged, synced platform-specific replacement, with
+   the post-replacement error and Windows-sharing limits described above.
+2. Batched elevation now preserves earlier step failures and propagates the
+   elevated Windows child's exit code. Some specialized wrappers still differ.
+3. Local setup success requires both a parsed loopback hosts entry and a
+   verified TLS handshake; a command's apparent success is insufficient.
+4. `HostTrusts` dials loopback with hostname verification, and Linux reads fresh
+   bundle contents rather than relying on a stale in-process root pool.
+5. mDNS readiness uses an actual matching service response, not ordinary
+   resolver success that a hosts entry could produce.
+6. Windows networking requires HTTP as well as HTTPS and mDNS, preserves
+   inspection failures, repairs specifically named rules, and does not reset
+   network profiles during removal.
+7. Linux trust cleanup checks generated bundles as well as anchor files;
+   downloadable browser imports use a readable anchor and do not hide attempted
+   NSS import failures.
+8. `applog.Header` does not itself print release pins, and Windows
+   post-install provisioning does not itself perform the reboot-key detection.
+
+For release/platform prerequisites and available developer validation commands,
+continue with [Development and release](development-and-release.md).

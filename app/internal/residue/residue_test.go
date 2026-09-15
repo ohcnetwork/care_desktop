@@ -1,6 +1,7 @@
 package residue
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,16 +18,14 @@ func TestUnavailableDockerIsNotClean(t *testing.T) {
 	}
 	root := t.TempDir()
 	t.Setenv("HOME", root)
-	for _, name := range []string{"docker", "security"} {
-		if err := os.WriteFile(filepath.Join(root, name), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.WriteFile(filepath.Join(root, "docker"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
 	}
 	t.Setenv("PATH", root)
 	run := proc.Runner{Env: os.Environ()}
-	report, err := Scan(Options{
+	report, err := scan(Options{
 		Runner: run, Project: "care-desktop", InstallDir: filepath.Join(root, "install"),
-	})
+	}, noSystemTraces)
 	if err == nil || report.Clean {
 		t.Fatalf("unavailable Docker was called clean: %+v, %v", report, err)
 	}
@@ -75,25 +74,54 @@ func TestCachedImagesDoNotBlockSetup(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "docker"), []byte(docker), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "security"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("PATH", root)
-	report, err := Scan(Options{
+	report, err := scan(Options{
 		Runner: proc.Runner{Env: os.Environ()}, Project: "care-desktop",
 		InstallDir: filepath.Join(root, "install"), Images: []string{"care:clinic"},
-	})
+	}, noSystemTraces)
 	if err != nil || !report.Clean || len(report.Traces) != 1 || report.Traces[0].ID != "images" {
 		t.Fatalf("cached images should be reported but not block: %+v, %v", report, err)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "install"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	report, err = Scan(Options{
+	report, err = scan(Options{
 		Runner: proc.Runner{Env: os.Environ()}, Project: "care-desktop",
 		InstallDir: filepath.Join(root, "install"), Images: []string{"care:clinic"},
-	})
+	}, noSystemTraces)
 	if err != nil || report.Clean {
 		t.Fatalf("installed files should still block: %+v, %v", report, err)
+	}
+}
+
+func noSystemTraces(proc.Runner) ([]Trace, error) { return nil, nil }
+
+func TestSystemInspectionCannotReportFalseClean(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses POSIX command fixtures")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "docker"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", root)
+	inspectionError := errors.New("hosts file could not be read")
+	for _, tc := range []struct {
+		name   string
+		traces []Trace
+		err    error
+	}{
+		{"unknown system state", nil, inspectionError},
+		{"existing hosts entry", []Trace{{ID: "hosts", Label: "Hosts file entry"}}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			report, err := scan(Options{
+				Runner: proc.Runner{Env: os.Environ()}, Project: "care-desktop",
+				InstallDir: filepath.Join(root, "install"),
+			}, func(proc.Runner) ([]Trace, error) { return tc.traces, tc.err })
+			if report.Clean || !errors.Is(err, tc.err) || len(report.Traces) != len(tc.traces) {
+				t.Fatalf("system inspection was lost: %+v, %v", report, err)
+			}
+		})
 	}
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 )
 
-func TestMinioBootstrapUsesContainerCredentials(t *testing.T) {
+func TestSiloBootstrapUsesContainerCredentials(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses POSIX command fixtures")
 	}
@@ -22,9 +22,9 @@ func TestMinioBootstrapUsesContainerCredentials(t *testing.T) {
 	}
 	trace := filepath.Join(dir, "mc-calls")
 	for name, script := range map[string]string{
-		"minio": "#!/bin/sh\nexit 0\n",
-		"curl":  "#!/bin/sh\nexit 0\n",
-		"mc":    "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$CARE_MINIO_TRACE\"\nprintf '%s\\n' '--' >> \"$CARE_MINIO_TRACE\"\n",
+		"silo": "#!/bin/sh\n[ \"$*\" = 'server /data --console-address :9001' ]\n",
+		"curl": "#!/bin/sh\nexit 0\n",
+		"mc":   "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$CARE_MINIO_TRACE\"\nprintf '%s\\n' '--' >> \"$CARE_MINIO_TRACE\"\n",
 	} {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o700); err != nil {
 			t.Fatal(err)
@@ -56,7 +56,7 @@ func TestMinioBootstrapUsesContainerCredentials(t *testing.T) {
 		"mb\n-p\nlocal/clinic-facilities\n--\n" +
 		"anonymous\nset\ndownload\nlocal/clinic-facilities\n--\n"
 	if string(data) != want {
-		t.Fatalf("MinIO bootstrap received different settings:\ngot  %q\nwant %q", data, want)
+		t.Fatalf("Silo bootstrap received different settings:\ngot  %q\nwant %q", data, want)
 	}
 }
 

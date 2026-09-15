@@ -22,7 +22,7 @@ func (a *App) envPath(name string) (string, error) {
 
 func (a *App) ReadEnv(name, adminPassword string) (string, error) {
 	var content string
-	err := a.withJob(func() error {
+	err := a.withReadJob(func() error {
 		if err := a.requireAdmin(adminPassword); err != nil {
 			return err
 		}
