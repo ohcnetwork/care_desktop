@@ -60,6 +60,7 @@ export const GROUPS: Group[] = [
         unit: "days",
         min: 0,
         max: 3650,
+        fallback: "14",
         required: true,
       },
     ],

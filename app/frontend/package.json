@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/stage-install.mjs && vite",
     "build": "node scripts/stage-install.mjs && node scripts/check-bindings.mjs && tsc && vite build && node scripts/prune-fonts.mjs"
   },
   "devDependencies": {

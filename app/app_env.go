@@ -21,23 +21,18 @@ func (a *App) envPath(name string) (string, error) {
 }
 
 func (a *App) ReadEnv(name, adminPassword string) (string, error) {
-	var content string
-	err := a.withJob(func() error {
-		if err := a.requireAdmin(adminPassword); err != nil {
-			return err
-		}
-		if err := a.requireSetup(); err != nil {
-			return err
-		}
-		p, err := a.envPath(name)
-		if err != nil {
-			return err
-		}
-		b, err := os.ReadFile(p)
-		content = string(b)
-		return err
-	})
-	return content, err
+	if err := a.requireAdmin(adminPassword); err != nil {
+		return "", err
+	}
+	if err := a.requireSetup(); err != nil {
+		return "", err
+	}
+	p, err := a.envPath(name)
+	if err != nil {
+		return "", err
+	}
+	b, err := os.ReadFile(p)
+	return string(b), err
 }
 
 func (a *App) WriteEnv(name, content, adminPassword string) error {

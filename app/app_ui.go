@@ -45,7 +45,7 @@ func (a *App) OpenLogFolder() error {
 	case "darwin":
 		cmd = proc.Command("open", "-R", path)
 	case "windows":
-		cmd = proc.Command("explorer.exe", "/select,"+path)
+		cmd = exec.Command("explorer.exe", "/select,"+path)
 	default:
 		cmd = proc.Command("xdg-open", filepath.Dir(path))
 	}
