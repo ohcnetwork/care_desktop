@@ -6,6 +6,9 @@
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
+  "preBuildHooks": {
+    "*/*": "node ../../frontend/scripts/stage-install.mjs"
+  },
   "author": {
     "name": "Open Healthcare Network"
   },

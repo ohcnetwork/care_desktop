@@ -32,6 +32,7 @@ For a first reading, follow the table from top to bottom. If you are fixing one 
 | "How are patient data and uploaded files stored?" | [Clinic lifecycle](clinic-lifecycle.md) and [backups](backups-and-restore.md). |
 | "What happens if restore or uninstall is interrupted?" | [Backups and restore](backups-and-restore.md) and [cleanup and uninstall](cleanup-and-uninstall.md). |
 | "The app works here but not on another device." | [Native integrations](native-integrations.md). |
+| "This client previously hosted CARE and now cannot reach another server." | [Client recovery and earlier-install cleanup](client-recovery.md). |
 | "How do I reproduce the installed version?" | [Release identity](development-and-release.md#release-identity-and-pins). |
 | "Which file should I change?" | [Repository map](repository-map.md). |
 

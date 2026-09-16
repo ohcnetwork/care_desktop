@@ -9,6 +9,9 @@ needed after the first install.
 **Download:** [latest release](https://github.com/ohcnetwork/care_desktop/releases/latest)
 — `.dmg` for macOS (Apple Silicon and Intel), `-setup.exe` for Windows 64-bit.
 
+**Previously hosted CARE on this computer, but now cannot open another clinic?**
+See [client recovery and earlier-install cleanup](docs/client-recovery.md).
+
 ## What it does
 
 - **Setup wizard** — checks the computer (Docker, Git, network), takes a backup

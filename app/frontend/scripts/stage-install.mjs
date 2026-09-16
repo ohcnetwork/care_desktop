@@ -1,5 +1,5 @@
 // Stage deployments/ into ../install so Go can embed it (//go:embed all:install).
-// Runs at frontend build time, before the Go compile, so the embed is fresh.
+// Runs from the Wails pre-build hook (including dev) and standalone frontend builds.
 // deployments/ is the single source of truth; nothing is duplicated in git.
 //
 // The list is read from the directory rather than hardcoded: a hand-maintained

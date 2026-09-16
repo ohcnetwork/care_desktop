@@ -154,7 +154,10 @@ app/internal/
     |   `-- hosts_test.go
     |-- mdns/
     |   |-- advertise.go
-    |   `-- advertise_test.go
+    |   |-- advertise_test.go
+    |   |-- hostname_network_test.go
+    |   |-- probe.go
+    |   `-- responder.go
     |-- netfix/
     |   |-- netfix.go
     |   `-- netfix_test.go

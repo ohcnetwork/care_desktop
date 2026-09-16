@@ -658,15 +658,20 @@ than assuming that any certificate-management window is showing it.
 
 ## LAN names and mDNS
 
-Source: [advertise.go](../app/internal/sys/mdns/advertise.go). Renewal is an
+Sources: [advertise.go](../app/internal/sys/mdns/advertise.go),
+[responder.go](../app/internal/sys/mdns/responder.go), and
+[probe.go](../app/internal/sys/mdns/probe.go). Renewal is an
 application-lifetime responsibility at the integration boundary in
 [app.go](../app/app.go), not a background loop inside this package.
 
 ### Why this is separate from hosts and trust
 
 Other devices need a route to the server's LAN address. A server-only loopback
-hosts entry cannot provide one. The advertiser uses `github.com/hashicorp/mdns`
-to answer for an HTTPS service in the multicast `local.` domain:
+hosts entry cannot provide one. The advertiser retains the
+`github.com/hashicorp/mdns` DNS record builder, but uses an interface-bound UDP
+transport instead of that dependency's server. The dependency's server sends
+multicast answers to the requester and does not frame legacy replies correctly.
+The advertised HTTPS service remains unchanged:
 
 | Record property | Value |
 | --- | --- |
@@ -675,24 +680,24 @@ to answer for an HTTPS service in the multicast `local.` domain:
 | Hostname | `<label>.local.` |
 | Port | `443` |
 | TXT information | Exactly one field, `CARE Desktop` |
-| Advertised addresses | Selected usable interface IPv4 addresses |
+| Advertised addresses | Only the usable IPv4 addresses of the receiving/sending interface |
 
 `Label` trims surrounding whitespace/dots, lowercases, removes a final `.local`,
 and trims dots again. `ValidateLabel` requires 1-63 characters, ASCII letters,
 digits, and internal hyphens, with an alphanumeric first and last character.
-`Advertise` normalizes and rejects an empty result but does **not** itself call
-the full validator. Callers accepting user input must retain validation.
+`Advertise` normalizes the label and calls the full validator before opening
+network sockets.
 
 ### Selecting addresses
 
-`lanIPv4s` examines interfaces that are up and excludes loopback, point-to-point,
-and interfaces whose names begin, case-insensitively, with:
+`lanInterfaces` examines interfaces that are up and multicast-capable, excluding
+loopback, point-to-point, and interfaces whose names begin, case-insensitively, with:
 
 ```text
 docker  br-  veth  virbr  vboxnet  vmnet  utun  tun  tap
 ```
 
-It keeps IPv4 addresses that are neither loopback nor link-local unicast. This
+It keeps unicast IPv4 addresses that are neither loopback nor link-local. This
 avoids advertising a Docker bridge, VPN tunnel, or self-assigned link-local
 address as if a tablet could use it.
 
@@ -701,53 +706,67 @@ This is a heuristic, not complete topology discovery:
 - It does not restrict addresses to private RFC 1918 ranges.
 - It does not prove routing, inspect WiFi client isolation, or rank a preferred
   interface.
-- Failures reading one interface's addresses are skipped; failure enumerating
-  interfaces is returned. No surviving address produces
-  `no usable LAN IPv4 address found`.
-- Address filtering is distinct from explicitly binding the responder to an
-  interface list; the server is created with its zone, without such a list.
-- Address selection and the response probe are IPv4-oriented. Do not assume an
-  IPv6-only LAN works merely because the host OS supports IPv6.
+- Enumeration and per-interface address failures are returned and logged. No
+  surviving interface produces `no multicast-capable LAN IPv4 interface found`.
+- Each selected interface gets explicitly bound multicast listeners and an
+  explicit outgoing multicast interface, including on Windows. Where receive
+  interface metadata is unavailable, IPv4 source subnets or IPv6 source zones
+  identify the link.
+- IPv4 transport is always enabled; IPv6 transport is also enabled on interfaces
+  with IPv6 addresses. Published host addresses and the watchdog remain IPv4:
+  this does not add support for IPv6-only clinics.
+
+### Browser hostname replies
+
+The responder answers direct `<label>.local. A` queries, not just DNS-SD service
+browsing. It sends ordinary mDNS replies to the multicast group, QU replies to
+the requester, and legacy queries from non-5353 source ports back to that port
+with the original ID and question. Legacy replies have a ten-second TTL and no
+cache-flush bit; unique mDNS records carry cache-flush. Expiring known answers
+are refreshed; sufficiently fresh known answers suppress redundant multicast
+responses. IPv4-only hostname records include NSEC to explicitly indicate that
+no AAAA record is available.
+
+Startup sends two announcements, one second apart, and shutdown withdraws the
+records with TTL zero. Multicast packets use TTL/hop-limit 255. Socket and send
+failures are reported through the application's log. This is not a complete
+general-purpose mDNS implementation: automatic hostname conflict resolution is
+not implemented, and the clinic name must be unique on its LAN.
 
 ### A genuine response probe
 
-`Resolves` does not call the ordinary system hostname resolver. It runs a bounded
-mDNS query for `_https._tcp` using a two-second timeout, IPv6 disabled for that
-query, a buffered entry channel, and a discarded library logger.
+`Resolves` sends a direct hostname A query on every selected IPv4 interface,
+concurrently under a shared two-second deadline. Each query uses an ephemeral
+UDP port, testing legacy-unicast handling without contending with the OS
+responder for replies on port 5353.
 
-For success, the query must finish without error, the advertiser must still be
-running, and at least one response must match **all** of:
+Every interface must return an authoritative response with the matching query
+ID/question and live A records belonging to that interface. A hosts-file
+loopback result, unrelated service response, stale address, or query error is
+not success. A nil/stopped advertiser does not query, and shutdown during the
+query prevents a positive result. Failures return an error to the application.
 
-1. The expected instance name and hostname, case-insensitively.
-2. Port 443.
-3. Exactly the `CARE Desktop` TXT information.
-4. One of the advertiser's recorded IPv4 addresses.
-
-A hosts-file loopback result, another HTTPS service, a stale address, or a query
-error is not success. A nil/stopped advertiser does not query. Shutdown during
-the query also prevents a positive result.
-
-The distinction from the old system-resolver approach is important: hosts could
-make the server resolve its own name while no multicast response reached the
-LAN. This implementation checks actual service responses. Even so, a successful
-probe **from this computer** is not an end-to-end test from another WiFi client,
-nor is the TXT marker a security authentication mechanism.
+The probe bypasses the system resolver and its hosts file. It does not prove
+that ordinary multicast replies reach a remote WiFi client, verify HTTPS, or
+authenticate the server.
 
 ### Renewal and shutdown
 
-`Advertiser` records its initial addresses and holds an mDNS server under a
-mutex. `Stop` is nil-safe and idempotent; it attempts library shutdown and clears
-the server pointer, ignoring a shutdown error.
+`Advertiser` records the selected interfaces and owns their responders under a
+mutex. `Stop` is nil-safe and idempotent; it stops readers and announcements,
+sends goodbyes, and closes sockets. A partial startup failure closes responders
+already opened rather than reporting a partially working advertisement.
 
-`IPsChanged` re-enumerates addresses and compares their length and membership;
-reordering alone does not trigger a change. If enumeration fails, including a
-loss of all usable addresses, it returns false rather than an error. False is
-therefore not proof that the network is unchanged.
+`IPsChanged` compares interface identities, addresses, subnet masks, and IPv6
+availability; reordering alone does not trigger a change. Enumeration errors,
+including loss of all usable interfaces, are returned rather than treated as
+an unchanged network.
 
 The application watches every **30 seconds**. It attempts to start a missing
-advertiser, restarts immediately when the address comparison reports a change,
+advertiser, restarts when the topology comparison reports a change or error,
 and restarts after **two consecutive failed response probes**. A successful
-probe clears the miss count. The watcher and advertiser must be stopped with
+probe clears the miss count. Shutdown prevents the watcher from reopening a
+responder. The watcher and advertiser must be stopped with
 application shutdown. The package itself does not automatically restart after
 a WiFi roam, dock change, or firewall change.
 
@@ -757,7 +776,7 @@ flowchart TD
     Have -- No --> Start["Try Advertise with current usable IPv4 addresses"]
     Have -- Yes --> Changed{"IPsChanged reports a change?"}
     Changed -- Yes --> Renew["Stop old responder and start a new one"]
-    Changed -- No --> Probe["Query genuine HTTPS mDNS service responses"]
+    Changed -- No --> Probe["Query hostname A records on every selected IPv4 interface"]
     Probe --> Match{"Matching response, no query error, still running?"}
     Match -- Yes --> Reset["Reset miss count"]
     Match -- No --> Misses{"Two consecutive misses?"}
@@ -771,6 +790,40 @@ Container lifetime and native advertiser lifetime are different. A running
 clinic stack is not by itself an mDNS responder from this package; the desktop
 process owns that service. See [The Wails application](wails-application.md) for
 hide, close, quit, and second-instance behavior.
+
+### Client independence and network limits
+
+Name discovery runs on the CARE computer; browsers do not need a client script,
+extension, or hosts-file change. A successful check on the server does not prove
+that an access point forwards multicast to every phone. Guest-network isolation,
+separate VLANs without an mDNS gateway, and clients without `.local` support
+cannot be repaired by the responder alone.
+
+DNS resolution and HTTPS trust are separate. Existing clients keep their clinic
+URL and installed CA. An unmanaged device that has never trusted the clinic CA
+still needs the certificate setup described above. Truly zero-touch HTTPS would
+require a real domain with a publicly trusted certificate and working DNS, not
+just a different mDNS responder. A router DNS entry for `.local` is not a
+portable substitute: clients may resolve that suffix exclusively through mDNS.
+
+### Reproducing discovery checks
+
+Run deterministic protocol and lifecycle checks with
+`cd app && go test -race ./internal/sys/mdns`. On a server connected to the
+clinic LAN, opt into real sockets with:
+
+```sh
+cd app
+CARE_MDNS_NETWORK_TEST=1 go test -race ./internal/sys/mdns -run '^TestHostnameOverLAN$' -count=1 -v
+```
+
+The live check advertises a unique temporary test hostname, checks the watchdog,
+and exercises multicast and legacy hostname replies on each selected interface
+and available transport family. It withdraws that name afterwards. QU framing
+is covered by deterministic tests; observing a QU reply on a second machine is
+still necessary because unicast port-5353 packets on one host can be consumed
+by its existing OS responder. Windows/Linux builds do not substitute for
+running the live check on those platforms or on an affected phone.
 
 ## Windows network repair
 
@@ -1041,7 +1094,7 @@ from the clinic hostname's browser site.
 | `health.Ping` | GET `https://localhost/ping/`, three-second client timeout, **TLS certificate verification disabled**, HTTP status 200 required. | Trusted certificate, correct CA identity, hosts/mDNS, remote reachability, or full clinical functionality. |
 | `trust.HostTrusts(host)` | TLS to `127.0.0.1:443`, verification enabled with the clinic hostname as `ServerName`. | DNS resolution, HTTP application health, or trust in every browser/device. |
 | `hosts.HasEntry(host)` | Parse this computer's hosts file for a consistent loopback mapping. | Multicast advertisement or resolution from any other computer. |
-| `Advertiser.Resolves` | Bounded matching mDNS service-response query. | A remote client's WiFi path, HTTPS request, or trust decision. |
+| `Advertiser.Resolves` | Bounded direct hostname queries on every selected IPv4 interface. | Remote multicast delivery, a client's WiFi path, HTTPS, or trust. |
 | `netfix.Check` | Windows profile and selected effective firewall-rule properties. | Absence of other blocks, router/client isolation, or actual remote packet delivery. |
 | `DockerCheck` | Responding configured daemon, acceptable container OS, and usable Compose command. | A started or healthy CARE stack. |
 
@@ -1235,8 +1288,11 @@ For the rest of the repository, use [Repository map](repository-map.md).
 | [sys/trust/installer.go](../app/internal/sys/trust/installer.go) | Validated SHA-256 display fingerprint and generated Unix/Windows remote-device trust installers. |
 | [sys/trust/trust_test.go](../app/internal/sys/trust/trust_test.go) | Generated certificate fixtures test Linux anchor/bundle residue, partial removal, approval/retry, unreadable bundles, and fresh trust-pool loading. |
 | [sys/trust/installer_test.go](../app/internal/sys/trust/installer_test.go) | Redirected POSIX installer fixtures verify readable Debian/Fedora public anchors, NSS profile imports including spaces, and visible NSS failures; not live trust-store installation. |
-| [sys/mdns/advertise.go](../app/internal/sys/mdns/advertise.go) | DNS label handling, usable IPv4 selection, responder lifetime, address comparison, and genuine service-response probing. |
-| [sys/mdns/advertise_test.go](../app/internal/sys/mdns/advertise_test.go) | Injected query results test exact multicast identity, stale/loopback rejection, time-bounded query parameters, stopped state, and address-order/change comparisons. |
+| [sys/mdns/advertise.go](../app/internal/sys/mdns/advertise.go) | DNS labels, usable interfaces, responder lifetime, topology comparison, and bounded hostname probes. |
+| [sys/mdns/responder.go](../app/internal/sys/mdns/responder.go) | Interface-bound multicast/unicast transport, hostname and DNS-SD replies, announcements and goodbyes. |
+| [sys/mdns/probe.go](../app/internal/sys/mdns/probe.go) | Direct hostname queries and interface-local response validation. |
+| [sys/mdns/advertise_test.go](../app/internal/sys/mdns/advertise_test.go) | Protocol framing, known answers, address validation, lifecycle and topology regression checks. |
+| [sys/mdns/hostname_network_test.go](../app/internal/sys/mdns/hostname_network_test.go) | Opt-in live multicast and legacy hostname checks using a temporary name. |
 | [sys/netfix/netfix.go](../app/internal/sys/netfix/netfix.go) | Windows profile/rule readiness, scoped repair, verified prefix-owned removal, and non-Windows no-op entry points. |
 | [sys/netfix/netfix_test.go](../app/internal/sys/netfix/netfix_test.go) | Profile/rule validation, malformed/failed reads, repair-script scope, residue counts, and verified removal via string assertions and POSIX command fixtures. |
 | [sys/autostart/autostart.go](../app/internal/sys/autostart/autostart.go) | Per-user login registration presence and writes/removal for plist, registry Run value, and desktop entry. |
@@ -1276,7 +1332,7 @@ corrections:
    verified TLS handshake; a command's apparent success is insufficient.
 4. `HostTrusts` dials loopback with hostname verification, and Linux reads fresh
    bundle contents rather than relying on a stale in-process root pool.
-5. mDNS readiness uses an actual matching service response, not ordinary
+5. mDNS readiness uses actual matching hostname responses, not ordinary
    resolver success that a hosts entry could produce.
 6. Windows networking requires HTTP as well as HTTPS and mDNS, preserves
    inspection failures, repairs specifically named rules, and does not reset

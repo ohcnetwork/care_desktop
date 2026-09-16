@@ -1,39 +1,42 @@
 package mdns
 
 import (
+	"context"
 	"fmt"
-	"io"
-	"log"
+	"maps"
 	"net"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
-
-	hmdns "github.com/hashicorp/mdns"
 )
 
 type Advertiser struct {
-	name   string
-	ips    []net.IP
-	mu     sync.Mutex
-	server *hmdns.Server
+	name    string
+	links   []lanInterface
+	mu      sync.Mutex
+	servers []*responder
 }
 
-func Advertise(name string) (*Advertiser, error) {
+func Advertise(name string, logf func(string)) (*Advertiser, error) {
 	name = Label(name)
-	if name == "" {
-		return nil, fmt.Errorf("empty mDNS name")
+	if err := ValidateLabel(name); err != nil {
+		return nil, err
 	}
-	ips, err := lanIPv4s()
+	links, err := lanInterfaces()
 	if err != nil {
 		return nil, err
 	}
-	server, err := newMDNSServer(name, ips)
-	if err != nil {
-		return nil, err
+	a := &Advertiser{name: name, links: links}
+	for _, link := range links {
+		server, err := newResponder(name, link, logf)
+		if err != nil {
+			a.Stop()
+			return nil, fmt.Errorf("advertise on %s: %w", link.iface.Name, err)
+		}
+		a.servers = append(a.servers, server)
 	}
-	return &Advertiser{name: name, ips: ips, server: server}, nil
+	return a, nil
 }
 
 func (a *Advertiser) Name() string { return a.name }
@@ -44,88 +47,65 @@ func (a *Advertiser) Stop() {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.server == nil {
-		return
+	for _, server := range a.servers {
+		server.Shutdown()
 	}
-	_ = a.server.Shutdown()
-	a.server = nil
+	a.servers = nil
 }
 
-func (a *Advertiser) IPsChanged() bool {
-	cur, err := lanIPv4s()
+func (a *Advertiser) IPsChanged() (bool, error) {
+	cur, err := lanInterfaces()
 	if err != nil {
-		return false
+		return false, err
 	}
-	return !sameIPs(a.ips, cur)
+	return !sameLinks(a.links, cur), nil
 }
 
-func (a *Advertiser) Resolves() bool {
-	return a.resolves(hmdns.Query)
+func (a *Advertiser) Resolves() error {
+	return a.resolves(probeHostname)
 }
 
-func (a *Advertiser) resolves(query func(*hmdns.QueryParam) error) bool {
+func (a *Advertiser) resolves(query func(context.Context, string, lanInterface) error) error {
 	if a == nil || a.stopped() {
-		return false
+		return fmt.Errorf("name responder is stopped")
 	}
-	entries := make(chan *hmdns.ServiceEntry, 32)
-	params := hmdns.DefaultParams("_https._tcp")
-	params.Timeout = 2 * time.Second
-	params.DisableIPv6 = true
-	params.Entries = entries
-	params.Logger = log.New(io.Discard, "", 0)
-	result := make(chan error, 1)
-	go func() {
-		result <- query(params)
-		close(entries)
-	}()
-	found := false
-	for entry := range entries {
-		if a.matches(entry) {
-			found = true
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	results := make(chan error, len(a.links))
+	for _, link := range a.links {
+		go func() {
+			if err := query(ctx, a.name+".local.", link); err != nil {
+				results <- fmt.Errorf("%s: %w", link.iface.Name, err)
+			} else {
+				results <- nil
+			}
+		}()
+	}
+	for range a.links {
+		select {
+		case err := <-results:
+			if err != nil {
+				return err
+			}
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
-	return <-result == nil && found && !a.stopped()
-}
-
-func (a *Advertiser) matches(entry *hmdns.ServiceEntry) bool {
-	if entry == nil || !strings.EqualFold(entry.Name, a.name+"._https._tcp.local.") ||
-		!strings.EqualFold(entry.Host, a.name+".local.") || entry.Port != 443 ||
-		len(entry.InfoFields) != 1 || entry.InfoFields[0] != "CARE Desktop" {
-		return false
+	if a.stopped() {
+		return fmt.Errorf("name responder stopped during query")
 	}
-	for _, ip := range a.ips {
-		if ip.Equal(entry.AddrV4) {
-			return true
-		}
-	}
-	return false
+	return nil
 }
 
 func (a *Advertiser) stopped() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.server == nil
+	return len(a.servers) == 0
 }
 
 type NameStatus struct {
 	OK      bool   `json:"ok"`
 	Message string `json:"message"`
-}
-
-func newMDNSServer(name string, ips []net.IP) (*hmdns.Server, error) {
-	svc, err := hmdns.NewMDNSService(
-		name,
-		"_https._tcp",
-		"local.",
-		name+".local.",
-		443,
-		ips,
-		[]string{"CARE Desktop"},
-	)
-	if err != nil {
-		return nil, err
-	}
-	return hmdns.NewServer(&hmdns.Config{Zone: svc})
 }
 
 func Label(name string) string {
@@ -151,14 +131,15 @@ func ValidateLabel(name string) error {
 
 var virtualIface = []string{"docker", "br-", "veth", "virbr", "vboxnet", "vmnet", "utun", "tun", "tap"}
 
-func lanIPv4s() ([]net.IP, error) {
+func lanInterfaces() ([]lanInterface, error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil, err
 	}
-	var ips []net.IP
+	var links []lanInterface
 	for _, ifi := range ifaces {
 		if ifi.Flags&net.FlagUp == 0 ||
+			ifi.Flags&net.FlagMulticast == 0 ||
 			ifi.Flags&net.FlagLoopback != 0 ||
 			ifi.Flags&net.FlagPointToPoint != 0 ||
 			isVirtual(ifi.Name) {
@@ -166,25 +147,30 @@ func lanIPv4s() ([]net.IP, error) {
 		}
 		addrs, err := ifi.Addrs()
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("read addresses on %s: %w", ifi.Name, err)
 		}
+		link := lanInterface{iface: ifi}
 		for _, addr := range addrs {
-			var ip net.IP
-			switch v := addr.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
+			network, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
 			}
-			if ip4 := ip.To4(); ip4 != nil && !ip4.IsLoopback() && !ip4.IsLinkLocalUnicast() {
-				ips = append(ips, ip4)
+			if network.IP.To4() == nil && !network.IP.IsLoopback() && !network.IP.IsUnspecified() {
+				link.ipv6 = true
+			}
+			if ip4 := network.IP.To4(); ip4 != nil && ip4.IsGlobalUnicast() && !ip4.IsLoopback() && !ip4.IsLinkLocalUnicast() {
+				link.ips = append(link.ips, ip4)
+				link.networks = append(link.networks, network)
 			}
 		}
+		if len(link.ips) > 0 {
+			links = append(links, link)
+		}
 	}
-	if len(ips) == 0 {
-		return nil, fmt.Errorf("no usable LAN IPv4 address found")
+	if len(links) == 0 {
+		return nil, fmt.Errorf("no multicast-capable LAN IPv4 interface found")
 	}
-	return ips, nil
+	return links, nil
 }
 
 func isVirtual(name string) bool {
@@ -197,18 +183,15 @@ func isVirtual(name string) bool {
 	return false
 }
 
-func sameIPs(a, b []net.IP) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	seen := map[string]bool{}
-	for _, ip := range a {
-		seen[ip.String()] = true
-	}
-	for _, ip := range b {
-		if !seen[ip.String()] {
-			return false
+func sameLinks(a, b []lanInterface) bool {
+	snapshot := func(links []lanInterface) map[string]bool {
+		keys := make(map[string]bool)
+		for _, link := range links {
+			for _, network := range link.networks {
+				keys[fmt.Sprintf("%d/%s/%t/%s", link.iface.Index, link.iface.Name, link.ipv6, network)] = true
+			}
 		}
+		return keys
 	}
-	return true
+	return maps.Equal(snapshot(a), snapshot(b))
 }

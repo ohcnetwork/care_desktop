@@ -74,6 +74,11 @@ func (a *App) emit(event string, data ...any) {
 func (a *App) startAdvertise() {
 	a.advMu.Lock()
 	defer a.advMu.Unlock()
+	select {
+	case <-a.advStop:
+		return
+	default:
+	}
 	if a.adv != nil {
 		return
 	}
@@ -82,9 +87,9 @@ func (a *App) startAdvertise() {
 	if name == "" || cfg.Removing {
 		return
 	}
-	adv, err := mdns.Advertise(name)
+	adv, err := mdns.Advertise(name, a.logln)
 	if err != nil {
-		a.logln("mDNS: couldn't advertise " + name + ".local (" + err.Error() + ")")
+		a.logln("mDNS: couldn't advertise " + mdns.Label(name) + ".local (" + err.Error() + ")")
 		return
 	}
 	a.adv = adv
@@ -120,14 +125,20 @@ func (a *App) watchAdvertise() {
 				a.startAdvertise()
 				continue
 			}
-			if adv.IPsChanged() {
+			changed, err := adv.IPsChanged()
+			if err != nil {
+				a.logln("mDNS: couldn't inspect the LAN (" + err.Error() + ")")
+			}
+			if changed || err != nil {
 				misses = 0
 				a.restartAdvertise()
 				continue
 			}
-			if adv.Resolves() {
+			if err := adv.Resolves(); err == nil {
 				misses = 0
 				continue
+			} else {
+				a.logln("mDNS: hostname probe failed (" + err.Error() + ")")
 			}
 			misses++
 			if misses >= 2 {

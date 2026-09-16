@@ -52,7 +52,7 @@ The backend starts name advertising, but the desktop state store makes the norma
 
 ### Advertiser lifetime
 
-`App` owns the mDNS advertiser. Its watcher wakes every 30 seconds, restarts advertising when LAN addresses change, and retries after two consecutive response-check failures. It can also recreate an absent advertiser. No name is advertised when the name is empty or removal is in progress.
+`App` owns the mDNS advertiser. Its watcher wakes every 30 seconds, restarts advertising when LAN interfaces/addresses change or enumeration fails, and retries after two consecutive direct-hostname probe failures. Probe and network errors are logged. It can also recreate an absent advertiser. No name is advertised when the name is empty, removal is in progress, or application shutdown has begun.
 
 `shutdown()` closes the watcher's stop channel and stops the advertiser. Stopping the desktop's advertisement is distinct from stopping Docker containers.
 

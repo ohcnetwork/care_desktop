@@ -30,7 +30,9 @@ The direct Go dependencies have narrow jobs:
 | --- | --- |
 | `github.com/wailsapp/wails/v2` | Native application runtime, webview binding, events and dialogs at the application boundary. |
 | `github.com/compose-spec/compose-go/v2` | Dotenv parsing. Stack control still goes through the Docker Compose executable, not a programmatic Compose service API. |
-| `github.com/hashicorp/mdns` | The local mDNS responder infrastructure. |
+| `github.com/hashicorp/mdns` | DNS-SD record construction; CARE owns the interface-bound responder transport. |
+| `github.com/miekg/dns` | DNS packet encoding/decoding for the responder and direct hostname probes. |
+| `golang.org/x/net` | Interface-bound IPv4/IPv6 multicast sockets. |
 | `github.com/zalando/go-keyring` | Platform credential-store access for the saved backup password. |
 | `golang.org/x/crypto` | Bcrypt hashing and comparison for desktop administrator authorization. |
 | `golang.org/x/sys` | Low-level platform operations, including Windows durable file replacement. |
@@ -52,12 +54,15 @@ From the repository root:
 ```sh
 cd app/frontend
 npm ci
-npm run build
 cd ..
 wails dev
 ```
 
-The explicit frontend build prepares both embedded trees before development starts. [`wails.json`](../app/wails.json) configures `npm run dev` as the development watcher, which starts Vite; that watcher alone is not the deployment-staging script.
+[`wails.json`](../app/wails.json) runs `stage-install.mjs` through its cross-platform
+pre-build hook before generating bindings or compiling Go, including during
+`wails dev` and development rebuilds. Missing or deleted `app/install/` is
+recreated automatically, including `.env`; no manual frontend rebuild is needed.
+The `npm run dev` watcher starts Vite separately.
 
 For a normal native production build, run from the repository root:
 
@@ -105,6 +110,11 @@ flowchart TD
 ### `stage-install.mjs`
 
 The script enumerates `deployments/`, including `.env`, rather than keeping a second manual file list. It skips `.DS_Store`, `Thumbs.db`, and `.gitkeep`, clears previous staging entries while retaining the tracked placeholder, and copies the kit recursively.
+
+Wails runs pre-build hooks from `app/build/bin/`, so its hook invokes
+`node ../../frontend/scripts/stage-install.mjs`. The script resolves source and
+destination paths relative to itself, not the working directory. The standalone
+`npm run build` command also stages the kit.
 
 This is **build staging**, not runtime installation. Clearing `app/install/` does not remove the user's installed directory.
 

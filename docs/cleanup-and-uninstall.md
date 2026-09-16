@@ -7,6 +7,10 @@ Stopping a clinic and uninstalling it are fundamentally different operations.
 volumes. Stop does not.** Keeping the backup directory is not the same as
 keeping the running clinic's data volumes.
 
+For a former server now used as a browser client, see
+[client recovery](client-recovery.md): it distinguishes a hosts-only repair from
+the destructive standalone cleanup scripts used when the app is unavailable.
+
 This guide explains the current Wails backend and engine cleanup paths. It is
 not a collection of destructive terminal recipes. Resource and command names
 are included to make source code and logs understandable, not to encourage
