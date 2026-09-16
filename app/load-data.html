@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Load demo data</title>
+<style>
+  :root {
+    --green:#0d9f6e; --green-600:#057a55; --green-ink:#046c4e;
+    --green-bg:#def7ec; --green-line:#84e1bc;
+    --fg:#111827; --muted:#6b7280; --dim:#9ca3af; --line:#e5e7eb;
+    --mono:"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#eceff1; color:var(--fg); line-height:1.55;
+         font-family:"IBM Plex Sans", Figtree, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         -webkit-font-smoothing:antialiased; }
+  header { width:100%; background:#fff; border-bottom:1px solid var(--line); }
+  header .inner { max-width:560px; margin:0 auto; padding:15px 22px; display:flex; align-items:center; gap:13px; }
+  header img { height:30px; width:auto; display:block; }
+  header .tag { font-size:13px; font-weight:600; color:var(--muted);
+                border-left:1px solid var(--line); padding-left:13px; }
+  .wrap { width:100%; max-width:560px; margin:0 auto; padding:34px 22px 60px; }
+  h1 { margin:0; font-size:23px; font-weight:700; letter-spacing:-.015em; }
+  .lede { margin:8px 0 0; font-size:14.5px; color:var(--muted); }
+  .panel { margin-top:22px; background:#fff; border:1px solid var(--line); border-radius:16px;
+           padding:22px; box-shadow:0 1px 2px rgba(17,24,39,.04); }
+  label { display:block; font-size:12px; font-weight:700; text-transform:uppercase;
+          letter-spacing:.06em; color:var(--dim); margin-bottom:6px; }
+  input { width:100%; font:inherit; font-size:15px; padding:11px 13px; border-radius:10px;
+          border:1px solid var(--line); background:#fff; color:var(--fg); }
+  input:focus { outline:none; border-color:var(--green); box-shadow:0 0 0 3px rgba(13,159,110,.15); }
+  input:disabled { background:#f9fafb; color:var(--muted); font-family:var(--mono); }
+  .field + .field { margin-top:16px; }
+  button { margin-top:20px; width:100%; font:inherit; font-size:15px; font-weight:600;
+           color:#fff; background:var(--green); border:none; border-radius:12px; padding:13px 22px;
+           cursor:pointer; box-shadow:0 10px 22px -10px rgba(13,159,110,.7); }
+  button:hover:not(:disabled) { background:var(--green-600); }
+  button:disabled { background:var(--dim); cursor:progress; box-shadow:none; }
+  .note { margin:0 0 18px; font-size:13.5px; line-height:1.6; color:var(--green-ink);
+          background:var(--green-bg); border:1px solid var(--green-line);
+          border-radius:10px; padding:12px 14px; }
+  .msg { margin-top:16px; font-size:13.5px; border-radius:10px; padding:11px 13px; white-space:pre-wrap; }
+  .msg.bad { color:#9b1c1c; background:#fde8e8; border:1px solid #f8b4b4; }
+  .msg.good { color:var(--green-ink); background:var(--green-bg); border:1px solid var(--green-line); }
+  .hidden { display:none; }
+  a { color:var(--green-ink); }
+</style>
+</head>
+<body>
+<header><div class="inner">
+  <img src="/setup/care_logo.svg" alt="CARE" onerror="this.style.display='none'">
+  <span class="tag">Demo data</span>
+</div></header>
+
+<div class="wrap">
+  <h1>Load demo data</h1>
+  <p class="lede">Fills this clinic with CARE's sample facility, staff and patients so you can try it out.</p>
+
+  <form class="panel" id="signin">
+    <div class="field">
+      <label for="username">Username</label>
+      <input id="username" value="admin" disabled>
+    </div>
+    <div class="field">
+      <label for="password">Admin password</label>
+      <input id="password" type="password" autocomplete="current-password" required
+             placeholder="The password you chose during setup">
+    </div>
+    <button id="signin-btn" type="submit">Continue</button>
+    <div id="signin-msg" class="msg bad hidden"></div>
+  </form>
+
+  <div class="panel hidden" id="loader">
+    <p class="note">This adds sample records only. It does not remove anything already in this
+      clinic, and it can take a few minutes. Keep this page open.</p>
+    <button id="load-btn" type="button">Load demo data</button>
+    <div id="load-msg" class="msg hidden"></div>
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let password = "";
+
+  function show(el, text, good) {
+    el.textContent = text;
+    el.className = "msg " + (good ? "good" : "bad");
+  }
+
+  async function post(path, body) {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    let data = {};
+    try { data = await res.json(); } catch (e) { /* non-JSON error page */ }
+    if (!res.ok || !data.ok) throw new Error(data.error || "The clinic could not be reached.");
+  }
+
+  $("signin").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const entered = $("password").value;
+    $("signin-btn").disabled = true;
+    $("signin-msg").classList.add("hidden");
+    try {
+      await post("/load-data/verify", { password: entered });
+      password = entered;
+      $("signin").classList.add("hidden");
+      $("loader").classList.remove("hidden");
+      $("load-btn").focus();
+    } catch (err) {
+      show($("signin-msg"), err.message, false);
+    } finally {
+      $("signin-btn").disabled = false;
+    }
+  });
+
+  $("load-btn").addEventListener("click", async () => {
+    $("load-btn").disabled = true;
+    $("load-btn").textContent = "Loading demo data...";
+    show($("load-msg"), "Working. This can take a few minutes.", true);
+    try {
+      await post("/load-data/run", { password });
+      show($("load-msg"), "Demo data loaded. Open the clinic and sign in as admin.", true);
+      $("load-btn").textContent = "Done";
+      $("load-btn").style.cursor = "default";
+    } catch (err) {
+      show($("load-msg"), err.message, false);
+      $("load-btn").disabled = false;
+      $("load-btn").textContent = "Try again";
+    }
+  });
+</script>
+</body>
+</html>

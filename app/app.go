@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"sync"
 	"time"
 
@@ -27,6 +28,8 @@ type App struct {
 
 	jobMu   sync.RWMutex
 	closing bool
+
+	loadDataSrv *http.Server
 
 	advMu   sync.Mutex
 	adv     *mdns.Advertiser

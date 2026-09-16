@@ -21,6 +21,7 @@ func (a *App) startup(ctx context.Context) {
 	a.advStop = make(chan struct{})
 	a.startAdvertise()
 	go a.watchAdvertise()
+	a.startLoadDataServer()
 	go func() {
 		a.log.Writef("docker: %s", prereq.DockerCheck(a.engine().Runner()).Message)
 	}()
@@ -59,6 +60,7 @@ func (a *App) refreshInstallDir() {
 }
 
 func (a *App) shutdown(context.Context) {
+	a.stopLoadDataServer()
 	if a.advStop != nil {
 		close(a.advStop)
 	}

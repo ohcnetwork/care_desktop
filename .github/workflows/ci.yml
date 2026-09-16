@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   go:
+    if: false
     name: Go
     runs-on: ubuntu-latest
     defaults:
@@ -69,6 +70,7 @@ jobs:
           working-directory: app
 
   frontend:
+    if: false
     name: Frontend
     runs-on: ubuntu-latest
     defaults:

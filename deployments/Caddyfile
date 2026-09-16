@@ -63,6 +63,14 @@
 		reverse_proxy backend:9000
 	}
 
+	# The demo-data page is served by CARE Desktop on the host, not by a
+	# container: loading fixtures means running a command in the backend
+	# container, which only the host app can do. Every action behind it asks
+	# for the admin password.
+	handle /load-data* {
+		reverse_proxy host.docker.internal:8765
+	}
+
 	@buckets path /{$FILE_UPLOAD_BUCKET:patient-bucket}/* /{$FACILITY_S3_BUCKET:facility-bucket}/*
 	handle @buckets {
 		reverse_proxy minio:9000

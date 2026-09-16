@@ -89,6 +89,10 @@ services:
   caddy:
     image: ${CADDY_WAF_IMAGE:?CADDY_WAF_IMAGE not set - .env is missing from this directory}
     restart: unless-stopped
+    # Docker Desktop resolves host.docker.internal on its own; Linux needs this
+    # line. Caddy uses it to reach CARE Desktop's /load-data page on the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       CORAZA_MODE: ${CORAZA_MODE:-Off}
       FILE_UPLOAD_BUCKET: ${FILE_UPLOAD_BUCKET:-patient-bucket}

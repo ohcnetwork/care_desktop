@@ -109,6 +109,7 @@ remaining teardown files and the residue package.
 | [`status.go`](../app/internal/clinic/status.go) | Service/state text from Compose, distinct from HTTP health. |
 | [`stop.go`](../app/internal/clinic/stop.go) | Data-preserving stop and restart implemented as Stop followed by Start. |
 | [`rebuild.go`](../app/internal/clinic/rebuild.go) | Explicit backend and frontend rebuild-and-restart paths. |
+| [`demodata.go`](../app/internal/clinic/demodata.go) | Runs CARE's bundled `load_fixtures` inside the backend container, installing the dev-only Faker package first and restoring the admin password afterwards. |
 | [`compose/build.go`](../app/internal/compose/build.go) | Source checkout cache, image fingerprints, four image builds, local freshness checks, and post-rebuild dangling-image cleanup. |
 | [`compose/build_test.go`](../app/internal/compose/build_test.go) | Build-input invalidation, local Git fixtures, source-stamp failures, image inspection failures, consumed build inputs, and empty-context cleanup. |
 | [`compose/deployment_test.go`](../app/internal/compose/deployment_test.go) | Silo bootstrap arguments, configurable Caddy bucket routes, and Compose storage-environment wiring. |

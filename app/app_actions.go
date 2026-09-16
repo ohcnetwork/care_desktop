@@ -170,15 +170,15 @@ func (a *App) notifyInstalled(mdnsName string) {
 	if mdnsName == "" {
 		mdnsName = "care.local"
 	}
-	url := "https://" + mdnsName + "/"
+	url := "https://" + mdnsName + "/load-data"
 	sel, _ := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
 		Type:          wruntime.InfoDialog,
 		Title:         "CARE Desktop installed",
-		Message:       "Staff can open the clinic at " + url,
-		Buttons:       []string{"Open CARE", "Close"},
-		DefaultButton: "Open CARE",
+		Message:       "Your clinic is empty. Add CARE's sample data to try it out at " + url,
+		Buttons:       []string{"Load demo data", "Close"},
+		DefaultButton: "Load demo data",
 	})
-	if sel == "Open CARE" {
+	if sel == "Load demo data" {
 		wruntime.BrowserOpenURL(a.ctx, url)
 	}
 }

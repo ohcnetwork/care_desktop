@@ -70,6 +70,8 @@ All of these files belong to Go `package main`, even though they are organized b
 | [`app_uninstall.go`](../app/app_uninstall.go) | Authorized normal uninstall, removal checkpoint, post-cleanup scan, local-state cleanup and event. | [Cleanup](cleanup-and-uninstall.md). |
 | [`app_residue.go`](../app/app_residue.go) | Residue scanning, recovery of old install location, confirmed purge, preserving the selected first-run name. | [Cleanup](cleanup-and-uninstall.md). |
 | [`password.go`](../app/password.go) | Shared setup password policy. | [Wails application](wails-application.md). |
+| [`load_data.go`](../app/load_data.go) | Host HTTP server behind Caddy's `/load-data` route: admin-password gate and the demo-data trigger. | [Clinic lifecycle](clinic-lifecycle.md). |
+| [`load-data.html`](../app/load-data.html) | The demo-data page: admin sign-in, then one button. Embedded into the binary. | [Clinic lifecycle](clinic-lifecycle.md). |
 | [`app_env_test.go`](../app/app_env_test.go) | Synthetic-app regressions for concurrent settings reads, guards, conflicting writes, and saved retention values. | [Configuration](configuration-and-settings.md). |
 
 The complete method signatures and event/result shapes are in the [Wails API reference](wails-application.md#complete-bound-method-reference). Do not infer an exported API just from a filename: Wails binds exported `App` methods, not every function in this package.
