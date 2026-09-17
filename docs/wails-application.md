@@ -184,6 +184,21 @@ The password policy in [`password.go`](../app/password.go) is 8 through 20 Unico
 | `rebuild-frontend` | `RebuildFrontend()` | Stable clinic and administrator password required. |
 | `backup-now` | `BackupNow()` | Stable clinic required. |
 
+Every action except `stop` then passes `ensureDockerReady()`. A stopped container
+engine would otherwise surface inside the engine as an unexplained subprocess
+failure, such as `inspect local images: exit status 1` from the image freshness
+check. The gate reuses `DockerPlan()`, so it names whichever engine the platform
+uses rather than assuming one:
+
+| Plan action | Behavior |
+| --- | --- |
+| `""` | Docker answers; the action proceeds. |
+| `open` | Ask the operator for confirmation, then `OpenDocker()`, which launches the engine and waits up to three minutes. Declining returns the readiness message as the error. |
+| anything else | Return the readiness message and point at the requirements check; the engine is missing, not merely stopped. |
+
+`stop` is excluded deliberately: reporting that an unreachable clinic is not
+running does not require starting a container engine first.
+
 The API does not require the desktop admin password for every operational control. In particular, ordinary start/stop/restart, backup-now, and backup-directory changes have their lifecycle checks but not `requireAdmin`.
 
 ### Environment, plugins, and backups

@@ -11,6 +11,7 @@ import (
 	"github.com/ohcnetwork/care_desktop/app/internal/backup"
 	"github.com/ohcnetwork/care_desktop/app/internal/clinic"
 	"github.com/ohcnetwork/care_desktop/app/internal/health"
+	"github.com/ohcnetwork/care_desktop/app/internal/prereq"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/mdns"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -203,8 +204,35 @@ func (a *App) ClinicAction(action, adminPassword string) error {
 				return err
 			}
 		}
+		if action != "stop" {
+			if err := a.ensureDockerReady(); err != nil {
+				return err
+			}
+		}
 		return actionFunc(a.engine(), action)()
 	}, false, action)
+}
+
+// ensureDockerReady stops a stopped container engine from reaching the clinic
+// operations as an unexplained subprocess failure such as "inspect local
+// images: exit status 1". The plan decides what can be offered, so this names
+// whichever engine the platform actually uses. Stop is excluded: it needs no
+// engine to report that a clinic which cannot be reached is not running.
+func (a *App) ensureDockerReady() error {
+	p := a.provisioner()
+	plan := p.DockerPlan()
+	if plan.Action == prereq.ActionNone {
+		return nil
+	}
+	status := a.DockerStatus()
+	if plan.Action != prereq.ActionOpen {
+		return fmt.Errorf("%s CARE needs it to run the clinic; set it up from the requirements check", status.Message)
+	}
+	if !a.confirmDialog(plan.Label+"?", status.Message+"\n\nCARE needs it to run the clinic. "+
+		"Start it now and wait for it to be ready?") {
+		return errors.New(status.Message)
+	}
+	return p.OpenDocker()
 }
 
 func actionFunc(e *clinic.Clinic, action string) func() error {

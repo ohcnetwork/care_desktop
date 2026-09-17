@@ -72,16 +72,18 @@ func (a *App) engine() *clinic.Clinic {
 		BackupDir:  cfg.BackupDir,
 		Pins:       a.pins,
 		Log:        a.logln,
-		Confirm: func(title, message string) bool {
-			sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
-				Type:          wruntime.QuestionDialog,
-				Title:         title,
-				Message:       message,
-				Buttons:       []string{"Yes", "No"},
-				DefaultButton: "Yes",
-				CancelButton:  "No",
-			})
-			return err == nil && sel == "Yes"
-		},
+		Confirm:    a.confirmDialog,
 	}
+}
+
+func (a *App) confirmDialog(title, message string) bool {
+	sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
+		Type:          wruntime.QuestionDialog,
+		Title:         title,
+		Message:       message,
+		Buttons:       []string{"Yes", "No"},
+		DefaultButton: "Yes",
+		CancelButton:  "No",
+	})
+	return err == nil && sel == "Yes"
 }
