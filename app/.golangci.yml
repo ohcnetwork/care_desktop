@@ -13,9 +13,9 @@ linters:
 
   settings:
     staticcheck:
-      # ST1005: error strings are shown verbatim in the UI, so they are
-      # capitalised and punctuated on purpose.
-      checks: ["all", "-ST1005"]
+      # Internal application packages do not need public API documentation.
+      # UI-facing errors deliberately use sentence capitalization.
+      checks: ["all", "-ST1000", "-ST1005", "-ST1020", "-ST1021", "-ST1022"]
 
 formatters:
   enable:

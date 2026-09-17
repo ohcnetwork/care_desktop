@@ -17,8 +17,6 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 )
 
-var version = "dev"
-
 var appLog *applog.Logger
 
 //go:embed all:frontend/dist

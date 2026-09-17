@@ -6,7 +6,7 @@ storage and nightly encrypted backups — and staff open it from any phone or la
 on the clinic Wi-Fi at `https://<clinic>.local`. No cloud account, and no internet
 needed after the first install.
 
-**Download:** [latest release](https://github.com/ohcnetwork/care_desktop/releases/latest)
+**Download:** [releases](https://github.com/ohcnetwork/care_desktop/releases)
 — `.dmg` for macOS (Apple Silicon and Intel), `-setup.exe` for Windows 64-bit.
 
 **Previously hosted CARE on this computer, but now cannot open another clinic?**
@@ -34,11 +34,15 @@ built on the clinic's machine from the upstream commits pinned in `deployments/.
 |---|---|
 | `app/` | The desktop app: Go engine in `internal/`, Wails bindings in `*.go`, React UI in `frontend/` |
 | `deployments/` | The kit installed on the clinic computer: compose file, Caddyfile, env files, backup script, device-setup page |
-| `.github/workflows/` | CI, and the release that builds the installers when a `vX.Y.Z` tag is pushed |
+| `.github/workflows/` | CI and manually triggered releases using the version and pins in `deployments/.env` |
 
 **Backend documentation:** [Start with `docs/README.md`](docs/README.md) for the
 architecture, file map, Wails API, configuration, lifecycle, backups, native
 integrations and release workflow.
 
-Build with `cd app && wails build` (needs Go, Node 22 and the Wails CLI). MIT
+**Releases:** [Preparing and publishing a version](docs/releases.md), including
+manual Actions runs, automatic tags, and existing macOS signing configuration.
+
+Build with `cd app && node frontend/scripts/stage-install.mjs && wails build`
+(needs Go, Node 22 and the Wails CLI). MIT
 licensed — see [LICENSE](LICENSE). Part of the [Open Healthcare Network](https://ohc.network).

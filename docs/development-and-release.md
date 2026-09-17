@@ -22,7 +22,7 @@ The control panel's "rebuild frontend" action builds the **CARE web application*
 
 The Go module is [`app/go.mod`](../app/go.mod), not the repository root. It currently declares Go 1.26 and Wails v2.12.0. The desktop frontend uses npm and its checked-in [`package-lock.json`](../app/frontend/package-lock.json).
 
-Use Node 22 for local development, matching the root README and frontend CI. The release workflow currently selects Node 20; that is an existing workflow difference, not an instruction to treat both jobs as identical environments.
+Use Node 22 for local development, matching CI and release packaging.
 
 The direct Go dependencies have narrow jobs:
 
@@ -45,7 +45,9 @@ For a CLI version matching the current Go dependency:
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 ```
 
-Use the version in `go.mod` when that dependency changes. The checked-in release workflow currently installs the Wails CLI with `@latest`; the runtime library version is still controlled by the module.
+Use the version in `go.mod` when that dependency changes. Both CI and release
+builds resolve the Wails CLI version from that module instead of installing
+`@latest`.
 
 ## Prepare a fresh checkout
 
@@ -68,6 +70,7 @@ For a normal native production build, run from the repository root:
 
 ```sh
 cd app
+node frontend/scripts/stage-install.mjs
 wails build
 ```
 
@@ -109,7 +112,12 @@ flowchart TD
 
 ### `stage-install.mjs`
 
-The script enumerates `deployments/`, including `.env`, rather than keeping a second manual file list. It skips `.DS_Store`, `Thumbs.db`, and `.gitkeep`, clears previous staging entries while retaining the tracked placeholder, and copies the kit recursively.
+The script derives `app/wails.json`'s numeric installer version from
+`CARE_DESKTOP_VERSION` in `deployments/.env` (stripping `-dev` for local builds).
+Run it before invoking Wails for production builds, as Wails reads its metadata
+before its pre-build hook. CI does this explicitly.
+
+It then enumerates `deployments/`, including `.env`, rather than keeping a second manual file list. It skips `.DS_Store`, `Thumbs.db`, and `.gitkeep`, clears previous staging entries while retaining the tracked placeholder, and copies the kit recursively.
 
 Wails runs pre-build hooks from `app/build/bin/`, so its hook invokes
 `node ../../frontend/scripts/stage-install.mjs`. The script resolves source and
@@ -163,18 +171,22 @@ These checks do not stage the kit or build a release.
 
 The version format is `X.Y.Z` or `X.Y.Z-dev`. A non-development version requires both CARE refs to be full 40-character hexadecimal commit IDs. A `-dev` version permits moving refs for intentional development.
 
-At runtime, `GetState().version` comes from these embedded pins. The `version = "dev"` variable declared in `main.go` is not the active source of the displayed release identity.
+At runtime, `GetState().version` comes from these embedded pins, not a separate
+linker-injected version variable.
 
-Release packaging requires agreement among:
+Manual releases derive their identity from the selected commit:
 
 | Source | Expected value |
 | --- | --- |
 | `CARE_DESKTOP_VERSION` | Numeric `X.Y.Z`, without `-dev`. |
-| `app/wails.json` -> `info.productVersion` | The same `X.Y.Z`. |
-| Pushed tag, when present | `vX.Y.Z`. |
+| `app/wails.json` -> `info.productVersion` | Derived as `X.Y.Z` before building. |
+| Automatically created tag | `vX.Y.Z`, pointing to the workflow's source commit. |
 | CARE backend and frontend refs | Full commit hashes. |
 
-The workflow rejects missing/duplicate manifest identity values and mismatches before building installers. Untagged manual packaging still needs a coherent numeric release identity, but publishes workflow artifacts instead of attaching to a tag.
+The workflow rejects missing/duplicate manifest identity values and an existing
+release version before building installers. Maintainers do not need to edit
+Wails metadata or create tags. See the [release runbook](releases.md) for preparing,
+building, reviewing, publishing, and recovering a release.
 
 ### Reproducibility boundaries
 
@@ -186,23 +198,59 @@ The current storage image pin points to Silo while the key remains `MINIO_IMAGE`
 
 ## CI
 
-[`ci.yml`](../.github/workflows/ci.yml) has independent Go and frontend jobs.
+[`ci.yml`](../.github/workflows/ci.yml) runs on pull requests, pushes to `main`,
+merge-queue groups, manual dispatch, and reusable calls from the release workflow.
+A newer run cancels the previous run
+for the same PR/ref. There are no path filters that could leave a required check
+missing, and a PR branch push does not trigger a duplicate push workflow.
 
 | Job/check | What it does |
 | --- | --- |
-| Go setup | Reads the required Go version from `app/go.mod`. |
-| Host build | Builds `./...` from `app/` without inventing missing embed placeholders. |
-| Wails boundary | Fails if `internal/` contains a Wails import/reference matching the check. |
-| Cross-compile | Compiles Windows/amd64 and Darwin/arm64 in addition to the host. |
-| Vet | Runs Go vet. |
-| Tests | Runs `go test -race ./...`. |
-| Formatting | Rejects files reported by `gofmt -l`. |
-| Lint | Uses the checked-in golangci-lint configuration. |
-| Frontend | Uses Node 22, `npm ci`, and the full frontend build script. |
+| Lint | Formatting, the Wails/internal boundary, pinned Actionlint workflow validation, and golangci-lint v2.13.2 through its v9 action. |
+| Go tests | Clean-checkout `go build ./...` and the full race-enabled test suite, including the release identity/CI gate contracts. Node, PostgreSQL fixture tools, OpenSSL, Python, Git, and Compose must be available rather than silently skipping their tests. |
+| Frontend | Node 22, `npm ci`, binding checks, TypeScript, and the Vite production build. Uploads the built frontend for native builds. |
+| Native builds | After the first three jobs pass: actual Wails macOS universal and Windows/amd64 builds for CARE Desktop. Windows must produce an NSIS installer. |
+| CI | Stable aggregate check; fails if any required job failed, was cancelled, or was skipped. Configure this check in branch protection. |
 
-[`app/.golangci.yml`](../app/.golangci.yml) enables focused correctness/resource/style checks including `errcheck`, `govet`, `ineffassign`, `staticcheck`, `unused`, `bodyclose`, and `misspell`. Its Staticcheck configuration exempts ST1005 because errors are shown directly to operators with sentence-style capitalization.
+Go comes from `app/go.mod`, and module writes are disallowed. Native jobs reuse
+the frontend artifact rather than running npm for each platform. They use the
+Wails CLI version from `go.mod`, production build flags, and real platform
+dependencies. The Desktop pre-build hook still
+stages the deployment kit before embedding it.
 
-Compilation on an OS target does not execute native trust, firewall, dialog, or installer behavior on that OS.
+[`app/.golangci.yml`](../app/.golangci.yml) keeps `errcheck`, `govet`,
+`ineffassign`, `staticcheck`, `unused`, `bodyclose`, and `misspell`. Staticcheck
+exempts public API documentation rules for these internal application packages
+and ST1005 for operator-facing sentence-style errors. Correctness checks are
+not disabled to make CI pass.
+
+CI has read-only repository permissions, no signing secrets, explicit timeouts,
+and seven-day **unsigned** build artifacts. macOS bundles are zipped with
+`ditto` to retain executable bits and symlinks. These are maintainer preview
+builds, not clinic-ready signed releases. The intermediate frontend artifact is
+kept for one day.
+
+The Go suite runs on Linux. Native builds prove compilation and packaging on the
+other platforms, not successful administrator prompts, certificate installation,
+browser trust, or real clinic Wi-Fi behavior. Network mDNS tests remain opt-in.
+PostgreSQL tests create an isolated fixture; CI does not start the clinic's
+Compose stack, build upstream CARE images, or contact a production database.
+
+Local equivalents for the portable checks:
+
+```sh
+actionlint -shellcheck="" -pyflakes=""
+cd app
+golangci-lint run --timeout=5m
+go test -mod=readonly -race -count=1 -timeout=15m ./...
+cd frontend
+npm ci
+npm run build
+```
+
+Use Actionlint v1.7.12 and golangci-lint v2.13.2, matching CI. Actionlint checks
+workflow syntax and expressions; it does not invoke ShellCheck or Pyflakes.
+Database/Compose tests need the same local prerequisites as the Go job.
 
 ## Regression-test organization
 
@@ -231,30 +279,28 @@ For another change, select the package/test covering that behavior first. The fu
 
 ## Packaging and publication
 
-The release workflow is triggered by `v*` tags or `workflow_dispatch`. Its current matrix builds:
+The release workflow is **manual-only** and reuses the native artifacts built by
+CI in the same workflow run:
 
 | Platform | Wails target | Artifact |
 | --- | --- | --- |
 | macOS | `darwin/universal` | `CARE-Desktop-X.Y.Z-macos.dmg`. |
 | Windows | `windows/amd64` with `-nsis` | `CARE-Desktop-X.Y.Z-windows-amd64-setup.exe`. |
 
-Linux has backend/native helper implementations and compile coverage, but this workflow does not currently publish a Linux installer.
+Linux has backend/native helper implementations but no published desktop installer.
 
-Before building, the workflow stages the kit and confirms critical files exist. Wails' frontend build hook also stages from source. On Windows, the workflow installs NSIS if needed and explicitly rejects a build that did not produce an installer.
+The workflow packages a DMG and the Windows NSIS installer, adds the exact
+configuration, build identity, and checksums, creates `vX.Y.Z` at the selected
+source commit, and creates a **draft prerelease**. Published assets are never
+replaced. Only the draft job has write permission.
 
-### macOS signing
+macOS preserves the existing optional Developer ID signing/notarization flow and
+secret names; without credentials it retains Wails' ad-hoc signature. Windows
+installers are unsigned. The release manifest records each platform's actual
+status; these remain preview releases.
 
-Signing is optional. Without a signing certificate, packaging uses ad-hoc signing; this is not equivalent to a trusted Developer ID/notarized release.
-
-With signing configured, the workflow imports the certificate into a temporary keychain, signs the application with the hardened runtime, submits it for notarization, polls and verifies the final status, staples the ticket, creates and signs the DMG, notarizes/staples it, and validates the final artifacts. It removes the signing keychain in an always-run cleanup step.
-
-The relevant secret names are `MACOS_CERT_P12`, `MACOS_CERT_PASSWORD`, `MACOS_SIGN_IDENTITY`, `APPSTORE_PRIVATE_KEY`, `APPSTORE_KEY_ID`, and `APPSTORE_ISSUER_ID`. Their values belong in the release environment's secret store, not in this repository or documentation.
-
-The checked-in workflow does not have a corresponding Windows code-signing step.
-
-### Release versus manual artifacts
-
-Tagged runs attach the installers to a **draft** GitHub Release. Untagged manual runs upload workflow artifacts and fail if no files were produced. Packaging a build is not the same as publishing a final non-draft release.
+Follow [Releasing CARE Desktop](releases.md) for the complete maintainer procedure
+and safe retry rules.
 
 ## Maintainer change map
 
@@ -267,6 +313,6 @@ Tagged runs attach the installers to a **draft** GitHub Release. Untagged manual
 | Restore sequence | Journal/state recovery, staging cleanup, worker callbacks, interruption cases, restore diagrams. |
 | Native resource identity | Creation, inspection, cleanup, residue classification, platform-specific tests. |
 | Kit file | `deployments/` source, readers/mounts, staging/runtime preservation assumptions, file map. |
-| Release version | `deployments/.env`, `wails.json`, tag identity, release documentation if behavior changes. |
+| Release version | `deployments/.env`; build metadata and tags are derived. Update release documentation if behavior changes. |
 
 Keep code and diagrams synchronized. A documentation-only change does not require rebuilding CARE Desktop.

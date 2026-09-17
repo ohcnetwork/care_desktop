@@ -17,6 +17,7 @@ This documentation explains the current implementation, from operating-system pr
 | [Cleanup and uninstall](cleanup-and-uninstall.md) | What each removal operation deletes or preserves, ownership checks, and partial-cleanup recovery. |
 | [Native integrations](native-integrations.md) | Process execution, file persistence, logs, prerequisites, elevation, TLS trust, mDNS, and OS differences. |
 | [Development and release](development-and-release.md) | Local builds, embedded assets, release pins, CI, packaging, and changing the backend safely. |
+| [Releasing CARE Desktop](releases.md) | Preparing a version, manually running a release, reviewing the draft, signing limitations, and retrying safely. |
 
 For a first reading, follow the table from top to bottom. If you are fixing one behavior, use the task map below instead.
 
@@ -34,6 +35,7 @@ For a first reading, follow the table from top to bottom. If you are fixing one 
 | "The app works here but not on another device." | [Native integrations](native-integrations.md). |
 | "This client previously hosted CARE and now cannot reach another server." | [Client recovery and earlier-install cleanup](client-recovery.md). |
 | "How do I reproduce the installed version?" | [Release identity](development-and-release.md#release-identity-and-pins). |
+| "How do I release a new version?" | [Release runbook](releases.md). |
 | "Which file should I change?" | [Repository map](repository-map.md). |
 
 ## Vocabulary

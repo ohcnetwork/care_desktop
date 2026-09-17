@@ -76,7 +76,7 @@ func (s *Store) GenBackupKeypair(passphrase string) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(stage)
+	defer func() { _ = os.RemoveAll(stage) }()
 	keyArgs := "-newkey rsa:4096 -keyout /keys/" + s.encKeyName() + " -passout env:PASS"
 	if hasKey {
 		key, err := s.readKey()

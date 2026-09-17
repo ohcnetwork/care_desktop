@@ -179,7 +179,7 @@ func (pr *Provisioner) installDockerDarwin() error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(dmg)
+	defer func() { _ = os.Remove(dmg) }()
 
 	const mount = "/Volumes/Docker"
 	pr.logln("Installing Docker Desktop. macOS will ask for your password...")
@@ -211,7 +211,7 @@ func (pr *Provisioner) installDockerWindows() error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(exe)
+	defer func() { _ = os.Remove(exe) }()
 	pr.logln("Running the Docker Desktop installer. Windows will ask for permission...")
 	if err := pr.runElevated(exe, "install", "--quiet", "--accept-license", "--backend=wsl-2"); err != nil {
 		return fmt.Errorf("could not install Docker Desktop: %w", err)
@@ -450,7 +450,7 @@ func (pr *Provisioner) download(url, name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("could not download %s: %w", name, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("could not download %s: the server said %s", name, resp.Status)
 	}
@@ -469,7 +469,7 @@ func (pr *Provisioner) download(url, name string) (string, error) {
 	})
 	closeErr := f.Close()
 	if err != nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("the download of %s stopped making progress for %s - "+
 				"check this computer's internet connection and try again", name, downloadStallTimeout)
@@ -477,7 +477,7 @@ func (pr *Provisioner) download(url, name string) (string, error) {
 		return "", fmt.Errorf("could not download %s: %w", name, err)
 	}
 	if closeErr != nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 		return "", closeErr
 	}
 	pr.logln("Downloaded " + name + ".")

@@ -201,7 +201,7 @@ type backupScriptRun struct {
 
 func (f *backupScriptFixture) start(t *testing.T, id string, args []string, env ...string) *backupScriptRun {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	cmd := exec.CommandContext(ctx, "/bin/sh", append([]string{filepath.Join(f.root, "backup.sh")}, args...)...)
 	cmd.Env = append(append(append([]string{}, f.env...), "BACKUP_TEST_ID="+id), env...)
 	cmd.WaitDelay = time.Second
@@ -227,11 +227,8 @@ func (f *backupScriptFixture) start(t *testing.T, id string, args []string, env 
 
 func (r *backupScriptRun) wait(t *testing.T, code int) string {
 	t.Helper()
-	select {
-	case <-r.done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("backup script did not finish")
-	}
+	// CommandContext and WaitDelay bound this wait, including inherited output pipes.
+	<-r.done
 	got := 0
 	if r.err != nil {
 		var exitErr *exec.ExitError

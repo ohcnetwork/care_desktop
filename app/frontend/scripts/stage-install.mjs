@@ -5,13 +5,25 @@
 // The list is read from the directory rather than hardcoded: a hand-maintained
 // array silently drifts, and a file added to the stack but missed here goes
 // missing at runtime on the clinic's machine, not at build time here.
-import { cpSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url)); // app/frontend/scripts
 const source = join(here, "..", "..", "..", "deployments");
 const install = join(here, "..", "..", "install"); // app/install
+
+const versions = [...readFileSync(join(source, ".env"), "utf8").matchAll(/^CARE_DESKTOP_VERSION=([^\r\n]*)$/gm)];
+if (versions.length !== 1 || !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-dev)?$/.test(versions[0][1].trim())) {
+  throw new Error("deployments/.env must contain one CARE_DESKTOP_VERSION=X.Y.Z or X.Y.Z-dev");
+}
+const version = versions[0][1].trim().replace(/-dev$/, "");
+const metadataPath = join(here, "..", "..", "wails.json");
+const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+if (metadata.info.productVersion !== version) {
+  metadata.info.productVersion = version;
+  writeFileSync(metadataPath, JSON.stringify(metadata, null, 2) + "\n");
+}
 
 // .env must be staged: Compose auto-loads it from the project dir, and it is
 // what pins every image. Only OS/editor junk is skipped.

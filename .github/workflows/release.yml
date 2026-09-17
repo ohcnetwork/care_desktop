@@ -1,63 +1,48 @@
-name: release
+name: Release CARE Desktop
 
-# Push a tag like v0.1.0 to build CARE Desktop installers for all three OSes and
-# attach them to a GitHub Release. (This dir must be its own git repo on GitHub.)
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: care-desktop-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { os: macos-latest,   platform: "darwin/universal", name: macos,   extra: "" }
-          - { os: windows-latest, platform: "windows/amd64",    name: windows, extra: "-nsis" }
-    runs-on: ${{ matrix.os }}
-    # Signing is opt-in: absent secrets (fork PRs, untagged runs) fall back to ad-hoc.
-    env:
-      SIGN_MACOS: ${{ secrets.MACOS_CERT_P12 != '' }}
+  prepare:
+    name: Validate release configuration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-
-      # go-version-file, not a literal: go.mod already declares the toolchain, and a
-      # pin here that falls behind it only builds because GOTOOLCHAIN=auto silently
-      # downloads the right one on every job.
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7.0.1
         with:
-          go-version-file: app/go.mod
-
-      - uses: actions/setup-node@v4
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
         with:
-          node-version: 20
-
-      - name: Validate release identity
-        id: v
-        shell: bash
+          node-version: "22"
+          package-manager-cache: false
+      - name: Read release version and immutable sources
+        id: version
         run: |
           node <<'NODE'
           const fs = require("fs");
           const env = fs.readFileSync("deployments/.env", "utf8");
           const value = key => {
-            const matches = [...env.matchAll(new RegExp(`^${key}=([^\\r\\n]+)$`, "gm"))];
+            const matches = [...env.matchAll(new RegExp(`^${key}=([^\\r\\n]*)$`, "gm"))];
             if (matches.length !== 1) throw new Error(`Expected one ${key} in deployments/.env`);
             return matches[0][1].trim();
           };
           const version = value("CARE_DESKTOP_VERSION");
           if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(version)) {
-            throw new Error("Release installers require a numeric X.Y.Z version");
-          }
-          const metadata = JSON.parse(fs.readFileSync("app/wails.json", "utf8"));
-          if (metadata.info.productVersion !== version) {
-            throw new Error("wails.json productVersion must equal CARE_DESKTOP_VERSION");
-          }
-          if (process.env.GITHUB_REF.startsWith("refs/tags/") && process.env.GITHUB_REF_NAME !== `v${version}`) {
-            throw new Error(`Release tag must be v${version}`);
+            throw new Error("Releases require CARE_DESKTOP_VERSION=X.Y.Z (no -dev suffix)");
           }
           for (const key of ["CARE_BE_REF", "CARE_FE_REF"]) {
             if (!/^[0-9a-f]{40}$/i.test(value(key))) {
@@ -66,185 +51,229 @@ jobs:
           }
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
           NODE
-
-      # wails only warns and exits 0 when makensis is absent, so without this a
-      # missing NSIS would produce a green build carrying no installer.
-      - name: Install NSIS
-        if: matrix.name == 'windows'
-        shell: pwsh
+      - name: Reject an existing release version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
-            choco install nsis -y --no-progress
-            "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append
-          }
+          existing=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"v$VERSION\") | .html_url")
+          if [ -n "$existing" ]; then
+            echo "::error::Version $VERSION already has a release: $existing. Bump CARE_DESKTOP_VERSION; published assets are never replaced."
+            exit 1
+          fi
 
-      - name: Install Wails
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+  checks:
+    name: Check and build selected commit
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
 
-
-      - name: Stage the deployment kit
-        shell: bash
-        run: |
-          cp -R deployments/. app/install/
-          for f in .env docker-compose.yml Caddyfile scripts/backup.sh; do
-            test -f "app/install/$f" || { echo "::error::staging missed $f"; exit 1; }
-          done
-
-      - name: Build
-        working-directory: app
-        run: wails build -platform ${{ matrix.platform }} -clean ${{ matrix.extra }}
-
-      - name: Import signing certificate
-        if: matrix.name == 'macos' && env.SIGN_MACOS == 'true'
+  package:
+    name: Package installers
+    needs: [prepare, checks]
+    runs-on: macos-15
+    timeout-minutes: 360
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SIGN_MACOS: ${{ secrets.MACOS_CERT_P12 != '' }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: "22"
+          package-manager-cache: false
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: desktop-macos-unsigned
+          path: incoming/macos
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: desktop-windows-unsigned
+          path: incoming/windows
+      - name: Import macOS signing certificate
+        if: env.SIGN_MACOS == 'true'
         env:
           CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
           CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
         run: |
+          umask 077
           keychain="$RUNNER_TEMP/signing.keychain-db"
           keychain_pw=$(uuidgen)
           security create-keychain -p "$keychain_pw" "$keychain"
           security set-keychain-settings -lut 21600 "$keychain"
           security unlock-keychain -p "$keychain_pw" "$keychain"
-
           printf '%s' "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$CERT_PASSWORD" \
             -T /usr/bin/codesign -T /usr/bin/security
           rm -f "$RUNNER_TEMP/cert.p12"
-
-          # Without this codesign blocks on a UI prompt no one can answer, and the
-          # job hangs until it times out.
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$keychain_pw" "$keychain" > /dev/null
-
-          # The identity reads as invalid until its keychain is in the search list —
-          # trust can't chain to Apple's root otherwise.
           security list-keychains -d user -s "$keychain" \
             $(security list-keychains -d user | tr -d '"')
-
           security find-identity -v -p codesigning "$keychain"
           echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
-
-      - name: Package macOS .dmg
-        if: matrix.name == 'macos'
-        shell: bash
-        working-directory: app/build/bin
+      - name: Package the CI-built applications
         env:
-          VERSION: ${{ steps.v.outputs.version }}
           SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
           NOTARY_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
           NOTARY_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
           NOTARY_ISSUER: ${{ secrets.APPSTORE_ISSUER_ID }}
         run: |
-          # wails names the bundle from wails.json "name" (care-desktop), but this is
-          # the one name users see when they drag it to Applications.
-          app=$(ls -d *.app | head -1)
-          if [ "$app" != "CARE Desktop.app" ]; then
-            mv "$app" "CARE Desktop.app"
-            app="CARE Desktop.app"
-          fi
-          dmg="CARE-Desktop-$VERSION-macos.dmg"
-
-          if [ "$SIGN_MACOS" != "true" ]; then
-            # Ad-hoc: Apple Silicon refuses to launch a wholly unsigned bundle. Users
-            # still get the unidentified-developer warning.
-            codesign --force --sign - "$app"
-          else
+          mkdir -p incoming/app release-assets staging
+          ditto -x -k incoming/macos/desktop-macos-unsigned.zip incoming/app
+          app=incoming/app/care-desktop.app
+          test -d "$app"
+          actual=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
+          test "$actual" = "$VERSION"
+          codesign --verify --strict "$app"
+          if [ "$SIGN_MACOS" = "true" ]; then
+            : "${SIGN_IDENTITY:?Missing MACOS_SIGN_IDENTITY}"
+            : "${NOTARY_KEY:?Missing APPSTORE_PRIVATE_KEY}"
+            : "${NOTARY_KEY_ID:?Missing APPSTORE_KEY_ID}"
+            : "${NOTARY_ISSUER:?Missing APPSTORE_ISSUER_ID}"
             notary_key="$RUNNER_TEMP/notary.p8"
-            printf '%s' "$NOTARY_KEY" > "$notary_key"
-            notary=(--key "$notary_key" --key-id "$NOTARY_KEY_ID"
-                    --issuer "$NOTARY_ISSUER")
-
-            # Submit, then poll separately. `submit --wait` dies on a single dropped
-            # packet, and Apple's queue has run to hours on this account, so the poll
-            # window is long enough that a blip is likely. Retry the poll, then read
-            # the status back explicitly rather than trusting any exit code.
+            (umask 077; printf '%s' "$NOTARY_KEY" > "$notary_key")
+            notary=(--key "$notary_key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER")
             field() { python3 -c 'import sys,json; print(json.load(sys.stdin)["'"$1"'"])'; }
             notarize() {
               local id status
               id=$(xcrun notarytool submit "$1" "${notary[@]}" \
-                     --no-wait --output-format json | field id)
-              [ -n "$id" ] || { echo "::error::no submission id returned"; exit 1; }
+                --no-wait --output-format json | field id)
+              [ -n "$id" ] || { echo "::error::No notarization submission ID"; exit 1; }
               echo "submitted $1 -> $id"
               for attempt in 1 2 3 4 5 6; do
                 xcrun notarytool wait "$id" "${notary[@]}" --timeout 2h && break
-                echo "poll attempt $attempt dropped, retrying"
+                echo "::warning::Notarization poll $attempt failed; retrying."
               done
               status=$(xcrun notarytool info "$id" "${notary[@]}" \
-                         --output-format json | field status)
-              echo "$1: $status"
+                --output-format json | field status)
               if [ "$status" != "Accepted" ]; then
-                xcrun notarytool log "$id" "${notary[@]}" || true
+                echo "::error::Notarization status: $status"
+                xcrun notarytool log "$id" "${notary[@]}"
                 exit 1
               fi
             }
-
-            # --options runtime is what notarization requires; the bundle has no
-            # nested code, so there is nothing to sign inside-out.
             codesign --force --timestamp --options runtime \
               --keychain "$SIGNING_KEYCHAIN" --sign "$SIGN_IDENTITY" "$app"
             codesign --verify --strict "$app"
-
-            ditto -c -k --keepParent "$app" notarize.zip
-            notarize notarize.zip
-            rm -f notarize.zip
+            ditto -c -k --keepParent "$app" incoming/notarize.zip
+            notarize incoming/notarize.zip
             xcrun stapler staple "$app"
+            xcrun stapler validate "$app"
+          else
+            echo "::warning::MACOS_CERT_P12 is absent; macOS retains its ad-hoc signature only."
           fi
-
-          mkdir staging
-          cp -R "$app" staging/
+          ditto "$app" "staging/CARE Desktop.app"
           ln -s /Applications staging/Applications
-          hdiutil create -volname "CARE Desktop" -srcfolder staging -ov -format UDZO "$dmg"
-          rm -rf staging
-
+          dmg="release-assets/CARE-Desktop-$VERSION-macos.dmg"
+          hdiutil create -volname "CARE Desktop" -srcfolder staging -ov -format UDZO \
+            "$dmg"
           if [ "$SIGN_MACOS" = "true" ]; then
             codesign --force --timestamp \
               --keychain "$SIGNING_KEYCHAIN" --sign "$SIGN_IDENTITY" "$dmg"
             notarize "$dmg"
             xcrun stapler staple "$dmg"
-            rm -f "$RUNNER_TEMP/notary.p8"
-
-            # Final proof the tickets are really attached.
             xcrun stapler validate "$dmg"
-            xcrun stapler validate "$app"
             spctl -a -vvv -t open --context context:primary-signature "$dmg"
           fi
-
-      - name: Package Windows installer
-        if: matrix.name == 'windows'
-        shell: bash
-        working-directory: app/build/bin
-        env:
-          VERSION: ${{ steps.v.outputs.version }}
+          test -s incoming/windows/desktop-windows-unsigned-setup.exe
+          cp incoming/windows/desktop-windows-unsigned-setup.exe \
+            "release-assets/CARE-Desktop-$VERSION-windows-amd64-setup.exe"
+          cp deployments/.env release-assets/release-config.env
+      - name: Remove macOS signing credentials
+        if: always() && env.SIGN_MACOS == 'true'
         run: |
-          installer=$(ls *installer.exe 2>/dev/null | head -1)
-          if [ -z "$installer" ]; then
-            echo "::error::wails produced no NSIS installer — is makensis on PATH?"
-            exit 1
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/notary.p8"
+          if [ -f "$RUNNER_TEMP/signing.keychain-db" ]; then
+            security delete-keychain "$RUNNER_TEMP/signing.keychain-db"
           fi
-          mv "$installer" "CARE-Desktop-$VERSION-windows-amd64-setup.exe"
-
-      - name: Remove signing keychain
-        if: always() && matrix.name == 'macos' && env.SIGN_MACOS == 'true'
-        run: security delete-keychain "${SIGNING_KEYCHAIN:-}" 2>/dev/null || true
-
-      # No tag means no release to attach to, so keep the installers as workflow
-      # artifacts — lets packaging changes be tested without cutting a tag.
-      - name: Upload artifacts (untagged run)
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-artifact@v4
+      - name: Record build identity and checksums
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+          const crypto = require("crypto");
+          const hash = path => crypto.createHash("sha256").update(fs.readFileSync(path)).digest("hex");
+          const manifest = {
+            version: process.env.VERSION,
+            source_commit: process.env.GITHUB_SHA,
+            configuration_sha256: hash("release-assets/release-config.env"),
+            signing: {
+              macos: process.env.SIGN_MACOS === "true" ? "developer-id-notarized" : "ad-hoc",
+              windows: "unsigned",
+            },
+            run_url: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+          };
+          fs.writeFileSync("release-assets/release-manifest.json", JSON.stringify(manifest, null, 2) + "\n");
+          const files = fs.readdirSync("release-assets").sort();
+          fs.writeFileSync("release-assets/SHA256SUMS",
+            files.map(file => `${hash("release-assets/" + file)}  ${file}\n`).join(""));
+          NODE
+      - uses: actions/upload-artifact@v7.0.1
         with:
-          name: care-desktop-${{ matrix.name }}
+          name: care-release-assets
+          path: release-assets/
           if-no-files-found: error
-          path: |
-            app/build/bin/*.dmg
-            app/build/bin/*-setup.exe
+          retention-days: 14
 
-      - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+  publish:
+    name: Create draft release
+    needs: [prepare, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v8.0.1
         with:
-          draft: true
-          name: "CARE Desktop ${{ github.ref_name }}"
-          files: |
-            app/build/bin/*.dmg
-            app/build/bin/*-setup.exe
+          name: care-release-assets
+          path: release-assets
+      - name: Verify complete asset set
+        working-directory: release-assets
+        run: |
+          test -s "CARE-Desktop-$VERSION-macos.dmg"
+          test -s "CARE-Desktop-$VERSION-windows-amd64-setup.exe"
+          test -s release-config.env
+          test -s release-manifest.json
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 5
+          sha256sum --check --strict SHA256SUMS
+      - name: Create tag and draft without replacing published versions
+        run: |
+          tag="v$VERSION"
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag" \
+            --jq ".[] | select(.ref == \"refs/tags/$tag\") | .ref")
+          if [ -n "$existing" ]; then
+            commit=$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)
+            if [ "$commit" != "$GITHUB_SHA" ]; then
+              echo "::error::$tag already points to another commit. Use a new version."
+              exit 1
+            fi
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f "ref=refs/tags/$tag" -f "sha=$GITHUB_SHA"
+          fi
+          cat > release-notes.md <<EOF
+          ## CARE Desktop $VERSION
+
+          **Preview release.** Windows downloads are unsigned and may be blocked by SmartScreen.
+          See release-manifest.json for each platform's actual signing status.
+          macOS uses the existing Developer ID/notarization configuration when enabled;
+          otherwise its ad-hoc signature is not trusted by Gatekeeper.
+
+          - Source commit: $GITHUB_SHA
+          - Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          - Exact dependency pins: release-config.env
+          - Build identity: release-manifest.json
+          - File integrity: SHA256SUMS (not a publisher signature)
+
+          Before publishing, review the installers, test on a disposable clinic,
+          and add upgrade notes, database migration requirements, and known limitations.
+          Preserve the clinic CA and take a verified backup before upgrading an existing clinic.
+          EOF
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --draft --prerelease --title "CARE Desktop $VERSION (preview)" \
+            --notes-file release-notes.md release-assets/*
