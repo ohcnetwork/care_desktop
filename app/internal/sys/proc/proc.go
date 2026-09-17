@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -126,12 +127,15 @@ func AugmentedPath() string {
 	if runtime.GOOS == "windows" {
 		sep = ";"
 		parts = []string{
-			`C:\Program Files\Docker\Docker\resources\bin`,
+			filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "Rancher Desktop",
+				"resources", "resources", "win32", "bin"),
+			`C:\Program Files\Rancher Desktop\resources\resources\win32\bin`,
 			`C:\Program Files\Git\bin`,
 			`C:\Program Files\Git\cmd`,
 		}
 	} else {
 		parts = []string{
+			filepath.Join(os.Getenv("HOME"), ".rd", "bin"),
 			"/opt/homebrew/bin", "/opt/homebrew/sbin",
 			"/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
 		}

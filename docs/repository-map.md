@@ -124,6 +124,7 @@ app/internal/
 |   `-- plugins_test.go
 |-- prereq/
 |   |-- check.go
+|   |-- profile.go
 |   |-- provision.go
 |   `-- provision_test.go
 |-- release/
@@ -184,7 +185,7 @@ app/internal/
 | [`internal/compose`](../app/internal/compose) | Infrastructure and CARE image building, source checkout, freshness inputs. | [Clinic lifecycle](clinic-lifecycle.md). |
 | [`internal/health`](../app/internal/health) | HTTP readiness and port availability. | [Native integrations](native-integrations.md). |
 | [`internal/plugins`](../app/internal/plugins) | `ADDITIONAL_PLUGS` dotenv/JSON access and atomic update. | [Configuration](configuration-and-settings.md#backend-plugins). |
-| [`internal/prereq`](../app/internal/prereq) | Docker/Git detection, action plans, installation and readiness waits. | [Native integrations](native-integrations.md). |
+| [`internal/prereq`](../app/internal/prereq) | Docker/Git detection, action plans, Rancher Desktop provisioning and preconfiguration, and readiness waits. | [Native integrations](native-integrations.md). |
 | [`internal/release`](../app/internal/release) | Validated release manifest and source/image identity. | [Development and release](development-and-release.md#release-identity-and-pins). |
 | [`internal/residue`](../app/internal/residue) | Owned-resource inventory, unknown-state errors, old kit location. | [Cleanup](cleanup-and-uninstall.md). |
 | [`sys/proc`](../app/internal/sys/proc) | Child-process creation, runner context/output, PATH repair. | [Native integrations](native-integrations.md). |

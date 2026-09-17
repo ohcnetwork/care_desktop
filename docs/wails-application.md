@@ -149,7 +149,7 @@ Execution abbreviations: **query** means no `run`/`withJob` helper, **read** mea
 | `GitPlan()` | `ToolPlan` | Query. Describes the available Git action. |
 | `InstallDocker()` | `string` | Sync. Runs prerequisite provisioning and returns its result or error. |
 | `InstallGit()` | `string` | Sync. Runs Git provisioning. |
-| `OpenDocker()` | `void` | Sync. Attempts to launch the available Docker application. |
+| `OpenDocker()` | `void` | Sync. Attempts to launch the available Docker application: Rancher Desktop on macOS/Windows, the `docker` service on Linux. |
 | `RestartPlan()` | `RestartPlan` | Query. Describes a detected prerequisite-related reboot requirement. |
 | `RestartNow()` | `void` | Sync. Attempts to enable login startup, then requests an OS restart; autostart failure is logged. |
 | `ClinicHealth()` | `Health` | Query. HTTP health probe, separate from name and certificate-trust checks. |

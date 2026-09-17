@@ -43,11 +43,11 @@ func DockerCheck(run proc.Runner) Status {
 func dockerAdvice() (missing, stopped string) {
 	switch runtime.GOOS {
 	case "windows":
-		return "Docker Desktop is not installed.",
-			"Docker Desktop is installed but not running. If you just installed it, restart this computer."
+		return "Rancher Desktop is not installed.",
+			"Rancher Desktop is installed but not running. If you just installed it, restart this computer."
 	case "darwin":
-		return "Docker Desktop is not installed.",
-			"Docker Desktop is installed but not running."
+		return "Rancher Desktop is not installed.",
+			"Rancher Desktop is installed but not running."
 	default:
 		return "Docker is not installed.",
 			"Docker is installed but not running."
@@ -58,15 +58,15 @@ func composeAdvice() string {
 	if runtime.GOOS == "linux" {
 		return "Docker is running, but the Compose plugin is missing. Install docker-compose-plugin with your package manager."
 	}
-	return "Docker is running, but the Compose v2 plugin is missing. Update Docker Desktop."
+	return "Docker is running, but the Compose v2 plugin is missing. Update Rancher Desktop."
 }
 
 func wrongContainerOS(serverOS string) string {
 	if serverOS == "" || serverOS == "linux" {
 		return ""
 	}
-	return "Docker Desktop is set to " + serverOS + " containers, and CARE needs Linux containers. " +
-		"Right-click the Docker Desktop tray icon and choose \"Switch to Linux containers\"."
+	return "Docker is set to " + serverOS + " containers, and CARE needs Linux containers. " +
+		"In Rancher Desktop, open Preferences and set the container engine to \"dockerd (moby)\"."
 }
 
 func hasCompose(run proc.Runner) bool {

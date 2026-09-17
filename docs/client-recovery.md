@@ -94,7 +94,8 @@ Before proceeding, confirm this is not the active clinic server and preserve a
 current, verified backup and its recovery material outside the installation.
 Download the appropriate script as a file and review it; do not pipe a download
 directly into a shell. Run it as the normal user who installed CARE, from the
-folder containing the downloaded script. Docker Desktop must be running if
+folder containing the downloaded script. The Docker engine (Rancher Desktop on
+macOS and Windows) must be running if
 Docker resources are to be inspected and removed.
 
 ### Windows

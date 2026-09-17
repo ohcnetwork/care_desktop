@@ -89,7 +89,7 @@ The UI seam is deliberately small: `Log func(string)` and `Confirm func(title, m
 | `compose` | Which images need building, and from which exact inputs? |
 | `health` | Is the clinic HTTP endpoint responding, and is the HTTPS port usable? |
 | `plugins` | What plugin configuration is stored in `backend.env`? |
-| `prereq` | Are Docker and Git usable, and how can the user obtain or start them? |
+| `prereq` | Are Docker and Git usable, and how can the user obtain or start them? Supplies the Docker engine through Rancher Desktop on macOS/Windows and native Docker Engine on Linux. |
 | `release` | Which version, sources, and image references does this executable ship? |
 | `residue` | What resources from an earlier installation remain? |
 

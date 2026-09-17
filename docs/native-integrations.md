@@ -101,7 +101,7 @@ environment, browser, or architecture is supported or has been integration-teste
 | Atomic replacement | Rename within the destination directory, then sync that directory. | `MoveFileEx` with replacement and write-through flags. | Same Unix replacement implementation as macOS. |
 | Login startup | Per-user LaunchAgent plist. | Per-user `HKCU` Run value. | Per-user `.desktop` autostart file under `~/.config`. |
 | Restart detection/action | No pending-restart detection; `Now` returns an unsupported error. | Two registry-key probes; restart action schedules `shutdown /r` after five seconds. | No pending-restart detection; `Now` returns an unsupported error. |
-| Automated Docker setup | Download architecture-selected Docker Desktop DMG. | Prefer `winget`, otherwise download the amd64 installer. | Package-manager commands plus `systemctl` and `usermod`. |
+| Automated Docker setup | Download architecture-selected Rancher Desktop DMG. | Prefer `winget`, otherwise download and run the Rancher Desktop MSI. | Package-manager commands plus `systemctl` and `usermod`. |
 | Automated Git setup | Launch Command Line Tools installer with `xcode-select --install`. | `winget`, otherwise a manual-download plan. | Supported package manager, otherwise a manual plan. |
 
 Other `GOOS` values are not a general supported-platform promise. For example,
@@ -159,10 +159,12 @@ construction; see the integration point in [app.go](../app/app.go).
   `SHELL` is unset. It has a three-second context deadline. The command emits a
   line prefixed with `__care_path__`, so unrelated shell startup output is not
   mistaken for PATH. Failure simply omits this part.
-- `AugmentedPath` prepends `/opt/homebrew/bin`, `/opt/homebrew/sbin`,
-  `/usr/local/bin`, `/usr/bin`, `/bin`, `/usr/sbin`, and `/sbin` on Unix.
+- `AugmentedPath` prepends `$HOME/.rd/bin` (Rancher Desktop's CLI directory),
+  `/opt/homebrew/bin`, `/opt/homebrew/sbin`, `/usr/local/bin`, `/usr/bin`,
+  `/bin`, `/usr/sbin`, and `/sbin` on Unix.
 - On Windows it prepends
-  `C:\Program Files\Docker\Docker\resources\bin`,
+  `%LOCALAPPDATA%\Programs\Rancher Desktop\resources\resources\win32\bin`,
+  `C:\Program Files\Rancher Desktop\resources\resources\win32\bin`,
   `C:\Program Files\Git\bin`, and `C:\Program Files\Git\cmd`.
 - The existing PATH is appended. The login-shell result, when available, precedes
   the augmented path. There is no directory-existence check or deduplication.
@@ -986,34 +988,83 @@ flowchart LR
 
 **macOS Docker**
 
-The downloader chooses
-`https://desktop.docker.com/mac/main/arm64/Docker.dmg` for an arm64 build and
-`https://desktop.docker.com/mac/main/amd64/Docker.dmg` otherwise. It downloads the
-DMG, requests administrator approval, attaches it without browsing, invokes
-`/Volumes/Docker/Docker.app/Contents/MacOS/install` with license acceptance and
-the current user, then detaches it.
+The engine supplied on macOS and Windows is
+[Rancher Desktop](https://rancherdesktop.io/) (Apache-2.0), not Docker Desktop:
+Docker Desktop requires a paid subscription for organizations above its size
+threshold, and that threshold applies to the clinic running the installation.
+Rancher Desktop ships dockerd (moby) and the same `docker` CLI and Compose v2
+plugin, so nothing in `internal/clinic` or `internal/compose` changes.
+
+Asset names carry the release version, so there is no fixed download URL.
+`latestRancherVersion` sends a `HEAD` request to
+`https://github.com/rancher-sandbox/rancher-desktop/releases/latest` with
+redirects disabled and reads the version out of the `Location` tag URL.
+`versionFromTagURL` rejects a missing or unexpected location rather than
+building a download URL for an empty version. This avoids both a pinned version
+that rots and the rate-limited JSON API.
+
+The downloader then fetches
+`.../releases/download/v<version>/Rancher.Desktop-<version>.aarch64.dmg` for an
+arm64 build, or the `x86_64` asset otherwise. It requests administrator
+approval to attach the image on a temporary mount point it owns, replace
+`/Applications/Rancher Desktop.app`, and detach.
 
 The shell sequence is joined with `&&`. On failure it also attempts an ordinary
 detach so the image is not intentionally left mounted. Downloaded media is
-removed on return. It then launches Docker using `open -a Docker` and waits for
-readiness.
+removed on return. It then launches Rancher Desktop with
+`open -a "/Applications/Rancher Desktop.app"` and waits for readiness.
 
 **Windows Docker**
 
-It first tries `winget install -e --id Docker.DockerDesktop` with package/source
-agreement acceptance. If that command fails, it logs the fallback and downloads
-`https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe`.
-There is no architecture-selection branch for that Windows download.
+It first tries `winget install -e --id SUSE.RancherDesktop` with package/source
+agreement acceptance. If that command fails, it logs the fallback, resolves the
+latest version the same way macOS does, and downloads
+`.../releases/download/v<version>/Rancher.Desktop.Setup.<version>.msi`. There is
+no architecture-selection branch for that Windows download.
 
-The direct installer runs elevated with `install --quiet --accept-license
---backend=wsl-2`; this helper waits and propagates the installer exit code.
-After either installation route, it launches Docker Desktop and waits.
-`afterWindowsDockerInstall` does not itself edit group membership or inspect
-restart registry keys. It reports a start failure with advice that Windows may
-need a WSL 2 restart.
+The direct installer runs elevated as `msiexec /i <msi> /qn /norestart`; this
+helper waits and propagates the installer exit code. After either installation
+route, it launches Rancher Desktop and waits. `afterWindowsDockerInstall` does
+not itself edit group membership or inspect restart registry keys. It reports a
+start failure with advice that Windows may need a WSL 2 restart.
 
-Docker Desktop executable lookup checks `ProgramFiles`, `ProgramW6432`, and
-`C:\Program Files`, each with `Docker\Docker\Docker Desktop.exe`.
+Rancher Desktop executable lookup checks `%LOCALAPPDATA%\Programs`,
+`ProgramFiles`, `ProgramW6432`, and `C:\Program Files`, each with
+`Rancher Desktop\Rancher Desktop.exe`.
+
+### The Rancher Desktop deployment profile
+
+Source: [profile.go](../app/internal/prereq/profile.go).
+
+The profile carries a `version` field, pinned to `rancherProfileVersion = 18`,
+the schema version the format is documented against. Rancher Desktop migrates an
+older profile version forward, so this does not need to track every release.
+
+Before installing, `writeRancherProfile` writes a *defaults* deployment profile
+so the operator never meets the first-run wizard and the clinic's requirements
+are already answered:
+
+| Setting | Why CARE needs it |
+| --- | --- |
+| `application.adminAccess: true` | Rancher Desktop only forwards host ports below 1024 with administrative access. Without it Caddy cannot take 80/443, every container still reports healthy, and `health.Wait` times out with no obvious cause. |
+| `containerEngine.name: moby` | Supplies dockerd and the `docker` CLI the engine calls. The containerd/nerdctl engine would fail every Compose command. |
+| `kubernetes.enabled: false` | k3s would consume roughly 1.5GB of RAM the clinic never uses. |
+| `application.pathManagementStrategy: rcfiles` | Lets Rancher Desktop put `~/.rd/bin` on the shell PATH, matching what `AugmentedPath` already prepends. Ignored on Windows. |
+
+| Platform | Profile location |
+| --- | --- |
+| macOS | `~/Library/Preferences/io.rancherdesktop.profile.defaults.plist` |
+| Windows | `HKCU\Software\Policies\Rancher Desktop\Defaults` through `reg add` |
+| Linux | Not written; Linux uses its native Docker Engine. |
+
+Defaults are applied on first run only. An operator's later preference changes
+are kept, and an administrator's managed profile in `/Library/Managed
+Preferences` or `HKLM` still takes precedence over this user profile. Because of
+that, an installation that had already run would ignore the profile, so
+`applyRancherProfileNow` additionally attempts `rdctl set` for the same three
+values. That attempt is best-effort: `rdctl` may be absent, or the values may be
+locked by an administrator. A profile write failure is logged as a warning and
+does not stop the installation.
 
 **Linux Docker**
 
@@ -1048,12 +1099,13 @@ that every installation step was rolled back.
   installer fallback in this implementation.
 - Linux installs `git` with the selected package manager under elevation.
 
-Manual information URLs are `https://www.docker.com/products/docker-desktop/`
-and `https://git-scm.com/downloads`.
+Manual information URLs come from `dockerHelpURL()`: `https://rancherdesktop.io/`
+on macOS and Windows, `https://docs.docker.com/engine/install/` on Linux. Git
+uses `https://git-scm.com/downloads`.
 
 ### Waiting, downloads, and side effects
 
-`OpenDocker` launches Docker Desktop on macOS/Windows. On Linux it elevates
+`OpenDocker` launches Rancher Desktop on macOS/Windows. On Linux it elevates
 `systemctl start docker`. It then uses `dockerReadyTimeout = 3 * time.Minute`,
 checking full `DockerCheck` readiness and sleeping three seconds between
 unsuccessful checks. Poll deadlines are checked between probes; they are not
@@ -1316,7 +1368,7 @@ For the rest of the repository, use [Repository map](repository-map.md).
 The included tests cover important error and ownership decisions, but many use
 injected queries, generated command strings, redirected filesystem fixtures, or
 fake executables. They are not evidence of real UAC, macOS keychain, LAN
-multicast, Docker Desktop installation, or distribution-wide browser support.
+multicast, Rancher Desktop installation, or distribution-wide browser support.
 This scope has no separate test files for `applog`, `autostart`, `reboot`,
 `health`, root extraction, or device-script writing. The documentation work does
 not require running installers, native removal scripts, or broad test suites.

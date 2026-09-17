@@ -48,3 +48,15 @@ esac
 		})
 	}
 }
+
+func TestVersionFromTagURL(t *testing.T) {
+	got, err := versionFromTagURL("https://github.com/rancher-sandbox/rancher-desktop/releases/tag/v1.24.0")
+	if err != nil || got != "1.24.0" {
+		t.Fatalf("got %q, %v; want 1.24.0", got, err)
+	}
+	for _, bad := range []string{"", "https://github.com/rancher-sandbox/rancher-desktop/releases", "/releases/tag/v"} {
+		if _, err := versionFromTagURL(bad); err == nil {
+			t.Fatalf("expected an error for %q", bad)
+		}
+	}
+}

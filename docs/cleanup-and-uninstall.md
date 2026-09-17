@@ -134,7 +134,7 @@ shared project identity important.
 
 ### What is not an automatic cleanup target
 
-The engine does not uninstall Docker Desktop, Git, the desktop binary, or
+The engine does not uninstall Rancher Desktop, Docker Engine, Git, the desktop binary, or
 unrelated packages. It does not search every folder for copied backups,
 remove certificates from other devices, or prove that no clinical data
 exists elsewhere. It also does not own arbitrary volumes/networks merely
