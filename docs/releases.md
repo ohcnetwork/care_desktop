@@ -1,0 +1,167 @@
+# Releasing CARE Desktop
+
+[Documentation index](README.md)
+
+Releases are started manually from GitHub Actions. Do not create or push a tag
+to start a build. The workflow reads the selected commit's
+[`deployments/.env`](../deployments/.env), runs CI, packages the CI-built
+applications, creates a tag automatically, and creates a **draft prerelease**.
+Nothing is published to clinic users automatically.
+
+Windows downloads are unsigned previews. macOS retains the existing optional
+Developer ID signing and notarization flow, using the same secrets listed below.
+Without those credentials it retains Wails' ad-hoc signature only. The release
+manifest records signing status separately for each platform. Do not tell users
+to disable OS protection.
+
+## Prepare a version
+
+1. Create a PR updating `deployments/.env`.
+2. Set `CARE_DESKTOP_VERSION` to a new numeric version, for example `0.1.1`.
+   Use a new version even if only the backend, frontend, images, or deployment
+   settings changed.
+3. Update the dependency pins needed by that release.
+4. Review the PR, let CI pass, and merge it into `main`.
+
+| Configuration | What to maintain |
+| --- | --- |
+| `CARE_DESKTOP_VERSION` | One `X.Y.Z` value. `-dev` builds are not accepted by the release workflow. |
+| `CARE_BE_REPO`, `CARE_FE_REPO` | The intended CARE source repositories. |
+| `CARE_BE_REF`, `CARE_FE_REF` | Full 40-character commit SHAs, not branch names or moving tags. |
+| `POSTGRES_IMAGE`, `REDIS_IMAGE`, `MINIO_IMAGE`, `CADDY_IMAGE` | Deliberately chosen image versions; use immutable digests when available. |
+| `CORAZA_VERSION` | The WAF module version used to build the proxy. |
+| `BACKUP_IMAGE`, `CADDY_WAF_IMAGE`, `BACKEND_IMAGE`, `FRONTEND_IMAGE` | Local output image names. These are not upstream version selectors; normally leave them alone. |
+
+If a change starts from an FE/BE branch, resolve it to a commit while preparing
+the PR. The workflow does not resolve moving branches at install time.
+
+Do not add passwords, signing credentials, or clinic-specific data to this file:
+the exact file is embedded in the app and attached to the release.
+
+`deployments/.env` is the version source of truth. Do not maintain
+`app/wails.json`'s `info.productVersion` by hand. The staging script synchronizes
+it before native builds; a stale checked-in metadata version is not a separate
+release input.
+
+## Build the release
+
+1. Open **Actions -> Release CARE Desktop**.
+2. Select **Run workflow**, choose the approved branch (normally `main`), and
+   start the run. There is no version form: the version comes from `.env`.
+3. Wait for every job to finish.
+4. Open the resulting draft in the repository's **Releases** page.
+
+The workflow must be present on the default branch for the manual button to
+appear. Maintainers need permission to run workflows. GitHub CLI equivalent:
+
+```sh
+gh workflow run release.yml --ref main
+```
+
+All jobs use the workflow run's selected source commit, even if the branch moves
+while the build is running. A matching tag is created only after packaging
+succeeds. For `CARE_DESKTOP_VERSION=0.1.1`, the tag is `v0.1.1`.
+
+## What the workflow does
+
+| Stage | Behavior |
+| --- | --- |
+| Validate | Reject malformed/duplicate version values, moving FE/BE refs, and a version that already has a draft or published release. |
+| Check and build | Call the same CI workflow used by PRs: lint, race tests, frontend checks, and real macOS/Windows native builds. No separate untested release rebuild. |
+| macOS signing | With the existing credentials, sign the app with hardened runtime, notarize/staple it, then sign and notarize/staple the DMG. Otherwise explicitly report ad-hoc signing. |
+| Package | Wrap the CI macOS app in a DMG and copy the CI Windows NSIS installer. Verify macOS metadata matches the release version. |
+| Record | Save the exact release configuration, source commit, workflow run URL, signing status, and SHA-256 file checksums. |
+| Draft | Verify the complete asset set, create/reuse the tag at the exact source commit, and create a draft marked as a prerelease. Never replace an existing release. |
+
+Release runs are serialized and do not cancel an active release. CI invoked by
+a release has a separate concurrency group from ordinary PR/main CI.
+
+For version `0.1.1`, the draft has these five assets:
+
+```text
+CARE-Desktop-0.1.1-macos.dmg
+CARE-Desktop-0.1.1-windows-amd64-setup.exe
+release-config.env
+release-manifest.json
+SHA256SUMS
+```
+
+The manifest's `source_commit` identifies the desktop source. The configuration
+records the CARE FE/BE revisions and image pins. Checksums detect altered or
+incomplete downloads; they are **not** publisher signatures or clinic TLS
+certificate fingerprints.
+
+The combined package is also retained as the `care-release-assets` workflow
+artifact for 14 days. These temporary Actions artifacts are for maintainers;
+the eventual published release assets are the durable downloads.
+
+## Review and publish
+
+Before publishing:
+
+1. Check both installers and their checksums. Use a disposable clinic to check
+   fresh setup, existing-clinic upgrade, browser access, and operation without
+   internet after provisioning.
+2. Add release notes describing visible changes, dependency changes, known
+   limitations, and any database migration or prerequisite requirements.
+3. For an existing clinic, require a verified backup before migration. Preserve
+   its CA identity and persistent data; an application upgrade should not
+   require all client devices to reinstall certificate trust.
+4. If distributing the current preview to testers, publish it **as a
+   prerelease**, retaining the unsigned-download warnings.
+
+A draft is not public, and a prerelease is not the normal GitHub "latest stable"
+download. Publishing a stable release is a separate maintainer decision.
+
+Once published, do not move the tag or replace its files. Corrections require a
+new version and another configuration PR. A database downgrade is not guaranteed
+by reinstalling an older desktop binary; recovery may require a version-matched
+backup.
+
+## Failure and retry
+
+| Failure | Action |
+| --- | --- |
+| Validation, CI, or packaging failed | Fix the issue. Rerun the failed job for a transient problem, or start a new run for the corrected commit. No tag/release is created before the draft job. |
+| Version already has a release | Bump `.env` to a new version. Never delete a published release to reuse its version. |
+| Existing tag points to another commit | Choose a new version. The workflow will not move the tag. |
+| Tag created, but draft creation failed | Rerun from the same commit. A matching existing tag can be reused if no release exists. |
+| Draft created, but asset upload failed | Inspect it. Delete only that incomplete, unpublished draft, retain its matching tag, and rerun from the same commit. Never publish a partial draft. |
+| Tag creation rejected | Check repository tag rules and Actions permissions. Only the final job requests `contents: write`; configure repository rules to allow the intended release actor without allowing tag replacement. |
+
+Do not restart a release from a different commit using an already reserved
+version/tag. The selected commit and configuration are part of the release's
+identity.
+
+## Scope and current limitations
+
+The process does not deploy to clinics, automatically update running clinics,
+bundle Docker/prerequisite installers, or prebuild the upstream CARE container
+images. Initial clinic setup still needs the dependencies and source downloads
+described in the installation guides. Image tags and downstream dependency
+downloads are not guaranteed immutable merely because FE/BE commits are pinned.
+
+## Existing macOS signing configuration
+
+No secret names, `.env` pins, bundle identifier, or application executable name
+need to change:
+
+| Existing secret | Purpose |
+| --- | --- |
+| `MACOS_CERT_P12` | Base64-encoded Developer ID signing certificate and private key. Its presence enables macOS signing. |
+| `MACOS_CERT_PASSWORD` | Password used to import that PKCS#12 file. |
+| `MACOS_SIGN_IDENTITY` | Existing Developer ID signing identity. |
+| `APPSTORE_PRIVATE_KEY` | Existing App Store Connect API private key used by `notarytool`. |
+| `APPSTORE_KEY_ID` | API key ID. |
+| `APPSTORE_ISSUER_ID` | API issuer ID. |
+
+The workflow keeps the existing `SIGN_MACOS`, `SIGNING_KEYCHAIN`, `CERT_P12`,
+`CERT_PASSWORD`, `SIGN_IDENTITY`, `NOTARY_KEY`, `NOTARY_KEY_ID`, and
+`NOTARY_ISSUER` environment mappings. It imports into a temporary keychain,
+retains the separate submit/wait/status-check notarization flow, and validates
+the stapled application and DMG. Cleanup runs even after failure.
+
+If signing is enabled, incomplete credentials or a rejected notarization fail
+the release; they do not silently produce an unsigned substitute. The job allows
+up to six hours for Apple's queue, subject to the hosted runner limit.
+When `MACOS_CERT_P12` is absent, the manifest explicitly says `ad-hoc`.

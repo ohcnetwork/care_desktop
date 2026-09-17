@@ -5,12 +5,19 @@ system tools. The engine packages under `internal/` never import Wails.
 
 ```bash
 wails dev
+```
+
+For a production build, synchronize installer metadata before Wails starts:
+
+```bash
+node frontend/scripts/stage-install.mjs
 wails build
 ```
 
 See [Development and release](../docs/development-and-release.md) for preparing
 a fresh checkout, embedded assets, build prerequisites, and platform packaging.
 Running a development app can operate an existing clinic on this computer.
+For publishing installers, follow [Releasing CARE Desktop](../docs/releases.md).
 
 ## Backend documentation
 

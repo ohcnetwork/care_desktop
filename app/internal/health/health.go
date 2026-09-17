@@ -27,7 +27,7 @@ func Ping() Health {
 	if err != nil {
 		return Health{Active: false, Code: 0, Detail: "nothing answering on :443"}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == 200 {
 		return Health{Active: true, Code: 200, Detail: "healthy"}
 	}

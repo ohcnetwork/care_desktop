@@ -1,7 +1,6 @@
 package release
 
 import (
-	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -16,25 +15,10 @@ func deploymentPins(t *testing.T) []byte {
 	return data
 }
 
-func TestDeploymentVersionMatchesInstaller(t *testing.T) {
+func TestDeploymentSourcesAreImmutable(t *testing.T) {
 	pins, err := Load(deploymentPins(t))
 	if err != nil {
 		t.Fatal(err)
-	}
-	var metadata struct {
-		Info struct {
-			ProductVersion string `json:"productVersion"`
-		} `json:"info"`
-	}
-	data, err := os.ReadFile("../../wails.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(data, &metadata); err != nil {
-		t.Fatal(err)
-	}
-	if pins.AppVersion != metadata.Info.ProductVersion {
-		t.Fatalf("embedded version %q differs from installer version %q", pins.AppVersion, metadata.Info.ProductVersion)
 	}
 	if !IsCommitRef(pins.BeRef) || !IsCommitRef(pins.FeRef) {
 		t.Fatal("deployment source refs are not immutable commits")

@@ -68,17 +68,17 @@ func Step(log func(string), host, rootPEM string) (elevate.Step, func(), bool) {
 	}
 	path := f.Name()
 	if _, err := f.WriteString(rootPEM); err != nil {
-		f.Close()
-		os.Remove(path)
+		_ = f.Close()
+		_ = os.Remove(path)
 		logln(log, "Could not prepare local certificate trust: "+err.Error())
 		return elevate.Step{}, noop, false
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(path)
+		_ = os.Remove(path)
 		logln(log, "Could not prepare local certificate trust: "+err.Error())
 		return elevate.Step{}, noop, false
 	}
-	cleanup := func() { os.Remove(path) }
+	cleanup := func() { _ = os.Remove(path) }
 
 	_ = installUnprivileged(path)
 	if HostTrusts(host) {
@@ -101,7 +101,7 @@ func HostTrusts(host string) bool {
 	if err != nil {
 		return false
 	}
-	conn.Close()
+	_ = conn.Close()
 	return true
 }
 

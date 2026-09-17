@@ -44,7 +44,7 @@ func TestWailsStagesMissingInstallBeforeGoBuild(t *testing.T) {
 		}
 	}
 	write("app/frontend/scripts/stage-install.mjs", string(script))
-	write("deployments/.env", "CARE_DESKTOP_VERSION=1.2.3\n")
+	write("app/wails.json", `{"name":"care-desktop","info":{"productVersion":"9.9.9","productName":"CARE Desktop"}}`)
 	write("deployments/setup/index.html", "device setup")
 	write("app/main.go", `package main
 import ("embed"; "fmt")
@@ -60,10 +60,17 @@ func main() {
 	if err := os.MkdirAll(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, state := range []string{"missing", "deleted-again", "stale"} {
-		t.Run(state, func(t *testing.T) {
+	for _, tc := range []struct{ state, version string }{
+		{"missing", "1.2.3"},
+		{"deleted-again", "1.2.3"},
+		{"stale", "1.2.3"},
+		{"development", "2.3.4-dev"},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			manifest := "CARE_DESKTOP_VERSION=" + tc.version + "\n"
+			write("deployments/.env", manifest)
 			install := filepath.Join(root, "app", "install")
-			switch state {
+			switch tc.state {
 			case "deleted-again":
 				if err := os.RemoveAll(install); err != nil {
 					t.Fatal(err)
@@ -79,21 +86,57 @@ func main() {
 			if output, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("pre-build hook failed: %v\n%s", err, output)
 			}
+			metadata, err := os.ReadFile(filepath.Join(root, "app", "wails.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var info struct {
+				Name string `json:"name"`
+				Info struct {
+					ProductVersion string `json:"productVersion"`
+					ProductName    string `json:"productName"`
+				} `json:"info"`
+			}
+			if err := json.Unmarshal(metadata, &info); err != nil {
+				t.Fatal(err)
+			}
+			if info.Info.ProductVersion != strings.TrimSuffix(tc.version, "-dev") || info.Name != "care-desktop" || info.Info.ProductName != "CARE Desktop" {
+				t.Fatalf("installer metadata was not derived from .env: %s", metadata)
+			}
 			cmd = proc.Command("go", "run", "main.go")
 			cmd.Dir = filepath.Join(root, "app")
-			if output, err := cmd.CombinedOutput(); err != nil || string(output) != "CARE_DESKTOP_VERSION=1.2.3\n" {
+			if output, err := cmd.CombinedOutput(); err != nil || string(output) != manifest {
 				t.Fatalf("compiled kit is missing or stale: %v\n%s", err, output)
 			}
 			if data, err := os.ReadFile(filepath.Join(install, "setup", "index.html")); err != nil || string(data) != "device setup" {
 				t.Fatalf("nested kit file was not staged: %v", err)
 			}
-			if state == "stale" {
+			if tc.state == "stale" {
 				if _, err := os.Stat(filepath.Join(install, "removed-file")); !os.IsNotExist(err) {
 					t.Fatalf("obsolete kit file survived: %v", err)
 				}
 				if _, err := os.Stat(filepath.Join(install, ".gitkeep")); err != nil {
 					t.Fatalf("tracked placeholder was removed: %v", err)
 				}
+			}
+		})
+	}
+	for _, value := range []string{
+		"",
+		"CARE_DESKTOP_VERSION=invalid\n",
+		"CARE_DESKTOP_VERSION=01.2.3\n",
+		"CARE_DESKTOP_VERSION=1.2.3\nCARE_DESKTOP_VERSION=2.0.0\n",
+	} {
+		t.Run("invalid-version-"+strings.TrimSpace(value), func(t *testing.T) {
+			write("deployments/.env", value)
+			cmd := proc.Command(command[0], command[1:]...)
+			cmd.Dir = bin
+			if output, err := cmd.CombinedOutput(); err == nil {
+				t.Fatalf("invalid release version was accepted: %s", output)
+			}
+			data, err := os.ReadFile(filepath.Join(root, "app", "install", ".env"))
+			if err != nil || string(data) != "CARE_DESKTOP_VERSION=2.3.4-dev\n" {
+				t.Fatalf("invalid version changed the staged kit: %q, %v", data, err)
 			}
 		})
 	}

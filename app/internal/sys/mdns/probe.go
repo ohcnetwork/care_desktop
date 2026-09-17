@@ -15,7 +15,7 @@ func probeHostname(ctx context.Context, host string, link lanInterface) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	packet := ipv4.NewPacketConn(conn)
 	deadline, ok := ctx.Deadline()
 	if !ok {

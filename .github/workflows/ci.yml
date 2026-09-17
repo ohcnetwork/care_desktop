@@ -1,88 +1,209 @@
 name: CI
 
 on:
-  push:
-    branches: ["**"]
   pull_request:
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOFLAGS: -mod=readonly
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: app/go.mod
+          cache-dependency-path: app/go.sum
+      - name: Check Go formatting
+        working-directory: app
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            printf 'Run gofmt on:\n%s\n' "$unformatted"
+            exit 1
+          fi
+      - name: Check engine boundary
+        run: |
+          if grep -Rn --include='*.go' '"github.com/wailsapp/wails' app/internal; then
+            echo "::error::Keep Wails in the application entrypoints, not internal packages."
+            exit 1
+          fi
+      - name: Validate GitHub Actions workflows
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          actionlint -color -shellcheck="" -pyflakes=""
+      - uses: golangci/golangci-lint-action@v9.3.0
+        with:
+          version: v2.13.2
+          working-directory: app
+          args: --timeout=5m
+
   go:
-    name: Go
-    runs-on: ubuntu-latest
+    name: Go tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7.0.0
         with:
           go-version-file: app/go.mod
           cache-dependency-path: app/go.sum
-
-      # No staging step on purpose. app/install/.gitkeep is tracked, so
-      # //go:embed all:install resolves straight from the checkout - and if that
-      # placeholder ever stops being tracked, this job must fail the way a fresh
-      # clone does rather than paper over it with a runner-local file.
-      - name: Build (host)
-        run: go build ./...
-
-      # internal/ must stay free of Wails so the engine is testable and portable.
-      # The CLI used to prove this by compiling; assert it directly instead.
-      - name: internal/ must not import Wails
-        run: |
-          if grep -rq "wailsapp/wails" internal/; then
-            echo "internal/ must not import Wails - keep UI concerns in app/*.go"
-            grep -rn "wailsapp/wails" internal/
-            exit 1
-          fi
-
-      - name: Cross-compile
-        run: |
-          GOOS=windows GOARCH=amd64 go build ./...
-          GOOS=darwin  GOARCH=arm64 go build ./...
-
-      - name: Vet
-        run: go vet ./...
-
-      # -race because the log sink is written from several goroutines at once,
-      # and the redaction test is the only guard on credentials reaching a file
-      # that gets emailed to support.
-      - name: Test
-        run: go test -race ./...
-
-      - name: gofmt
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "These files need gofmt:"
-            echo "$unformatted"
-            exit 1
-          fi
-
-      - uses: golangci/golangci-lint-action@v6
+      - uses: actions/setup-node@v7.0.0
         with:
-          version: latest
-          working-directory: app
+          node-version: "22"
+          package-manager-cache: false
+      - name: Prepare integration-test tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql openssl
+          echo "$(pg_config --bindir)" >> "$GITHUB_PATH"
+      - name: Require test prerequisites
+        run: |
+          for tool in gcc git node python3 openssl initdb postgres psql pg_dump pg_restore; do
+            command -v "$tool"
+          done
+          docker compose version
+      - name: Build from a clean checkout
+        run: go build ./...
+      - name: Test with race detection
+        run: go test -race -count=1 -timeout=15m ./...
+      - name: Check module files were not changed
+        run: git diff --exit-code -- go.mod go.sum
 
   frontend:
     name: Frontend
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: app/frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
         with:
-          node-version: 22
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: "22"
           cache: npm
           cache-dependency-path: app/frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: app/frontend
+        run: npm ci
+      - name: Check bindings, typecheck, and build frontend
+        working-directory: app/frontend
+        run: npm run build
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desktop-frontend
+          path: app/frontend/dist/
+          if-no-files-found: error
+          retention-days: 1
 
-      - run: npm ci
+  native:
+    name: Build ${{ matrix.target }}
+    needs: [lint, go, frontend]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: desktop-macos, os: macos-15, platform: darwin/universal, extra: "" }
+          - { target: desktop-windows, os: windows-2025, platform: windows/amd64, extra: "-nsis" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: app/go.mod
+          cache-dependency-path: app/go.sum
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: "22"
+          package-manager-cache: false
+      - name: Fetch built desktop frontend
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: desktop-frontend
+          path: app/frontend/dist
+      - name: Install Windows installer tooling
+        if: matrix.target == 'desktop-windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "NSIS installation failed" }
+            "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append
+          }
+      - name: Install matching Wails CLI
+        working-directory: app
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@"$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)"
+      - name: Prepare installer metadata and deployment kit
+        run: node app/frontend/scripts/stage-install.mjs
+      - name: Build native application
+        working-directory: app
+        run: wails build -platform ${{ matrix.platform }} -clean -s -skipbindings -m -nosyncgomod ${{ matrix.extra }}
+      - name: Verify and collect unsigned build
+        env:
+          TARGET: ${{ matrix.target }}
+          BUILD_DIR: app/build/bin
+        run: |
+          mkdir -p ci-artifacts
+          case "$TARGET" in
+            *-macos)
+              apps=("$BUILD_DIR"/*.app)
+              test "${#apps[@]}" -eq 1 && test -d "${apps[0]}"
+              codesign --verify --strict "${apps[0]}"
+              ditto -c -k --keepParent "${apps[0]}" "ci-artifacts/$TARGET-unsigned.zip"
+              ;;
+            desktop-windows)
+              installers=("$BUILD_DIR"/*installer.exe)
+              test "${#installers[@]}" -eq 1 && test -s "${installers[0]}"
+              cp "${installers[0]}" "ci-artifacts/$TARGET-unsigned-setup.exe"
+              ;;
+            *) echo "::error::Unknown build target: $TARGET"; exit 1 ;;
+          esac
+          git diff --exit-code -- app/go.mod app/go.sum
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ${{ matrix.target }}-unsigned
+          path: ci-artifacts/
+          if-no-files-found: error
+          retention-days: 7
 
-      - run: npm run build
+  required:
+    name: CI
+    if: always()
+    needs: [lint, go, frontend, native]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every check
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node -e 'const jobs = JSON.parse(process.env.RESULTS); for (const [name, job] of Object.entries(jobs)) { console.log(`${name}: ${job.result}`); if (job.result !== "success") process.exitCode = 1; }'

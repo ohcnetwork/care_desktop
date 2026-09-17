@@ -17,8 +17,10 @@ func (e *Clinic) caddyRootPEM() string {
 		return ""
 	}
 	tmp := f.Name()
-	f.Close()
-	defer os.Remove(tmp)
+	defer func() { _ = os.Remove(tmp) }()
+	if err := f.Close(); err != nil {
+		return ""
+	}
 	if _, err := e.capture("docker", "compose", "cp", "caddy:"+caddyRootPath, tmp); err != nil {
 		return ""
 	}
