@@ -11,5 +11,10 @@ frontend/dist/*
 # wails-generated (bindings + dep hash are regenerated each build/dev)
 frontend/wailsjs/
 frontend/package.json.md5
+# wails-generated Windows inputs: icon from appicon.png, tools rendered from
+# wails.json, WebView2 bootstrapper from the Wails CLI. build/windows/* else is source.
+build/windows/icon.ico
+build/windows/installer/wails_tools.nsh
+build/windows/installer/tmp/
 # wails dev
 .wails/

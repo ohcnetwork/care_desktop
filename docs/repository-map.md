@@ -291,8 +291,12 @@ Generated public trust files and restore/build working files belong to the insta
 | [`build/darwin/Info.plist`](../app/build/darwin/Info.plist) | macOS production bundle metadata template. |
 | [`build/darwin/Info.dev.plist`](../app/build/darwin/Info.dev.plist) | Development bundle metadata, including local-network transport allowance. |
 | [`build/appicon.png`](../app/build/appicon.png) | Wails application-icon source. |
+| [`build/windows/info.json`](../app/build/windows/info.json), [`wails.exe.manifest`](../app/build/windows/wails.exe.manifest) | Windows version resource and manifest templates filled from `wails.json`. |
+| [`build/windows/installer/project.nsi`](../app/build/windows/installer/project.nsi) | NSIS installer definition; `wails_tools.nsh` beside it is generated. |
 | [`ci.yml`](../.github/workflows/ci.yml) | Compilation, package boundary, test, formatting/lint, frontend build checks. |
 | [`release.yml`](../.github/workflows/release.yml) | Release identity, platform builds, packaging/signing, draft release or artifact upload. |
+| [`actions/install-nsis`](../.github/actions/install-nsis/action.yml) | Pinned NSIS install shared by CI and release. |
+| [`signpath/artifact-configuration.xml`](../.github/signpath/artifact-configuration.xml) | SignPath artifact configuration: metadata restrictions the signed files must satisfy. |
 
 The full pipeline and current platform/tool versions are in [development and release](development-and-release.md).
 

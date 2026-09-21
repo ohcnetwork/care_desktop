@@ -152,13 +152,7 @@ jobs:
           path: app/frontend/dist
       - name: Install Windows installer tooling
         if: matrix.target == 'desktop-windows'
-        shell: pwsh
-        run: |
-          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
-            choco install nsis -y --no-progress
-            if ($LASTEXITCODE -ne 0) { throw "NSIS installation failed" }
-            "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append
-          }
+        uses: ./.github/actions/install-nsis
       - name: Install matching Wails CLI
         working-directory: app
         run: go install github.com/wailsapp/wails/v2/cmd/wails@"$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)"
@@ -181,13 +175,47 @@ jobs:
               ditto -c -k --keepParent "${apps[0]}" "ci-artifacts/$TARGET-unsigned.zip"
               ;;
             desktop-windows)
+              app="$BUILD_DIR/CARE Desktop.exe"
+              test -s "$app"
               installers=("$BUILD_DIR"/*installer.exe)
               test "${#installers[@]}" -eq 1 && test -s "${installers[0]}"
+              mkdir -p ci-app
+              cp "$app" ci-app/
               cp "${installers[0]}" "ci-artifacts/$TARGET-unsigned-setup.exe"
               ;;
             *) echo "::error::Unknown build target: $TARGET"; exit 1 ;;
           esac
           git diff --exit-code -- app/go.mod app/go.sum
+      - name: Verify Windows version metadata
+        if: matrix.target == 'desktop-windows'
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path deployments/.env -Pattern '^CARE_DESKTOP_VERSION=(.+)$').Matches.Groups[1].Value.Trim() -replace '-dev$', ''
+          foreach ($file in @("ci-app/CARE Desktop.exe") + (Get-ChildItem ci-artifacts/*.exe).FullName) {
+            $info = (Get-Item $file).VersionInfo
+            "${file}: product='$($info.ProductName)' company='$($info.CompanyName)' version='$($info.ProductVersion)'"
+            if ($info.ProductName -ne 'CARE Desktop' -or $info.CompanyName -ne 'Open Healthcare Network Foundation' -or $info.ProductVersion -ne $version) {
+              throw "Version metadata does not match app/wails.json and deployments/.env"
+            }
+          }
+      - name: Upload Windows application for signing
+        if: matrix.target == 'desktop-windows'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desktop-windows-app
+          path: ci-app/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload Windows installer inputs
+        if: matrix.target == 'desktop-windows'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desktop-windows-installer-inputs
+          path: |
+            app/build/windows/icon.ico
+            app/build/windows/installer/
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: ${{ matrix.target }}-unsigned

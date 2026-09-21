@@ -41,7 +41,46 @@ architecture, file map, Wails API, configuration, lifecycle, backups, native
 integrations and release workflow.
 
 **Releases:** [Preparing and publishing a version](docs/releases.md), including
-manual Actions runs, automatic tags, and existing macOS signing configuration.
+manual Actions runs, automatic tags, and macOS and Windows signing configuration.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+Windows releases are built by [GitHub Actions](.github/workflows/release.yml)
+from a commit of this repository and signed by SignPath only after it has
+verified that the file came from that build. macOS releases are signed and
+notarized with the Open Healthcare Network's Apple Developer ID.
+
+| Role | Members |
+|---|---|
+| Authors — commit to this repository | [@praffq](https://github.com/praffq) |
+| Reviewers — review pull requests | [@praffq](https://github.com/praffq) |
+| Approvers — approve signing of a release | [@praffq](https://github.com/praffq) |
+
+### Privacy
+
+This program will not transfer any information to other networked systems unless
+specifically requested by the user or the person installing or operating it.
+
+CARE Desktop has no telemetry, analytics or crash reporting. It uses the internet
+only when the person setting up or operating the clinic asks for something that
+needs it:
+
+- **Setup** installs Rancher Desktop and Git if they are missing (from github.com,
+  winget, or the operating system's own package tools), clones the CARE backend
+  and frontend from github.com, pulls the PostgreSQL, Redis, Silo and Caddy images
+  from Docker Hub, and builds the CARE images, fetching their package dependencies.
+- **The Windows installer** contains Microsoft's WebView2 bootstrapper, which
+  downloads the WebView2 runtime from Microsoft if the computer lacks it.
+- **Clinic features** the operator turns on, such as SMS sign-in codes and email,
+  send data to the provider the operator configured.
+
+On the clinic network the app announces `https://<clinic>.local` with mDNS so
+staff devices can find it; that traffic stays on the local network. Rancher
+Desktop, the container images and WebView2 are covered by their own privacy
+policies.
 
 Build with `cd app && node frontend/scripts/stage-install.mjs && wails build`
 (needs Go, Node 22 and the Wails CLI). MIT

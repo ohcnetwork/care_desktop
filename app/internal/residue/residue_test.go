@@ -96,7 +96,7 @@ func TestCachedImagesDoNotBlockSetup(t *testing.T) {
 
 func noSystemTraces(proc.Runner) ([]Trace, error) { return nil, nil }
 
-func TestSystemInspectionCannotReportFalseClean(t *testing.T) {
+func TestSystemTracesClassifySetupResidue(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses POSIX command fixtures")
 	}
@@ -110,16 +110,22 @@ func TestSystemInspectionCannotReportFalseClean(t *testing.T) {
 		name   string
 		traces []Trace
 		err    error
+		clean  bool
 	}{
-		{"unknown system state", nil, inspectionError},
-		{"existing hosts entry", []Trace{{ID: "hosts", Label: "Hosts file entry"}}, nil},
+		{"after cleanup", nil, nil, true},
+		{"after network repair", []Trace{{ID: "firewall", Label: "Firewall rules"}}, nil, true},
+		{"unknown system state", nil, inspectionError, false},
+		{"firewall and inspection failure", []Trace{{ID: "firewall"}}, inspectionError, false},
+		{"existing hosts entry", []Trace{{ID: "hosts", Label: "Hosts file entry"}}, nil, false},
+		{"firewall and old hosts entry", []Trace{{ID: "firewall"}, {ID: "hosts"}}, nil, false},
+		{"firewall and old certificate", []Trace{{ID: "firewall"}, {ID: "certificate"}}, nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			report, err := scan(Options{
 				Runner: proc.Runner{Env: os.Environ()}, Project: "care-desktop",
 				InstallDir: filepath.Join(root, "install"),
 			}, func(proc.Runner) ([]Trace, error) { return tc.traces, tc.err })
-			if report.Clean || !errors.Is(err, tc.err) || len(report.Traces) != len(tc.traces) {
+			if report.Clean != tc.clean || !errors.Is(err, tc.err) || len(report.Traces) != len(tc.traces) {
 				t.Fatalf("system inspection was lost: %+v, %v", report, err)
 			}
 		})

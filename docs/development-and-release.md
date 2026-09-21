@@ -209,7 +209,7 @@ missing, and a PR branch push does not trigger a duplicate push workflow.
 | Lint | Formatting, the Wails/internal boundary, pinned Actionlint workflow validation, and golangci-lint v2.13.2 through its v9 action. |
 | Go tests | Clean-checkout `go build ./...` and the full race-enabled test suite, including the release identity/CI gate contracts. Node, PostgreSQL fixture tools, OpenSSL, Python, Git, and Compose must be available rather than silently skipping their tests. |
 | Frontend | Node 22, `npm ci`, binding checks, TypeScript, and the Vite production build. Uploads the built frontend for native builds. |
-| Native builds | After the first three jobs pass: actual Wails macOS universal and Windows/amd64 builds for CARE Desktop. Windows must produce an NSIS installer. |
+| Native builds | After the first three jobs pass: actual Wails macOS universal and Windows/amd64 builds for CARE Desktop. Windows must produce an NSIS installer with NSIS 3.12 from [`install-nsis`](../.github/actions/install-nsis/action.yml), and its version metadata must match `wails.json` and `.env`; the bare application and the generated installer inputs are uploaded separately so a release can sign the application before rebuilding the installer. |
 | CI | Stable aggregate check; fails if any required job failed, was cancelled, or was skipped. Configure this check in branch protection. |
 
 Go comes from `app/go.mod`, and module writes are disallowed. Native jobs reuse
@@ -296,8 +296,14 @@ replaced. Only the draft job has write permission.
 
 macOS preserves the existing optional Developer ID signing/notarization flow and
 secret names; without credentials it retains Wails' ad-hoc signature. Windows
-installers are unsigned. The release manifest records each platform's actual
-status; these remain preview releases.
+application and installer are signed through SignPath when its configuration is
+present, otherwise left unsigned. The release manifest records each platform's
+actual status; these remain preview releases.
+
+The Windows installer definition lives in `app/build/windows/` (`info.json`,
+`wails.exe.manifest`, `installer/project.nsi`). Wails regenerates `icon.ico`,
+`installer/wails_tools.nsh` and the WebView2 bootstrapper from `wails.json` and
+its own module on every build, so those are ignored.
 
 Follow [Releasing CARE Desktop](releases.md) for the complete maintainer procedure
 and safe retry rules.

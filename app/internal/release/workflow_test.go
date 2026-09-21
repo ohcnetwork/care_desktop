@@ -112,7 +112,7 @@ const assert = require("assert/strict");
 const workflow = fs.readFileSync(".github/workflows/release.yml", "utf8");
 const scripts = [...workflow.matchAll(/          node <<'NODE'\n([\s\S]*?)\n          NODE/g)];
 assert.equal(scripts.length, 2);
-for (const signing of ["false", "true"]) {
+for (const signing of ["false", "true"]) for (const windowsSigning of ["false", "true"]) {
 const files = new Map([
   ["CARE-Desktop-1.2.3-macos.dmg", "macOS application"],
   ["CARE-Desktop-1.2.3-windows-amd64-setup.exe", "Windows installer"],
@@ -123,7 +123,7 @@ const key = path => {
   return path.slice("release-assets/".length);
 };
 const env = {
-  SIGN_MACOS: signing,
+  SIGN_MACOS: signing, SIGN_WINDOWS: windowsSigning,
   VERSION: "1.2.3", GITHUB_SHA: "a".repeat(40),
   GITHUB_SERVER_URL: "https://github.com", GITHUB_REPOSITORY: "ohcnetwork/care_desktop",
   GITHUB_RUN_ID: "123",
@@ -152,7 +152,7 @@ assert.equal(manifest.version, env.VERSION);
 assert.equal(manifest.source_commit, env.GITHUB_SHA);
 assert.deepEqual(manifest.signing, {
   macos: signing === "true" ? "developer-id-notarized" : "ad-hoc",
-  windows: "unsigned",
+  windows: windowsSigning === "true" ? "signpath-foundation" : "unsigned",
 });
 assert.equal(manifest.configuration_sha256, hash(files.get("release-config.env")));
 assert.equal(manifest.run_url, "https://github.com/ohcnetwork/care_desktop/actions/runs/123");

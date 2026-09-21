@@ -84,7 +84,7 @@ files, including their tests, have their own complete table in
 | [`clinic/images.go`](../app/internal/clinic/images.go) | Current pinned-image inventory, non-forced tag removal, and explicitly shared Docker build-cache pruning. |
 | [`clinic/leftovers.go`](../app/internal/clinic/leftovers.go) | End-of-engine logging that distinguishes removed resources from deliberately kept backups/images/cache. |
 | [`residue/residue.go`](../app/internal/residue/residue.go) | `Options`, `Trace`, `Report`, production `Scan`, private injectable `scan`, native `systemTraces`, earlier-install discovery, and image-presence classification. |
-| [`residue/residue_test.go`](../app/internal/residue/residue_test.go) | Fail-closed Docker/system inspection, nonblocking image caches, and the correct Docker working-directory template context. |
+| [`residue/residue_test.go`](../app/internal/residue/residue_test.go) | Fail-closed Docker/system inspection, nonblocking image caches and firewall rules, and the correct Docker working-directory template context. |
 
 Neighboring App entry points are linked only to explain their public contract:
 [`app_actions.go`](../app/app_actions.go),
@@ -545,9 +545,9 @@ The public [`PurgeResidue`](../app/app_residue.go) flow:
 
 1. Acquires the App's mutation gate and rejects a normal installed clinic.
 2. Scans residue. If inspection fails, return the error.
-3. If the report is already `Clean`, return without purging. Because images
-   alone are nonblocking, **an images-only cache does not cause this UI path
-   to remove images**.
+3. If the report is already `Clean`, return without purging. Images and firewall
+   rules alone are nonblocking: **this UI path does not remove cached images or
+   undo network repair when no blocking residue exists**.
 4. Require a live desktop context and explicit destructive confirmation.
    Canceling is a normal no-op.
 5. Discover the earlier install directory. Check that the retained backup
@@ -671,16 +671,21 @@ not complete.
 | `config` | A nonempty supplied configuration path exists. | Yes. |
 | `hosts` | Native hosts inspection finds CARE's mapping. | Yes. |
 | `certificate` | Native trust inspection finds a CARE root. | Yes. |
-| `firewall` | Native networking inspection finds owned firewall rules. | Yes. |
+| `firewall` | Native networking inspection finds owned firewall rules. | **No**; network repair creates these before setup. They remain in `Traces`. |
 | `autostart` | Platform autostart reports enabled. | Yes. |
 | `secret` | The caller reports a saved backup password. | Yes. |
 
 Conceptually:
 
 ```text
-Clean = no traces except possibly "images"
+Clean = no traces except possibly "images" and "firewall"
         AND no inspection errors
 ```
+
+Firewall rules must not make the cleanup and network checks invalidate each
+other: network repair creates them before setup. The separate network check
+still validates their configuration. Uninstall and an actual residue purge
+still remove and verify owned firewall rules; only the first-run blocker changes.
 
 A failed Docker query, inaccessible install/config path, or failed native
 inspection makes `Clean=false` even when no positive trace could be produced.
