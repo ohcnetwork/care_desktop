@@ -40,8 +40,7 @@ care_desktop/
 |   |-- backup.Dockerfile
 |   |-- caddy.Dockerfile
 |   |-- scripts/backup.sh
-|   |-- minio/entrypoint.sh
-|   `-- setup/
+|   `-- minio/entrypoint.sh
 `-- .github/
     `-- workflows/
         |-- ci.yml
@@ -60,6 +59,7 @@ All of these files belong to Go `package main`, even though they are organized b
 | [`app.go`](../app/app.go) | `App` state, construction, log/event delivery, mDNS advertiser ownership and watcher. | [Architecture](architecture.md), [Wails application](wails-application.md). |
 | [`app_lifecycle.go`](../app/app_lifecycle.go) | Startup refresh, shutdown, second launch, close confirmation, bounded stop-for-quit. | [Wails application](wails-application.md). |
 | [`app_config.go`](../app/app_config.go) | `Config`, OS configuration path, strict initial loading, cached/atomic saves and forgetting state. | [Configuration](configuration-and-settings.md). |
+| [`app_client.go`](../app/app_client.go) | Native client connection, pinned trust/ownership journal, TLS verification, and exact-certificate uninstall with role reset after success. | [Native integrations](native-integrations.md), [Wails application](wails-application.md). |
 | [`app_installdir.go`](../app/app_installdir.go) | Fixed runtime kit path, unpacking/preservation rules, creation of a configured `Clinic`. | [Configuration](configuration-and-settings.md). |
 | [`app_actions.go`](../app/app_actions.go) | Read/write job gates, async runner, lifecycle/admin guards, setup, action dispatch, failed-install cleanup. | [Wails application](wails-application.md), [clinic lifecycle](clinic-lifecycle.md). |
 | [`app_status.go`](../app/app_status.go) | State/health/tool/network queries, provisioning controls, name/password/folder validation, pre-setup naming. | [Wails application](wails-application.md), [native integrations](native-integrations.md). |
@@ -102,7 +102,6 @@ app/internal/
 |   |-- backup.go
 |   |-- backupstore.go
 |   |-- caddyroot.go
-|   |-- devicescripts.go
 |   |-- thiscomputer.go
 |   |-- uninstall.go
 |   |-- purge.go
@@ -171,9 +170,8 @@ app/internal/
     |   `-- reboot.go
     `-- trust/
         |-- trust.go
-        |-- installer.go
-        |-- trust_test.go
-        `-- installer_test.go
+        |-- client.go
+        `-- trust_test.go
 ```
 
 ### Where each package is explained
@@ -193,7 +191,7 @@ app/internal/
 | [`sys/applog`](../app/internal/sys/applog) | Diagnostic sink, native log location, bounded rotation. | [Native integrations](native-integrations.md). |
 | [`sys/elevate`](../app/internal/sys/elevate) | Interpreter quoting and batching privileged native steps. | [Native integrations](native-integrations.md). |
 | [`sys/hosts`](../app/internal/sys/hosts) | Owned loopback hostname entries and verified removal. | [Native integrations](native-integrations.md). |
-| [`sys/trust`](../app/internal/sys/trust) | Root-CA trust, removal, and downloadable device installers. | [Native integrations](native-integrations.md). |
+| [`sys/trust`](../app/internal/sys/trust) | Root-CA trust, removal, and native client certificate bootstrap. | [Native integrations](native-integrations.md). |
 | [`sys/mdns`](../app/internal/sys/mdns) | LAN address selection, name advertisement, response probing. | [Native integrations](native-integrations.md). |
 | [`sys/netfix`](../app/internal/sys/netfix) | Windows network profiles and application-owned firewall rules. | [Native integrations](native-integrations.md). |
 | [`sys/autostart`](../app/internal/sys/autostart) | Platform login-startup records. | [Native integrations](native-integrations.md). |
@@ -264,13 +262,11 @@ See [Wails API](wails-application.md) and [configuration](configuration-and-sett
 | [`docker-compose.yml`](../deployments/docker-compose.yml) | Services, dependencies, mounts, health checks, fixed project and network identity. |
 | [`backend.env`](../deployments/backend.env) | Initial CARE/backend/backup-related settings; installed copy becomes clinic-specific. |
 | [`frontend.env`](../deployments/frontend.env) | Initial CARE frontend build settings; installed copy is preserved. |
-| [`Caddyfile`](../deployments/Caddyfile) | HTTPS/local CA, reverse proxy, storage routes, setup page, WAF behavior. |
+| [`Caddyfile`](../deployments/Caddyfile) | HTTPS/local CA, reverse proxy, storage routes, public root bootstrap, WAF behavior. |
 | [`caddy.Dockerfile`](../deployments/caddy.Dockerfile) | Builds the proxy with the Coraza module. |
 | [`backup.Dockerfile`](../deployments/backup.Dockerfile) | Tools and permissions required by backup/restore helper containers. |
 | [`scripts/backup.sh`](../deployments/scripts/backup.sh) | Scheduled/manual backup modes, encryption, writer locking, publication and retention. |
 | [`minio/entrypoint.sh`](../deployments/minio/entrypoint.sh) | Starts Silo, waits for readiness, configures credentials and buckets under the retained storage-service identity. |
-| [`setup/index.html`](../deployments/setup/index.html) | Device-onboarding page served by Caddy; consumes generated public trust material. |
-| [`setup/care_logo.svg`](../deployments/setup/care_logo.svg), [`setup/care_logo_mark.svg`](../deployments/setup/care_logo_mark.svg) | Static branding assets for that onboarding page. |
 
 Generated public trust files and restore/build working files belong to the installed copy, not the source kit.
 

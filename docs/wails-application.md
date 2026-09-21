@@ -23,6 +23,11 @@ Startup failures are written to the log and stderr. `fatal()` attempts a native 
 
 ## Startup and shutdown
 
+First run selects and saves a Server or Client role. Existing or partial
+installations infer Server. Clients and unchosen installations do not perform
+Docker/backup inspection or run the server startup path shown below; clients
+instead use native certificate bootstrap and connection management.
+
 ```mermaid
 flowchart TD
     Main["main: open log"] --> New["NewApp"]
@@ -139,7 +144,7 @@ Execution abbreviations: **query** means no `run`/`withJob` helper, **read** mea
 
 | Method | Result | Execution and contract |
 | --- | --- | --- |
-| `GetState()` | `AppState` | Query. Returns embedded version, setup availability, name, Docker status, and pending restore status; journal errors propagate. |
+| `GetState()` | `AppState` | Query. Returns embedded version, role and client URL. Only servers inspect Docker/restore state and expose server setup/name/status; journal errors propagate. Never exposes the pinned PEM or certificate ownership flag. |
 | `DockerStatus()` | `DockerStatus` | Query. Checks actual Docker/Compose usability. |
 | `GitStatus()` | `DockerStatus` | Query. Uses the same `{ok, message}` shape for Git. |
 | `MDNSStatus()` | `NameStatus` | Query. Reports whether this process has an advertiser, not an end-to-end remote-device verdict. |
@@ -156,6 +161,29 @@ Execution abbreviations: **query** means no `run`/`withJob` helper, **read** mea
 | `ClinicStatus()` | `string` | Query. Engine's formatted Compose service status. |
 
 ### Setup and lifecycle
+
+#### Role and client connection
+
+These methods return `error` in Go, resolving to `void` or rejecting the
+JavaScript promise. Role selection lives in
+[`app_config.go`](../app/app_config.go); client operations live in
+[`app_client.go`](../app/app_client.go).
+
+| Method | Execution and contract |
+| --- | --- |
+| `SelectRole(role string)` | Sync. Persists `server` or `client`; rejects ordinary role changes after selection. |
+| `ClearRole()` | Sync. Undoes an unused choice from the setup or client screen's Back button: clears the file only when nothing beyond `role`/`mdns_name` is saved and the install directory is empty; otherwise errors and changes nothing. See [Persisted `Config`](configuration-and-settings.md#persisted-config). |
+| `ConnectClient(address string)` | Sync. Client only. Normalizes a clinic address, rejects changing clinics until disconnected, validates bootstrap and TLS, journals URL/public pin/ownership before OS installation, retries using the saved pin, verifies TLS, and opens CARE. |
+| `DisconnectClient()` | Sync. Client only. Removes only the exact certificate installed by this client, then clears connection/certificate fields and role. Errors retain retry state. |
+
+The frontend refreshes `GetState` after connection or cleanup. A saved URL can
+represent an incomplete installation, so **Uninstall client setup** remains
+available after a failed attempt. The confirmation explains that no server
+data is removed. Pre-existing roots are preserved and may still allow browser
+access. Successful uninstall returns to role selection. OS uninstall removes the
+executable separately. See [client trust and removal](native-integrations.md#native-client-setup-and-trust-on-first-use).
+
+#### Server setup and lifecycle
 
 | Method | Result | Execution and contract |
 | --- | --- | --- |
@@ -248,7 +276,7 @@ The core serialized shapes are:
 
 | Shape | Fields |
 | --- | --- |
-| `AppState` | `version`, `setup_done`, `mdns_name`, `docker`, `restore_pending`. `setup_done` is false while removal is in progress. |
+| `AppState` | `version`, `role`, `client_url`, `setup_done`, `mdns_name`, `docker`, `restore_pending`. Client-specific state exposes neither PEM nor ownership. `setup_done` is false while removal is in progress. |
 | `DockerStatus`, `NameStatus` | `ok`, `message`. |
 | `Health` | `active`, `code`, `detail`. |
 | `NetworkStatus` | `applicable`, `ok`, `message`, `how`, `fixable`. |

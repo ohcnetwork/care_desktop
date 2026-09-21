@@ -6,6 +6,15 @@
 
 CARE Desktop runs a clinic's CARE installation on one computer without requiring the operator to administer a server. Staff use a browser to access the clinic on the local network. The desktop application is the installation and operations console, not the medical record server.
 
+The first-run Server/Client choice is persisted, not an ordinary role switch.
+Server mode owns the stack and advertises the clinic's `.local` name. Client
+mode connects to the address shown on the server, installs certificate trust
+through native OS approval, verifies HTTPS, and opens the clinical browser
+application. It does not provision Docker/Git or advertise mDNS. See
+[native bootstrap and its trust-on-first-use limitation](native-integrations.md#native-client-setup-and-trust-on-first-use).
+Multiple separately named servers are valid; this is not a network-wide
+single-clinic enforcement system.
+
 The application coordinates existing tools rather than replacing them:
 
 | Responsibility | Implementation |
@@ -18,7 +27,7 @@ The application coordinates existing tools rather than replacing them:
 | Cache and task broker | Redis. |
 | Uploaded files | Silo, retaining the Compose service name `minio`. |
 | HTTPS and reverse proxy | Caddy with the Coraza WAF module. |
-| Local name discovery | An mDNS advertiser in the desktop process. |
+| Local name discovery | An mDNS advertiser in the server desktop process. |
 | Scheduled backups | A shell program in the backup container, not a Go timer. |
 
 Initial provisioning and image construction need external downloads. An already prepared clinic can operate locally, but missing images, uncached build dependencies, and optional services such as outbound email can still require internet access.

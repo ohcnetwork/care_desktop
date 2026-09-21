@@ -18,7 +18,7 @@ import { errorText, firstLine } from "@/lib/format";
 import { RUN_STEPS, type RunStep } from "@/lib/run-steps";
 import type { Backup } from "@/types";
 
-export type Flow = "setup" | "installing" | "failed" | "panel";
+export type Flow = "role" | "client" | "setup" | "installing" | "failed" | "panel";
 export type SetupStep = "checks" | "backup" | "admin" | "install";
 export type PanelTab = "overview" | "backups" | "advanced";
 export type SystemState = "running" | "partial" | "stopped" | "unknown";
@@ -60,7 +60,7 @@ const ACTION_LABELS: Record<string, string> = {
 export const RESTORE_PENDING_NOTICE =
   "An earlier restore is unfinished. Start CARE to recover it before doing anything else.";
 
-// Docker Desktop needs about a minute after a reboot before it can answer, and
+// Rancher Desktop needs about a minute after a reboot before it can answer, and
 // the panel starts the clinic itself on launch. Nothing is wrong until then.
 const GRACE_MS = 90_000;
 
@@ -75,6 +75,9 @@ type CareStore = {
   ready: boolean;
   flow: Flow;
   mdnsName: string;
+  clientURL: string;
+  selectRole: (role: "server" | "client") => Promise<void>;
+  clearRole: () => Promise<boolean>;
 
   /** Which setup section is expanded — the rail highlights the same one. */
   openStep: SetupStep;
@@ -121,7 +124,8 @@ export function useCare(): CareStore {
 
 export function CareProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
-  const [flow, setFlowState] = useState<Flow>("setup");
+  const [flow, setFlowState] = useState<Flow>("role");
+  const [clientURL, setClientURL] = useState("");
   const [mdnsName, setMdnsName] = useState("care.local");
   const [openStep, setOpenStep] = useState<SetupStep>("checks");
   const [stepsDone, setStepsDone] = useState(NO_STEPS_DONE);
@@ -141,7 +145,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
 
   // Refs shadow the state the event handlers and the poll timer read, so they
   // never work from a stale closure and never need to re-subscribe.
-  const flowRef = useRef<Flow>("setup");
+  const flowRef = useRef<Flow>("role");
   const runRef = useRef<RunState>(IDLE_RUN);
   const busyRef = useRef(false);
   const restorePendingRef = useRef(false);
@@ -163,6 +167,11 @@ export function CareProvider({ children }: { children: ReactNode }) {
     flowRef.current = next;
     setFlowState(next);
   }, []);
+
+  const selectRole = useCallback(async (role: "server" | "client") => {
+    await bridge.SelectRole(role);
+    setFlow(role === "client" ? "client" : "setup");
+  }, [setFlow]);
 
   const setRun = useCallback((next: RunState) => {
     runRef.current = next;
@@ -215,6 +224,18 @@ export function CareProvider({ children }: { children: ReactNode }) {
     },
     [pushLine],
   );
+
+  const clearRole = useCallback(async () => {
+    try {
+      await bridge.ClearRole();
+    } catch (e) {
+      log(`role: ${errorText(e)}`);
+      toast(firstLine(errorText(e)));
+      return false;
+    }
+    setFlow("role");
+    return true;
+  }, [log, setFlow]);
 
   const failInstall = useCallback(() => {
     const tail = logRef.current.slice(-40).join("\n").trim();
@@ -381,6 +402,10 @@ export function CareProvider({ children }: { children: ReactNode }) {
     let restorePending = false;
     try {
       const state = await bridge.GetState();
+      if (state.role !== "server") {
+        setFlow(state.role === "client" ? "client" : "role");
+        return;
+      }
       setMdnsName(state.mdns_name || "care.local");
       restorePending = state.restore_pending;
       restorePendingRef.current = restorePending;
@@ -408,7 +433,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
     } catch {
       /* can't tell whether it's up — leave it to the operator */
     }
-  }, [log, refresh, reloadBackups, runAction, syncAutostart]);
+  }, [log, refresh, reloadBackups, runAction, syncAutostart, setFlow]);
 
   const openPanel = useCallback(() => {
     setFlow("panel");
@@ -477,6 +502,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
         logFromHost(line);
       }),
       onCareEvent("care-done", (code: number) => {
+        if (flowRef.current === "role" || flowRef.current === "client") return;
         if (flowRef.current !== "panel") {
           if (code !== 0) {
             log(`\n× Setup failed (exit ${code}).`);
@@ -517,7 +543,9 @@ export function CareProvider({ children }: { children: ReactNode }) {
       }),
       onCareEvent("uninstalled", () => {
         toast("Uninstalled");
-        window.setTimeout(() => window.location.reload(), 1800);
+        setBusy(false);
+        setFlow("role");
+        window.location.reload();
       }),
     ];
     return () => unsubscribes.forEach((off) => off?.());
@@ -530,9 +558,14 @@ export function CareProvider({ children }: { children: ReactNode }) {
         const state = await bridge.GetState();
         setVersion(state.version);
         setMdnsName(state.mdns_name || "care.local");
-        if (state.setup_done) {
+        setClientURL(state.client_url || "");
+        if (state.role === "client") {
+          setFlow("client");
+        } else if (state.role === "server" && state.setup_done) {
           setFlow("panel");
           await bootPanel();
+        } else if (state.role === "server") {
+          setFlow("setup");
         }
       } catch (e) {
         setBootError(new Error(errorText(e)));
@@ -554,6 +587,9 @@ export function CareProvider({ children }: { children: ReactNode }) {
       ready,
       flow,
       mdnsName,
+      clientURL,
+      selectRole,
+      clearRole,
       openStep,
       setOpenStep,
       stepsDone,
@@ -585,7 +621,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
       log,
     }),
     [
-      ready, flow, mdnsName, openStep, stepsDone, setStepDone,
+      ready, flow, mdnsName, clientURL, selectRole, clearRole, openStep, stepsDone, setStepDone,
       run, startInstall, retryInstall, restartSetup, openPanel,
       tab, busy, busyLabel, system, systemDetail, trouble, restorePending, version, backups, backupsError, autostart, refresh, reloadBackups,
       runAction, setAutostart, restore, restoreFile, uninstall, log,

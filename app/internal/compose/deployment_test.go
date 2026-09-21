@@ -71,6 +71,46 @@ func TestCaddyRoutesConfiguredBuckets(t *testing.T) {
 	}
 }
 
+func TestCaddyBootstrapOnlyServesPublicRoot(t *testing.T) {
+	data, err := os.ReadFile("../../../deployments/Caddyfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	start := strings.Index(text, "(bootstrap) {")
+	end := strings.Index(text, "(site) {")
+	if start < 0 || end <= start {
+		t.Fatal("missing bootstrap route group")
+	}
+	bootstrap := text[start:end]
+	for _, want := range []string{
+		"handle /setup* {\n\t\trespond 404\n\t}",
+		"handle /root.crt {\n\t\theader Content-Type application/x-x509-ca-cert\n\t\troot * /data/caddy/pki/authorities/local\n\t\tfile_server\n\t}",
+	} {
+		if !strings.Contains(bootstrap, want) {
+			t.Fatalf("missing bootstrap contract: %s", want)
+		}
+	}
+	for _, forbidden := range []string{"Referer", "query", "redir", "root.crt*", "handle_path", "install-cert", "root * /setup"} {
+		if strings.Contains(bootstrap, forbidden) {
+			t.Fatalf("bootstrap contains obsolete or unsafe directive: %s", forbidden)
+		}
+	}
+	if !strings.Contains(text, ":80 {\n\timport bootstrap") {
+		t.Fatal("public root is not available over HTTP")
+	}
+	compose, err := os.ReadFile("../../../deployments/docker-compose.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(compose), "./setup:") {
+		t.Fatal("retired setup directory is still mounted")
+	}
+	if _, err := os.Stat("../../../deployments/setup"); !os.IsNotExist(err) {
+		t.Fatalf("retired setup assets remain in the deployment kit: %v", err)
+	}
+}
+
 func TestComposePassesSharedStorageSettings(t *testing.T) {
 	if !proc.Exists("docker") {
 		t.Skip("Docker Compose is not installed")

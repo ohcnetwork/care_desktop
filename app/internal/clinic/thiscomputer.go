@@ -49,7 +49,7 @@ func localSetupResult(host string, hostsReady, trustReady bool, err error) strin
 		detail = " (" + err.Error() + ")"
 	}
 	return "Could not confirm " + strings.Join(incomplete, " and ") + detail +
-		". Other devices are unaffected; open http://localhost/setup to finish local setup by hand."
+		". Other devices are unaffected; try starting CARE again to retry local setup, or ask your administrator for help."
 }
 
 func confirmPrompt(host string, steps []elevate.Step) (title, message string) {

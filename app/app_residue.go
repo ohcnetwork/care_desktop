@@ -11,6 +11,9 @@ import (
 )
 
 func (a *App) ScanResidue() (residue.Report, error) {
+	if err := a.requireServer(); err != nil {
+		return residue.Report{}, err
+	}
 	e := a.engine()
 	dir, err := a.residueInstallDir(e)
 	if err != nil {
@@ -38,7 +41,7 @@ func (a *App) keepChosenName(before Config) error {
 	if before.SetupDone || before.Removing || before.MDNSName == "" {
 		return nil
 	}
-	if err := a.saveConfig(Config{MDNSName: before.MDNSName}); err != nil {
+	if err := a.saveConfig(Config{Role: before.Role, MDNSName: before.MDNSName}); err != nil {
 		return err
 	}
 	a.restartAdvertise()
@@ -46,7 +49,7 @@ func (a *App) keepChosenName(before Config) error {
 }
 
 func (a *App) PurgeResidue() error {
-	return a.withJob(func() error {
+	return a.withServerJob(func() error {
 		cfg := a.loadConfig()
 		if cfg.SetupDone && !cfg.Removing {
 			return errors.New("this computer already has a clinic set up - use Uninstall in the panel instead")

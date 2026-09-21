@@ -7,6 +7,18 @@ Stopping a clinic and uninstalling it are fundamentally different operations.
 volumes. Stop does not.** Keeping the backup directory is not the same as
 keeping the running clinic's data volumes.
 
+**Client cleanup is different:** use **Uninstall client setup** to disconnect a
+staff computer. It removes only the saved connection and exact certificate
+installed by that client; it does not invoke server uninstall, touch hosts
+files, delete clinic data, or remove unrelated trusted roots. Failures retain
+state for retry. Pre-existing trusted certificates are preserved and may still
+permit browser access; cleanup is not a blanket access revocation.
+Successful client or server uninstall clears the saved role and returns to the
+Server/Client choice. Failed cleanup retains the role and retry state. Retained
+backups do not count as an active server installation. Uninstall the setup before
+using OS uninstall to remove the desktop executable. See
+[client removal](native-integrations.md#removing-client-access).
+
 For a former server now used as a browser client, see
 [client recovery](client-recovery.md): it distinguishes a hosts-only repair from
 the destructive standalone cleanup scripts used when the app is unavailable.

@@ -44,7 +44,7 @@ func (a *App) RunUninstall(removeImages, removeBackups bool, adminPassword strin
 		if err := backup.ForgetPassword(); err != nil {
 			return err
 		}
-		if err := a.forgetConfig(); err != nil {
+		if err := a.resetConfigAfterUninstall(); err != nil {
 			return err
 		}
 		a.logln("Uninstall complete.")

@@ -2,8 +2,8 @@
 
 Self-contained, offline [CARE](https://github.com/ohcnetwork/care) for a small clinic.
 One installer on one computer runs the whole EMR — backend, web app, database, file
-storage and nightly encrypted backups — and staff open it from any phone or laptop
-on the clinic Wi-Fi at `https://<clinic>.local`. No cloud account, and no internet
+storage and nightly encrypted backups — and staff connect from other computers
+using CARE Desktop in client mode on the clinic Wi-Fi. No cloud account, and no internet
 needed after the first install.
 
 **Download:** [releases](https://github.com/ohcnetwork/care_desktop/releases)
@@ -14,16 +14,43 @@ See [client recovery and earlier-install cleanup](docs/client-recovery.md).
 
 ## What it does
 
-- **Setup wizard** — checks the computer (Docker, Git, network), takes a backup
+- **First-run choice** — choose **Server** to host a clinic or **Client** to
+  connect to one. The role is saved; ordinary use does not switch roles.
+- **Server setup wizard** — checks the computer (Docker, Git, network), takes a backup
   folder and password and an admin login, then builds and starts CARE.
-- **Control panel** — start/stop/restart, start at login, the clinic address, and
-  an "Add a device" page that trusts the local certificate on staff devices.
+- **Server control panel** — start/stop/restart, start at login, and the clinic address.
+- **Native client setup** — enter the clinic's `.local` address shown on its
+  server. No Docker, Git, or mDNS advertising runs on the client. CARE downloads
+  and validates the public certificate, verifies the server's TLS hostname
+  before installation, requests OS administrator approval when needed, and
+  automatically checks HTTPS before opening CARE. Later connections use the
+  saved certificate pin rather than silently downloading a replacement.
+- **Back** — on the server setup and client screens, returns to the Server/Client
+  choice after a misclick. It is only offered while nothing has been installed
+  or connected; after that, uninstall is the way back.
+- **Uninstall client setup** — disconnect a client and remove only the certificate
+  it installed, without touching server data. Successful uninstall clears its role
+  and returns to the Server/Client choice, as does successful server uninstall.
+  Remove access before connecting to another clinic or uninstalling the desktop
+  app through the operating system. Pre-existing trusted certificates remain
+  and may still permit browser access. Uninstall the setup in CARE Desktop before
+  removing the executable through the operating system.
 - **Backups** — nightly encrypted backups of the database and uploaded files,
   back up now, restore from the backup folder or an imported file.
 - **Advanced** — plain-language clinic settings (backups, sign-in, patient SMS
   codes, email, branding, languages, visits, billing), backend plugins, log, uninstall.
 
 ## How it works
+
+Client setup uses trust on first use over the local network: the initial
+certificate download is HTTP, not authenticated HTTPS. Use a trusted clinic
+network and the address supplied by its administrator. Automatic certificate and
+TLS checks do not prove that an attacker did not impersonate the server during
+that first download. There is no manual fingerprint-comparison step.
+The old web setup page and downloadable certificate installers are retired;
+there is no supported phone/tablet installer in this flow. Separate clinic
+servers with unique names remain valid; CARE does not enforce a signed,
+network-wide single-clinic rule.
 
 A Go / [Wails](https://wails.io) desktop app with a React UI drives a Docker Compose
 stack: the CARE backend and workers, the CARE frontend, PostgreSQL, Redis, Silo for
@@ -33,7 +60,7 @@ built on the clinic's machine from the upstream commits pinned in `deployments/.
 | Path | What lives there |
 |---|---|
 | `app/` | The desktop app: Go engine in `internal/`, Wails bindings in `*.go`, React UI in `frontend/` |
-| `deployments/` | The kit installed on the clinic computer: compose file, Caddyfile, env files, backup script, device-setup page |
+| `deployments/` | The server kit: compose file, Caddyfile, env files, backup script, and public certificate bootstrap route |
 | `.github/workflows/` | CI and manually triggered releases using the version and pins in `deployments/.env` |
 
 **Backend documentation:** [Start with `docs/README.md`](docs/README.md) for the
@@ -68,7 +95,7 @@ CARE Desktop has no telemetry, analytics or crash reporting. It uses the interne
 only when the person setting up or operating the clinic asks for something that
 needs it:
 
-- **Setup** installs Rancher Desktop and Git if they are missing (from github.com,
+- **Server setup** installs Rancher Desktop and Git if they are missing (from github.com,
   winget, or the operating system's own package tools), clones the CARE backend
   and frontend from github.com, pulls the PostgreSQL, Redis, Silo and Caddy images
   from Docker Hub, and builds the CARE images, fetching their package dependencies.
@@ -77,8 +104,10 @@ needs it:
 - **Clinic features** the operator turns on, such as SMS sign-in codes and email,
   send data to the provider the operator configured.
 
-On the clinic network the app announces `https://<clinic>.local` with mDNS so
-staff devices can find it; that traffic stays on the local network. Rancher
+On the clinic network the server announces `https://<clinic>.local` with mDNS so
+staff computers can find it; clients do not advertise a clinic. Clients retrieve
+the public certificate over local HTTP and check the clinic over HTTPS. That
+traffic stays on the local network. Rancher
 Desktop, the container images and WebView2 are covered by their own privacy
 policies.
 

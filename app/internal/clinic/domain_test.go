@@ -39,12 +39,10 @@ func TestApplyDomainPreservesUnmanagedSettings(t *testing.T) {
 		"PLUGIN_TEMPLATE='first\r\nBUCKET_EXTERNAL_ENDPOINT=https://example.local\r\nlast'\r\n" +
 		"PLUGIN_COLON: 'first\r\nBUCKET_EXTERNAL_ENDPOINT=https://example.local\r\nlast'\r\n"
 	frontend := "REACT_CARE_API_URL=https://example.local\nPLUGIN_API=https://printer.local\nPLUGIN_CLINIC=https://example.local\n"
-	setup := "<a href=\"https://example.local\">CARE</a><a href=\"https://printer.local\">Printer</a>"
 	for name, content := range map[string]string{
-		"Caddyfile":        caddy,
-		"backend.env":      backend,
-		"frontend.env":     frontend,
-		"setup/index.html": setup,
+		"Caddyfile":    caddy,
+		"backend.env":  backend,
+		"frontend.env": frontend,
 	} {
 		writeDomainFile(t, dir, name, content)
 	}
@@ -55,10 +53,9 @@ func TestApplyDomainPreservesUnmanagedSettings(t *testing.T) {
 	expectedBackend := strings.Replace(backend, "https://example.local:443/files", "https://north.local:443/files", 1)
 	expectedBackend = strings.Replace(expectedBackend, `["https://example.local",`, `["https://north.local",`, 1)
 	expected := map[string]string{
-		"Caddyfile":        strings.Replace(strings.Replace(caddy, "*example.local*", "*north.local*", 1), "example.local:443 {", "north.local:443 {", 1),
-		"backend.env":      expectedBackend,
-		"frontend.env":     strings.Replace(frontend, "REACT_CARE_API_URL=https://example.local", "REACT_CARE_API_URL=https://north.local", 1),
-		"setup/index.html": strings.Replace(setup, "https://example.local", "https://north.local", 1),
+		"Caddyfile":    strings.Replace(strings.Replace(caddy, "*example.local*", "*north.local*", 1), "example.local:443 {", "north.local:443 {", 1),
+		"backend.env":  expectedBackend,
+		"frontend.env": strings.Replace(frontend, "REACT_CARE_API_URL=https://example.local", "REACT_CARE_API_URL=https://north.local", 1),
 	}
 	for name, want := range expected {
 		if got := readDomainFile(t, dir, name); got != want {
@@ -115,15 +112,6 @@ func TestApplyDomainHandlesIncompleteSetup(t *testing.T) {
 	if got := readDomainFile(t, dir, "backend.env"); got != "BUCKET_EXTERNAL_ENDPOINT=https://retry.local\nCSRF_TRUSTED_ORIGINS=[\"https://retry.local\", \"https://scanner.local\"]\n" {
 		t.Fatalf("preserved environment was not updated during retry: %s", got)
 	}
-	setup := "<p class=\"lede\">Install the certificate once to open <b>https://first.local</b> without warnings.</p>\n" +
-		"<a href=\"https://scanner.local\">Scanner</a>\n"
-	writeDomainFile(t, dir, "setup/index.html", setup)
-	if err := e.ApplyDomain(); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := readDomainFile(t, dir, "setup/index.html"), strings.Replace(setup, "first.local", "retry.local", 1); got != want {
-		t.Fatalf("partly updated setup page retained the old hostname: %s", got)
-	}
 }
 
 func TestApplyDomainRejectsInvalidInputsBeforeWriting(t *testing.T) {
@@ -152,22 +140,22 @@ func TestApplyDomainRejectsInvalidInputsBeforeWriting(t *testing.T) {
 	}
 }
 
-func TestApplyDomainUpdatesDeviceGuide(t *testing.T) {
-	page, err := os.ReadFile("../../../deployments/setup/index.html")
+func TestApplyDomainUpdatesCurrentCaddyfile(t *testing.T) {
+	caddy, err := os.ReadFile("../../../deployments/Caddyfile")
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	writeDomainFile(t, dir, "setup/index.html", string(page))
+	writeDomainFile(t, dir, "Caddyfile", string(caddy))
 	e := &Clinic{InstallDir: dir, MDNSName: "first"}
 	for _, host := range []string{"first", "renamed"} {
 		e.MDNSName = host
 		if err := e.ApplyDomain(); err != nil {
 			t.Fatal(err)
 		}
-		want := strings.ReplaceAll(string(page), "example.local", host+".local")
-		if got := readDomainFile(t, dir, "setup/index.html"); got != want {
-			t.Fatal("device guide did not update every clinic link")
+		want := strings.ReplaceAll(string(caddy), "example.local", host+".local")
+		if got := readDomainFile(t, dir, "Caddyfile"); got != want {
+			t.Fatal("proxy configuration did not update the clinic host")
 		}
 	}
 }

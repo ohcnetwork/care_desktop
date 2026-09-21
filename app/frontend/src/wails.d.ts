@@ -21,6 +21,10 @@ declare global {
       main: {
         App: {
           GetState(): Promise<AppState>;
+          SelectRole(role: "server" | "client"): Promise<void>;
+          ClearRole(): Promise<void>;
+          ConnectClient(address: string): Promise<void>;
+          DisconnectClient(): Promise<void>;
           DockerStatus(): Promise<DockerStatus>;
           GitStatus(): Promise<DockerStatus>;
           MDNSStatus(): Promise<NameStatus>;

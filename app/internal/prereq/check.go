@@ -33,7 +33,7 @@ func DockerCheck(run proc.Runner) Status {
 			return Status{OK: false, Message: composeAdvice()}
 		}
 		return Status{OK: true, Message: "Docker " + version}
-	case isNotFound(err):
+	case isNotFound(err) || !rancherDesktopInstalled():
 		return Status{OK: false, Message: missing}
 	default:
 		return Status{OK: false, Message: stopped}

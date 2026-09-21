@@ -136,12 +136,6 @@ export function OverviewTab() {
             <Button variant="glass" onClick={copyAddress}>
               Copy
             </Button>
-            <Button
-              variant="outlineGlass"
-              onClick={() => void bridge.OpenURL(`https://${mdnsName}/setup`)}
-            >
-              Add a device
-            </Button>
           </div>
         </div>
 

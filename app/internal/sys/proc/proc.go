@@ -146,6 +146,16 @@ func AugmentedPath() string {
 	return strings.Join(parts, sep)
 }
 
+func DockerHost() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "unix://" + filepath.Join(os.Getenv("HOME"), ".rd", "docker.sock")
+	case "windows":
+		return "npipe:////./pipe/docker_engine"
+	}
+	return ""
+}
+
 // FixPath widens the process PATH so binary lookups succeed.
 func FixPath() {
 	var parts []string

@@ -66,7 +66,7 @@ flowchart TD
     Clinic --> Builder["compose.Builder: four clinic image builds"]
     Clinic --> Backup["backup.Store: keys and restore recovery"]
     Clinic --> Health["health: local HTTP and port checks"]
-    Clinic --> Native["Native completion: device scripts and local trust"]
+    Clinic --> Native["Native completion: local trust"]
     Builder --> Runner
     Backup --> Runner
     Runner --> Tools["Docker Compose, Docker, and Git"]
@@ -115,7 +115,7 @@ remaining teardown files and the residue package.
 
 Backup-facing `clinic/backup.go`, `backupstore.go`, and
 `backup_script_test.go` are documented in [backups and restore](backups-and-restore.md).
-The certificate, device-script, and this-computer files, including
+The certificate and this-computer files, including
 `thiscomputer_test.go`, are documented in [native integrations](native-integrations.md).
 
 ## 2. Three different copies of application material
@@ -167,10 +167,21 @@ Each call to [`Runner()`](../app/internal/clinic/clinic.go) creates a
   The latter lets label-based inspection run even when installation files are
   absent. It does not make a missing Compose file usable.
 - `Env` starts with `os.Environ()` and appends the engine's explicit settings.
-  The inherited Docker context, daemon connection settings, and other host
-  environment values still matter.
+  Other host environment values still matter, but not the Docker engine
+  selection: see the next two points.
 - `PATH` uses `proc.AugmentedPath()` so GUI-launched processes can find Docker
   and Git in their normal installation locations.
+- On macOS and Windows, `DOCKER_HOST` is pinned to Rancher Desktop's endpoint
+  from `proc.DockerHost()` (`unix://$HOME/.rd/docker.sock`, or
+  `npipe:////./pipe/docker_engine`) and `DOCKER_CONTEXT` is set to `default`,
+  so the CLI ignores `currentContext` in `~/.docker/config.json` and any
+  inherited `DOCKER_HOST`/`DOCKER_CONTEXT`. Docker Desktop rewrites
+  `currentContext` to `desktop-linux` every time it starts; without the pin a
+  computer with both applications installed silently switched engines, and an
+  uninstall then reported success after cleaning the wrong engine while the
+  clinic kept running in Rancher Desktop. Every engine, check, residue,
+  backup and restore command goes through this runner, so the pin covers all
+  of them. Linux keeps the inherited engine (native Docker Engine).
 - `Log` is the same callback supplied to the engine.
 
 `dc(args...)` means a runner invocation of `docker compose` with those
@@ -439,14 +450,13 @@ of just one required image.
 
 ## 6. Hostname, buckets, and proxy routing form one configuration
 
-[`ApplyDomain`](../app/internal/clinic/domain.go) manages exactly four files:
+[`ApplyDomain`](../app/internal/clinic/domain.go) manages exactly three files:
 
 | Installed file | Managed content |
 | --- | --- |
 | `backend.env` | Values assigned to `CSRF_TRUSTED_ORIGINS` and `BUCKET_EXTERNAL_ENDPOINT`. |
 | `frontend.env` | Values assigned to `REACT_CARE_API_URL`. |
-| `Caddyfile` | Tokens for recognized managed hosts, including the clinic TLS site and certificate-download referer hint. |
-| `setup/index.html` | Recognized managed-host tokens in the device setup page. |
+| `Caddyfile` | Tokens for recognized managed hosts, including the clinic TLS site. |
 
 It validates the clinic label, reads all available files, and parses the
 environment files before writing any changes. Missing files are allowed, so a
@@ -455,8 +465,7 @@ and dotenv parse errors stop the operation before the write phase.
 
 The managed-host set begins with the template's `example.local`. The code also
 recognizes previous `.local` hosts from parseable managed URL values, the
-expected Caddy site-block shape, and the setup page's expected introductory
-sentence. It then replaces **whole matching host tokens**, not every occurrence
+expected Caddy site-block shape. It then replaces **whole matching host tokens**, not every occurrence
 of `.local`:
 
 - An unrelated device such as `scanner.local` is not automatically renamed.
@@ -468,7 +477,7 @@ of `.local`:
   quoted values rather than rewriting the entire file from a parsed map.
 
 Each changed file is atomically replaced with its existing permission bits.
-This is **per-file atomicity**, not a transaction across all four files: a write
+This is **per-file atomicity**, not a transaction across all three files: a write
 failure partway through can leave some files updated. Idempotence and discovery
 of previous managed hosts make retries possible. Custom Caddy block shapes or
 URL values outside the recognized forms are not a generic configuration
@@ -538,7 +547,7 @@ represented by that example.
 flowchart LR
     Browser["Browser on clinic host or LAN"] --> HTTP["Caddy TCP 80"]
     Browser --> HTTPS["Caddy TCP 443: clinic host"]
-    HTTP --> Bootstrap["Setup page, installers, public root certificate"]
+    HTTP --> Bootstrap["Public root certificate; retired setup returns 404"]
     HTTP --> Redirect["Other paths: redirect to HTTPS"]
     HTTPS --> Bootstrap
     HTTPS --> API["API routes: Coraza then backend:9000"]
@@ -553,8 +562,8 @@ flowchart LR
 | --- | --- |
 | HTTP `:80` | Serve the bootstrap routes without requiring prior CA trust; redirect other requests to HTTPS. The redirect is explicit, because automatic HTTPS redirects are disabled globally. |
 | Clinic host `:443` | Use Caddy's internal CA, then import bootstrap and normal site routing. |
-| `/setup*` | Strip the setup prefix and serve the read-only `/setup` tree with `index.html`. Installer downloads receive attachment/octet-stream headers. |
-| `/root.crt` | Serve the public local CA certificate. Direct requests without `ok=1` or a matching referer hint are redirected to setup first. This is a download-navigation guard, not authentication. |
+| `/setup*` | Return 404; no retired setup page or installer is served, including through the frontend fallback. |
+| `/root.crt` | Serve only `/data/caddy/pki/authorities/local/root.crt`, the public local CA certificate, without query or referer restrictions. The native client sends `?ok=1` for older-server compatibility. |
 | `/api/*` | Run the Coraza WAF, then proxy to `backend:9000`. |
 | `/static/*`, `/ping/*`, `/health/*` | Proxy to the backend without the API-specific WAF block. |
 | Configured patient/facility bucket path prefixes | Proxy to `minio:9000` without exposing an object-storage host port. |
@@ -610,7 +619,7 @@ Ports shown as internal are not host-published by this kit.
 | `celery-worker` | `BACKEND_IMAGE`; `bash celery_worker.sh`, `backend.env`. | `db` and `redis` healthy. | No dedicated volume declared here. | No published port. |
 | `celery-beat` | `BACKEND_IMAGE`; `bash celery_beat.sh`, `backend.env`. | `db` and `redis` healthy. | No dedicated volume declared here. | No published port. |
 | `frontend` | `FRONTEND_IMAGE`; image default process, with configuration baked at build time. | `backend` started. | No host environment-file mount. | Web server 80 internally. |
-| `caddy` | `CADDY_WAF_IMAGE`; generate WAF mode file and execute Caddy. | `backend`, `frontend`, `minio` started. | `Caddyfile` and `setup/` read-only; `caddy-data` at `/data`; `caddy-config` at `/config`. | Host TCP 80 to 80 and TCP 443 to 443. |
+| `caddy` | `CADDY_WAF_IMAGE`; generate WAF mode file and execute Caddy. | `backend`, `frontend`, `minio` started. | `Caddyfile` read-only; `caddy-data` at `/data`; `caddy-config` at `/config`. | Host TCP 80 to 80 and TCP 443 to 443. |
 | `backup` | `BACKUP_IMAGE`; `/bin/sh /backup.sh`, `backend.env`. | `db` healthy. | Backup script read-only; selected backup directory writable at `/backups`; `keys/` read-only; `minio-data` read-only at `/minio-data`. | No published port. |
 
 ```mermaid
@@ -657,14 +666,12 @@ engine's default `Desktop/care-db-backups` location.
 | [`Caddyfile`](../deployments/Caddyfile) | TLS sites, public certificate bootstrap, API/WAF routing, bucket paths, and localhost health routing. |
 | [`caddy.Dockerfile`](../deployments/caddy.Dockerfile) | Compile Caddy with the pinned Coraza module and copy it into the runtime base. |
 | [`minio/entrypoint.sh`](../deployments/minio/entrypoint.sh) | Run Silo, wait for readiness, establish buckets and facility download policy, and forward shutdown signals. |
-| [`setup/index.html`](../deployments/setup/index.html) | Standalone device-trust instructions and installer/certificate links; not the Wails control panel. |
 
-The setup page uses local HTML/CSS/JavaScript, displays OS-specific
-instructions, supports selecting an OS from the URL hash, and provides
-desktop installer downloads for Windows, macOS, and Linux. Android and
-iOS/iPadOS use manual certificate instructions. Generated scripts and their
-failure behavior are covered by [native integrations](native-integrations.md).
-The page's public root certificate is not the CA's private key.
+Client onboarding is native CARE Desktop functionality, described in
+[native integrations](native-integrations.md#native-client-setup-and-trust-on-first-use).
+The public root bootstrap is not the CA's private key. Existing unused setup
+files need not be deleted from installed kits: current routes and mounts no
+longer expose them.
 
 The backup Dockerfile and backup script are described in
 [backups and restore](backups-and-restore.md).
@@ -689,7 +696,7 @@ flowchart TD
     All --> Proxy["Force-recreate only Caddy; wait up to 300 seconds"]
     Proxy --> Health["Wait for backend HTTP health, up to 3 minutes"]
     Health --> Finish["Backups.FinishRestore"]
-    Finish --> Local["Log clinic URL; write device scripts; set up this computer"]
+    Finish --> Local["Log clinic URL; set up this computer"]
     Local --> Done["Return success"]
 ```
 
@@ -722,7 +729,7 @@ it.
 | Proxy refresh | Compose `up` for Caddy only, with `--no-deps --force-recreate` and the same wait settings. | Return `the proxy could not be refreshed with the current configuration`. |
 | HTTP readiness | `health.Wait(Log, 3*time.Minute)`. | An apparently running Compose stack is not enough; failure leaves the started resources for diagnosis. |
 | Restore completion | `Backups().FinishRestore()`. | A cleanup/finalization error is still a Start error, even if the HTTP probe succeeded. |
-| Local usability | Log the clinic URL, generate device scripts, then set up this computer. | Missing trust, declined elevation, or script-generation problems are reported through native diagnostics; see the native guide. |
+| Local usability | Log the clinic URL, then set up this computer. | Missing trust or declined elevation is reported through native diagnostics with advice to retry starting CARE or ask an administrator; see the native guide. |
 
 There is no total five-minute startup deadline. Each Compose wait has its own
 300-second allowance, image builds precede them, and the HTTP wait has a

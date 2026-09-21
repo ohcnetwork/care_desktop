@@ -19,6 +19,9 @@ import (
 )
 
 func (a *App) run(fn func() error, markSetup bool, label string) error {
+	if err := a.requireServer(); err != nil {
+		return err
+	}
 	if err := a.lockJob(); err != nil {
 		return err
 	}
@@ -77,6 +80,15 @@ func (a *App) withJob(fn func() error) error {
 	return fn()
 }
 
+func (a *App) withServerJob(fn func() error) error {
+	return a.withJob(func() error {
+		if err := a.requireServer(); err != nil {
+			return err
+		}
+		return fn()
+	})
+}
+
 func (a *App) withReadJob(fn func() error) error {
 	if !a.jobMu.TryRLock() {
 		return errors.New("something else is still running - wait for it to finish")
@@ -89,6 +101,9 @@ func (a *App) withReadJob(fn func() error) error {
 }
 
 func (a *App) requireSetup() error {
+	if err := a.requireServer(); err != nil {
+		return err
+	}
 	cfg := a.loadConfig()
 	if cfg.Removing {
 		return errors.New("cleanup is incomplete; finish removing this installation before starting or changing it")
@@ -107,6 +122,9 @@ func (a *App) requireSetup() error {
 }
 
 func (a *App) beginRemoval() error {
+	if err := a.requireServer(); err != nil {
+		return err
+	}
 	cfg := a.loadConfig()
 	cfg.Removing = true
 	if err := a.saveConfig(cfg); err != nil {
@@ -117,6 +135,9 @@ func (a *App) beginRemoval() error {
 }
 
 func (a *App) requireAdmin(password string) error {
+	if err := a.requireServer(); err != nil {
+		return err
+	}
 	if !a.loadConfig().SetupDone || !a.VerifyAdminPassword(password) {
 		return errors.New("the admin password does not match this installation")
 	}
@@ -314,7 +335,7 @@ func (a *App) RunSetup(mdnsName, adminPassword, backupPassword, backupDir string
 }
 
 func (a *App) CleanupFailedInstall() error {
-	return a.withJob(func() error {
+	return a.withServerJob(func() error {
 		cfg := a.loadConfig()
 		if cfg.SetupDone {
 			return errors.New("this clinic is installed; use Uninstall instead of failed-install cleanup")
@@ -346,4 +367,9 @@ func (a *App) CleanupFailedInstall() error {
 	})
 }
 
-func (a *App) ClinicStatus() (string, error) { return a.engine().Status() }
+func (a *App) ClinicStatus() (string, error) {
+	if err := a.requireServer(); err != nil {
+		return "", err
+	}
+	return a.engine().Status()
+}

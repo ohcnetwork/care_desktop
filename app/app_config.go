@@ -13,11 +13,40 @@ import (
 const appDirName = "care-desktop"
 
 type Config struct {
-	SetupDone   bool   `json:"setup_done"`
-	Removing    bool   `json:"removing,omitempty"`
-	MDNSName    string `json:"mdns_name"`
-	BackupDir   string `json:"backup_dir"`
-	AdminPwHash string `json:"admin_pw_hash"`
+	Role                   string `json:"role"`
+	ClientURL              string `json:"client_url"`
+	ClientCertificate      string `json:"client_certificate,omitempty"`
+	ClientCertificateOwned bool   `json:"client_certificate_owned,omitempty"`
+	SetupDone              bool   `json:"setup_done"`
+	Removing               bool   `json:"removing,omitempty"`
+	MDNSName               string `json:"mdns_name"`
+	BackupDir              string `json:"backup_dir"`
+	AdminPwHash            string `json:"admin_pw_hash"`
+}
+
+const (
+	roleServer = "server"
+	roleClient = "client"
+)
+
+func (cfg Config) hasServerSettings() bool {
+	return cfg.SetupDone || cfg.Removing || cfg.AdminPwHash != "" || cfg.BackupDir != "" || cfg.MDNSName != ""
+}
+
+func normalizeRole(cfg Config) (Config, error) {
+	if cfg.Role != "" && cfg.Role != roleServer && cfg.Role != roleClient {
+		return Config{}, fmt.Errorf("the saved computer role is invalid: %q", cfg.Role)
+	}
+	if cfg.hasServerSettings() {
+		if cfg.Role == roleClient {
+			return Config{}, fmt.Errorf("client settings conflict with an existing server installation; recover the saved settings before continuing")
+		}
+		cfg.Role = roleServer
+	}
+	if cfg.Role == "" && (cfg.ClientURL != "" || cfg.ClientCertificate != "" || cfg.ClientCertificateOwned) {
+		cfg.Role = roleClient
+	}
+	return cfg, nil
 }
 
 func configPath() (string, error) {
@@ -57,7 +86,7 @@ func loadConfig(path string) (Config, error) {
 			return Config{}, fmt.Errorf("the saved clinic address is invalid: %w", err)
 		}
 	}
-	return *cfg, nil
+	return normalizeRole(*cfg)
 }
 
 func (a *App) configPath() string { return a.configFile }
@@ -65,12 +94,31 @@ func (a *App) configPath() string { return a.configFile }
 func (a *App) loadConfig() Config {
 	a.cfgMu.RLock()
 	defer a.cfgMu.RUnlock()
-	return a.cfg
+	cfg, err := normalizeRole(a.cfg)
+	if err != nil {
+		return a.cfg
+	}
+	return cfg
 }
 
 func (a *App) saveConfig(cfg Config) error {
 	a.cfgMu.Lock()
 	defer a.cfgMu.Unlock()
+	current, err := normalizeRole(a.cfg)
+	if err != nil {
+		return err
+	}
+	cfg, err = normalizeRole(cfg)
+	if err != nil {
+		return err
+	}
+	if current.Role != "" && cfg.Role != current.Role {
+		return fmt.Errorf("this computer's %s role cannot be changed", current.Role)
+	}
+	return a.writeConfigLocked(cfg)
+}
+
+func (a *App) writeConfigLocked(cfg Config) error {
 	b, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
@@ -85,9 +133,99 @@ func (a *App) saveConfig(cfg Config) error {
 func (a *App) forgetConfig() error {
 	a.cfgMu.Lock()
 	defer a.cfgMu.Unlock()
-	if err := os.Remove(a.configPath()); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("could not remove saved settings: %w", err)
+	cfg, err := normalizeRole(a.cfg)
+	if err != nil {
+		return err
 	}
-	a.cfg = Config{}
+	if cfg.Role == roleClient {
+		return a.writeConfigLocked(cfg)
+	}
+	return a.writeConfigLocked(Config{Role: cfg.Role})
+}
+
+func (a *App) resetConfigAfterUninstall() error {
+	a.cfgMu.Lock()
+	defer a.cfgMu.Unlock()
+	return a.writeConfigLocked(Config{})
+}
+
+// Existing files also identify a partial server setup when its settings are missing.
+func (a *App) inferInstalledRole() error {
+	cfg := a.loadConfig()
+	if cfg.Role != "" {
+		return nil
+	}
+	installed, err := a.installDirInUse()
+	if err != nil || !installed {
+		return err
+	}
+	cfg.Role = roleServer
+	return a.saveConfig(cfg)
+}
+
+func (a *App) installDirInUse() (bool, error) {
+	// Retained backups are recovery data, not an active server installation.
+	dir := a.installDir()
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("could not check the earlier installation at %s: %w", dir, err)
+	}
+	for _, entry := range entries {
+		if entry.Name() != ".gitkeep" && entry.Name() != ".DS_Store" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (a *App) ClearRole() error {
+	return a.withJob(func() error {
+		cfg := a.loadConfig()
+		if cfg.Role == "" {
+			return nil
+		}
+		installed, err := a.installDirInUse()
+		if err != nil {
+			return err
+		}
+		if installed || cfg != (Config{Role: cfg.Role, MDNSName: cfg.MDNSName}) {
+			return fmt.Errorf("this computer is already set up as a %s; uninstall its current setup first", cfg.Role)
+		}
+		if err := a.resetConfigAfterUninstall(); err != nil {
+			return err
+		}
+		a.restartAdvertise()
+		return nil
+	})
+}
+
+func (a *App) SelectRole(role string) error {
+	if role != roleServer && role != roleClient {
+		return fmt.Errorf("choose server or client")
+	}
+	return a.withJob(func() error {
+		if err := a.inferInstalledRole(); err != nil {
+			return err
+		}
+		cfg := a.loadConfig()
+		if cfg.Role != "" && cfg.Role != role {
+			return fmt.Errorf("this computer is already a %s; its role cannot be changed", cfg.Role)
+		}
+		cfg.Role = role
+		if err := a.saveConfig(cfg); err != nil {
+			return err
+		}
+		a.restartAdvertise()
+		return nil
+	})
+}
+
+func (a *App) requireServer() error {
+	if a.loadConfig().Role != roleServer {
+		return fmt.Errorf("this operation is only available on a computer selected as the clinic server")
+	}
 	return nil
 }
