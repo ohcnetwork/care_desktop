@@ -151,3 +151,23 @@ func TestApplyDomainRejectsInvalidInputsBeforeWriting(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyDomainUpdatesDeviceGuide(t *testing.T) {
+	page, err := os.ReadFile("../../../deployments/setup/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	writeDomainFile(t, dir, "setup/index.html", string(page))
+	e := &Clinic{InstallDir: dir, MDNSName: "first"}
+	for _, host := range []string{"first", "renamed"} {
+		e.MDNSName = host
+		if err := e.ApplyDomain(); err != nil {
+			t.Fatal(err)
+		}
+		want := strings.ReplaceAll(string(page), "example.local", host+".local")
+		if got := readDomainFile(t, dir, "setup/index.html"); got != want {
+			t.Fatal("device guide did not update every clinic link")
+		}
+	}
+}

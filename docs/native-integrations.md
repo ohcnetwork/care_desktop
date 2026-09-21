@@ -468,6 +468,25 @@ computer can use `http://localhost/setup`; another device can use
 means the tablet, not the clinic server. Reaching setup by IP does not make an
 HTTPS certificate valid for that IP or repair the clinic hostname's resolution.
 
+The device setup page suggests instructions from the browser's device type, with
+a native selector to correct the suggestion. It keeps download, operating-system
+approval, and opening CARE on one page. Windows and Mac default to Settings-based
+instructions; their script installers are under **Advanced setup**. Linux uses
+the generated installer, with manual certificate commands under Advanced setup.
+iPhone/iPad instructions require Safari and cover both profile installation and
+full trust. Android instructions include the CA-certificate settings and warn
+that menu names vary.
+
+Downloading a file is not reported as successful setup. **Open CARE** opens the
+configured clinic hostname in a new tab, preserving the instructions; the user
+must confirm the sign-in page opens without a security warning. The page cannot
+approve OS prompts or verify device trust itself. Help includes blocked installs,
+missing downloads, browser warnings, and clinic-network access. No external
+scripts or styles are required.
+
+Run the device-guide checks with
+`node app/frontend/scripts/check-device-setup.mjs` from the repository root.
+
 ### Root extraction is deliberately non-fatal
 
 `caddyRootPEM` first tries `docker compose exec -T caddy cat` on the root path.

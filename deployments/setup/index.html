@@ -3,284 +3,277 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Trust the CARE server</title>
+<title>Set up CARE on this device</title>
 <style>
   :root {
-    --green:#0d9f6e; --green-600:#057a55; --green-ink:#046c4e;
-    --green-bg:#def7ec; --green-line:#84e1bc;
-    --fg:#111827; --muted:#6b7280; --dim:#9ca3af; --line:#e5e7eb;
-    --mono:"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --green:#057a55; --green-ink:#046c4e; --green-bg:#def7ec;
+    --fg:#111827; --muted:#4b5563; --line:#d1d5db;
   }
   * { box-sizing:border-box; }
-  body { margin:0; background:#eceff1; color:var(--fg); line-height:1.55;
-         font-family:"IBM Plex Sans", Figtree, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-         -webkit-font-smoothing:antialiased; }
-  a { color:var(--green-ink); }
+  body { margin:0; background:#f6f8f7; color:var(--fg); line-height:1.6;
+    font-family:system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color:var(--green-ink); text-underline-offset:3px; }
   a:hover { color:#014737; }
-  code { font-family:var(--mono); background:var(--green-bg); color:var(--green-ink);
-         padding:1px 6px; border-radius:6px; font-size:.88em; word-break:break-all; }
-
-  .page { min-height:100vh; display:flex; flex-direction:column; align-items:center; }
-  header { width:100%; background:#fff; border-bottom:1px solid var(--line); }
-  header .inner { max-width:720px; margin:0 auto; padding:15px 22px;
-                  display:flex; align-items:center; gap:13px; }
-  header img { height:30px; width:auto; display:block; }
-  header .tag { font-size:13px; font-weight:600; color:var(--muted);
-                border-left:1px solid var(--line); padding-left:13px; }
-
-  .wrap { width:100%; max-width:720px; padding:30px 22px 60px; }
-
-  .head { display:flex; align-items:flex-start; gap:10px; }
-  h1 { margin:0; font-size:24px; font-weight:700; letter-spacing:-.015em; }
-  .why-btn { margin-top:4px; width:20px; height:20px; flex:none; border-radius:50%;
-             border:1px solid #d1d5db; background:#fff; color:var(--muted);
-             font-family:var(--mono); font-size:12px; font-weight:700; line-height:1;
-             cursor:pointer; display:flex; align-items:center; justify-content:center; }
-  .why-btn:hover { border-color:var(--green); color:var(--green-ink); }
-  .lede { margin:8px 0 0; font-size:14.5px; color:var(--muted); }
-  .lede b { color:var(--green-ink); font-family:var(--mono); }
-  .why { margin-top:12px; font-size:13px; line-height:1.6; color:var(--green-ink);
-         background:var(--green-bg); border:1px solid var(--green-line);
-         border-radius:10px; padding:12px 14px; }
-
-  .label { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.06em;
-           color:var(--dim); margin-bottom:12px; }
-  #picker { margin-top:26px; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(128px, 1fr)); gap:12px; }
-  .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:20px 12px;
-          text-align:center; cursor:pointer;
-          transition:border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
-  .card:hover, .card:focus-visible { border-color:var(--green); outline:none;
-          box-shadow:0 8px 20px -10px rgba(13,159,110,.5); transform:translateY(-2px); }
-  .card .ico { display:block; width:40px; height:40px; margin:0 auto 10px; }
-  .card .name { font-size:14px; font-weight:600; }
-
-  #guide { margin-top:22px; }
-  .link-btn { display:inline-flex; align-items:center; gap:7px; font:inherit; font-size:13.5px;
-              font-weight:600; color:var(--green-ink); background:transparent; border:none;
-              cursor:pointer; padding:0; }
-  .link-btn:hover { color:#014737; }
-  .panel { margin-top:14px; background:#fff; border:1px solid var(--line); border-radius:16px;
-           padding:22px; box-shadow:0 1px 2px rgba(17,24,39,.04); }
-  .panel-head { display:flex; align-items:center; gap:11px; }
-  .panel-head .ico { display:block; width:26px; height:26px; flex:none; }
-  .panel-head h2 { margin:0; font-size:18px; font-weight:700; }
-  .steps { margin-top:16px; display:flex; flex-direction:column; gap:2px; }
-  .step { display:flex; align-items:flex-start; gap:13px; padding:11px 0;
-          border-top:1px solid #f3f4f6; }
-  .step:first-child { border-top-color:transparent; }
-  .step .n { width:24px; height:24px; flex:none; border-radius:50%; background:var(--green-bg);
-             color:var(--green-ink); font-size:12.5px; font-weight:700;
-             display:flex; align-items:center; justify-content:center; }
-  .step .t { flex:1; font-size:14px; line-height:1.5; color:#374151; }
-  .code-wrap { margin-top:14px; }
-  .code-wrap .link-btn { font-size:13px; }
-  .caret { display:flex; transition:transform .18s ease; }
-  .code-wrap.open .caret { transform:rotate(180deg); }
-  .code-wrap pre { margin:10px 0 0; background:#0b1f17; color:#d7f7e6; padding:14px 16px;
-                   border-radius:10px; overflow:auto; font-family:var(--mono); font-size:12.5px;
-                   line-height:1.6; white-space:pre-wrap; word-break:break-word; }
-  .panel p { margin:14px 0 0; font-size:14px; line-height:1.5; color:#374151; }
-  .dl { display:flex; align-items:center; justify-content:center; gap:9px; margin-top:16px;
-        background:var(--green); color:#fff; text-decoration:none; font-size:15px; font-weight:600;
-        padding:14px 22px; border-radius:12px; box-shadow:0 10px 22px -10px rgba(13,159,110,.7); }
-  .dl:hover { background:var(--green-600); color:#fff; }
-
-  .foot { margin-top:34px; text-align:center; font-size:12.5px; color:var(--dim); }
-  .foot b { color:var(--green-ink); }
+  :focus-visible { outline:3px solid var(--green); outline-offset:4px; }
+  header { background:#fff; border-bottom:1px solid var(--line); }
+  header .inner { max-width:720px; margin:auto; padding:18px 24px;
+    display:flex; align-items:center; gap:16px; }
+  header img { height:30px; width:auto; }
+  header span { font-size:14px; color:var(--muted); border-left:1px solid var(--line); padding-left:16px; }
+  main { max-width:720px; margin:auto; padding:32px 24px 48px; }
+  h1 { margin:0; font-size:clamp(26px, 5vw, 32px); line-height:1.25; letter-spacing:-.025em; }
+  h2 { margin:0; font-size:19px; line-height:1.4; }
+  h3 { margin:20px 0 4px; font-size:16px; }
+  p { margin:8px 0 0; }
+  .lede, .hint { color:var(--muted); }
+  .hint { font-size:14px; }
+  .address { overflow-wrap:anywhere; }
+  .notice { margin:24px 0; padding:16px 18px; background:var(--green-bg);
+    border-left:4px solid var(--green); border-radius:0 10px 10px 0; }
+  .notice p { margin:4px 0 0; }
+  .device { margin:24px 0; }
+  label { display:block; font-weight:650; margin-bottom:8px; }
+  select { width:100%; min-height:48px; padding:10px 12px; border:1px solid #9ca3af;
+    border-radius:10px; background:#fff; color:var(--fg); font:inherit; }
+  .stages { list-style:none; padding:0; margin:0; counter-reset:stage; }
+  .stage { position:relative; counter-increment:stage; padding:24px 24px 24px 70px;
+    margin:16px 0; border:1px solid var(--line); border-radius:16px; background:#fff; }
+  .stage::before { content:counter(stage); position:absolute; top:23px; left:22px;
+    width:32px; height:32px; display:grid; place-items:center; border-radius:50%;
+    background:var(--green-bg); color:var(--green-ink); font-weight:700; }
+  .instructions { padding-left:22px; margin:18px 0 0; }
+  .instructions li { padding-left:4px; margin:12px 0; }
+  .instructions li::marker { color:var(--green-ink); font-weight:650; }
+  .button { display:inline-flex; align-items:center; justify-content:center; min-height:48px;
+    margin-top:18px; padding:12px 20px; background:var(--green); color:#fff;
+    text-decoration:none; text-align:center; font-weight:650; border-radius:10px; }
+  .button:hover { background:#046c4e; color:#fff; }
+  .secondary { background:#fff; color:var(--green-ink); border:1px solid var(--green); }
+  code, pre { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9em; }
+  code { background:#edf2ef; padding:2px 5px; border-radius:4px; overflow-wrap:anywhere; }
+  pre { padding:14px; background:#edf2ef; border-radius:8px; white-space:pre-wrap; overflow-wrap:anywhere; }
+  details { border-bottom:1px solid var(--line); padding:4px 0 16px; margin-top:12px; }
+  summary { padding:12px 0; min-height:48px; cursor:pointer; font-weight:650; }
+  details p { color:var(--muted); }
+  footer { text-align:center; color:var(--muted); font-size:13px; margin-top:32px; }
   [hidden] { display:none !important; }
+  @media (max-width:480px) {
+    main { padding:24px 16px 36px; }
+    .stage { padding:20px 18px; }
+    .stage::before { top:18px; left:18px; }
+    .stage h2 { padding-left:44px; min-height:32px; }
+    .button { width:100%; }
+  }
 </style>
 </head>
 <body>
-<div class="page">
-  <header>
-    <div class="inner">
-      <img src="/setup/care_logo.svg" alt="CARE">
-      <span class="tag">Device setup</span>
-    </div>
-  </header>
-
-  <div class="wrap">
-    <div class="head">
-      <h1>Trust this clinic's server</h1>
-      <button class="why-btn" id="why-btn" title="Why this is needed" aria-expanded="false">i</button>
-    </div>
-    <p class="lede">Install the certificate once to open <b>https://example.local</b> without warnings.</p>
-    <div class="why" id="why" hidden>The clinic server uses its own security certificate. Installing it lets this device confirm the server is genuine. It gives no access to your device and works fully offline. Use a Chrome based browser (Chrome, Edge, Brave), or Safari on iPhone and iPad.</div>
-
-    <div id="picker">
-      <div class="label">Which device is this?</div>
-      <div class="grid" id="grid"></div>
-    </div>
-
-    <div id="guide" hidden>
-      <button class="link-btn" id="back">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><polyline points="15 6 9 12 15 18"></polyline></svg>
-        Pick a different device
-      </button>
-
-      <div class="panel" id="auto" hidden>
-        <div class="label">Fastest way</div>
-        <a class="dl" href="/setup/install-cert.sh" id="auto-dl" download>
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><polyline points="12 4 12 15"></polyline><polyline points="7 11 12 16 17 11"></polyline><polyline points="5 20 19 20"></polyline></svg>
-          Download installer
-        </a>
-        <p id="auto-desc"></p>
-        <div class="code-wrap" id="auto-run-wrap" hidden><pre id="auto-run"></pre></div>
-      </div>
-
-      <div class="panel">
-        <div class="label" id="manual-label" hidden>Or set it up manually</div>
-        <div class="panel-head">
-          <span class="ico" id="g-icon"></span>
-          <h2 id="g-label"></h2>
-        </div>
-        <div class="steps" id="g-steps"></div>
-        <div class="code-wrap" id="code-wrap" hidden>
-          <button class="link-btn" id="code-btn" aria-expanded="false">
-            <span class="caret"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></span>
-            Terminal commands
-          </button>
-          <pre id="code" hidden></pre>
-        </div>
-      </div>
-
-      <a class="dl" href="/root.crt?ok=1" download="root.crt">
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><polyline points="12 4 12 15"></polyline><polyline points="7 11 12 16 17 11"></polyline><polyline points="5 20 19 20"></polyline></svg>
-        Download certificate
-      </a>
-    </div>
-
-    <div class="foot">
-      Powered by <b>CARE</b>, an <a href="https://ohc.network">Open Healthcare Network</a> project
-    </div>
+<header>
+  <div class="inner">
+    <img src="/setup/care_logo.svg" alt="CARE">
+    <span>Device setup</span>
   </div>
-</div>
+</header>
+<main>
+  <h1>Set up CARE on this device</h1>
+  <p class="lede">Do this once so you can open your clinic's CARE securely.</p>
+  <p class="hint address">Clinic address: <a id="clinic-address" href="https://example.local">https://example.local</a></p>
+
+  <aside class="notice" aria-label="Before you start">
+    <strong>Before you start</strong>
+    <p>Connect to the clinic Wi-Fi, or its wired network. Only continue if your clinic administrator gave you this setup address.</p>
+  </aside>
+
+  <noscript><p class="notice">Turn on JavaScript in your browser to see the instructions for your device, or ask your clinic administrator for help.</p></noscript>
+  <div class="device" id="device-picker" hidden>
+    <label for="device">Your device</label>
+    <select id="device" aria-describedby="device-hint">
+      <option value="">Choose your device</option>
+      <option value="windows">Windows computer</option>
+      <option value="macos">Mac</option>
+      <option value="ios">iPhone / iPad</option>
+      <option value="android">Android phone / tablet</option>
+      <option value="linux">Linux computer</option>
+    </select>
+    <p class="hint" id="device-hint">Check the device shown above. Change it if needed.</p>
+  </div>
+
+  <div id="guide" hidden>
+    <ol class="stages">
+      <li class="stage">
+        <h2 id="download-title">Download the clinic's security certificate</h2>
+        <p id="download-note"></p>
+        <a class="button" id="download" href="/root.crt?ok=1" download="root.crt">Download certificate</a>
+        <p class="hint" id="download-hint">The file is called <code>root.crt</code>. Downloading it is only the first step.</p>
+      </li>
+      <li class="stage">
+        <h2 id="settings-title">Allow it in Settings</h2>
+        <p class="hint">Keep this page open so you can return to these instructions.</p>
+        <ol class="instructions" id="instructions"></ol>
+        <pre id="linux-command" hidden>sh ~/Downloads/install-cert.sh</pre>
+        <p class="hint" id="settings-note"></p>
+      </li>
+      <li class="stage">
+        <h2>Open CARE</h2>
+        <p>After completing the steps above, open CARE. If the sign-in page opens without a security warning, setup is complete.</p>
+        <a class="button secondary" href="https://example.local" target="_blank" rel="noopener">Open CARE (new tab)</a>
+        <p class="hint">Still seeing a warning? Close and reopen your browser, then try again. Do not bypass the warning to enter patient information.</p>
+      </li>
+    </ol>
+
+    <details id="advanced" hidden>
+      <summary>Advanced setup</summary>
+      <div id="installer">
+        <p>For someone comfortable running scripts. This installer adds the clinic's certificate and may ask for computer administrator approval.</p>
+        <a id="installer-download" href="/setup/install-cert.sh" download>Download installer</a>
+        <p id="installer-note"></p>
+        <pre id="installer-command" hidden>sh ~/Downloads/install-cert.sh</pre>
+      </div>
+      <div id="linux-manual" hidden>
+        <p>Alternatively, <a href="/root.crt?ok=1" download="root.crt">download the certificate</a>, then run the commands for your distribution:</p>
+        <pre># Debian / Ubuntu
+sudo cp ~/Downloads/root.crt /usr/local/share/ca-certificates/care-root.crt
+sudo update-ca-certificates
+
+# Fedora / RHEL
+sudo cp ~/Downloads/root.crt /etc/pki/ca-trust/source/anchors/care-root.crt
+sudo update-ca-trust</pre>
+        <p>Some Linux browsers use a separate certificate store. Ask your administrator to configure browser trust if a warning remains.</p>
+      </div>
+    </details>
+  </div>
+
+  <details>
+    <summary>Having trouble?</summary>
+    <h3>I cannot find the download</h3>
+    <p>Look in your browser's Downloads list or your device's Downloads folder for <code>root.crt</code> (or <code>install-cert.sh</code> on Linux).</p>
+    <h3>My settings look different</h3>
+    <p>Check the device selected above. Setting names vary by device and version. On Android, search Settings for "CA certificate". On iPhone or iPad, use Safari to download the certificate.</p>
+    <h3>I need a password, or installation is blocked</h3>
+    <p>Use your device's passcode or computer administrator password, not your CARE password. If you do not have it, or this device is managed by your organisation, ask your clinic administrator. Do not turn off security protections.</p>
+    <h3>CARE still shows a security warning</h3>
+    <p>Downloading the file is not enough: finish the Settings steps, then close and reopen your browser. Try Chrome or Edge on a computer, Chrome on Android, or Safari on iPhone or iPad. If the warning remains, ask your clinic administrator to check the certificate.</p>
+    <h3>The clinic page does not open</h3>
+    <p>Check that this device is on the clinic network and the computer running CARE is switched on. If you reached setup using an IP address, ask your administrator to check that the clinic address works on this device.</p>
+  </details>
+  <details>
+    <summary>Why is this needed?</summary>
+    <p>Your clinic runs CARE on its own computer. Its security certificate lets this device recognise that computer and open an encrypted connection to CARE, even without internet access.</p>
+    <p>A root certificate changes who your device trusts for secure connections. Only install it from your clinic's trusted setup page. If you are unsure, ask your clinic administrator to confirm the certificate before approving it.</p>
+    <p>Your browser cannot approve this for you. You need to complete the steps in your device's settings, once on each device.</p>
+  </details>
+  <footer>Powered by <strong>CARE</strong>, an <a href="https://ohc.network">Open Healthcare Network</a> project</footer>
+</main>
 
 <script>
-var ICON = {
-  windows: '<svg viewBox="0 0 24 24" width="100%" height="100%" fill="#0078D4" xmlns="http://www.w3.org/2000/svg"><path d="M0 3.449 9.75 2.1v9.451H0zm10.949-1.5L24 0v11.4H10.949zM0 12.6h9.75v9.451L0 20.699zm10.949 0H24V24l-13.051-1.851z"/></svg>',
-  macos: '<svg viewBox="0 0 24 24" width="100%" height="100%" fill="#1a1a2e" xmlns="http://www.w3.org/2000/svg"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg>',
-  linux: '<svg viewBox="0 0 24 24" width="100%" height="100%" fill="#111827" xmlns="http://www.w3.org/2000/svg"><path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.3 1.953-1.05 3.02-.885 1.051-2.127 2.75-2.716 4.521-.278.832-.41 1.684-.287 2.489a.424.424 0 00-.11.135c-.26.268-.45.6-.663.839-.199.199-.485.267-.797.4-.313.136-.658.269-.864.68-.09.189-.136.394-.132.602 0 .199.027.4.055.536.058.399.116.728.04.97-.249.68-.28 1.145-.106 1.484.174.334.535.47.94.601.81.2 1.91.135 2.774.6.926.466 1.866.67 2.616.47.526-.116.97-.464 1.208-.946.587-.003 1.23-.269 2.26-.334.699-.058 1.574.267 2.577.2.025.134.063.198.114.333l.003.003c.391.778 1.113 1.132 1.884 1.071.771-.06 1.592-.536 2.257-1.306.631-.765 1.683-1.084 2.378-1.503.348-.199.629-.469.649-.853.023-.4-.2-.811-.714-1.376v-.097l-.003-.003c-.17-.2-.25-.535-.338-.926-.085-.401-.182-.786-.492-1.046h-.003c-.059-.054-.123-.067-.188-.135a.357.357 0 00-.19-.064c.431-1.278.264-2.55-.173-3.694-.533-1.41-1.465-2.638-2.175-3.483-.796-1.005-1.576-1.957-1.56-3.368.026-2.152.236-6.133-3.544-6.139z"/></svg>',
-  android: '<svg viewBox="0 0 24 24" width="100%" height="100%" fill="#3DDC84" xmlns="http://www.w3.org/2000/svg"><path d="M18.4395 5.5586c-.675 1.1664-1.352 2.3318-2.0274 3.498-.0366-.0155-.0742-.0286-.1113-.043-1.8249-.6957-3.484-.8-4.42-.787-1.8551.0185-3.3544.4643-4.2597.8203-.084-.1494-1.7526-3.021-2.0215-3.4864a1.1451 1.1451 0 0 0-.1406-.1914c-.3312-.364-.9054-.4859-1.379-.203-.475.282-.7136.9361-.3886 1.5019 1.9466 3.3696-.0966-.2158 1.9473 3.3593.0172.031-.4946.2642-1.3926 1.0177C2.8987 12.176.452 14.772 0 18.9902h24c-.119-1.1108-.3686-2.099-.7461-3.0683-.7438-1.9118-1.8435-3.2928-2.7402-4.1836a12.1048 12.1048 0 0 0-2.1309-1.6875c.6594-1.122 1.312-2.2559 1.9649-3.3848.2077-.3615.1886-.7956-.0079-1.1191a1.1001 1.1001 0 0 0-.8515-.5332c-.5225-.0536-.9392.3128-1.0488.5449zm-.0391 8.461c.3944.5926.324 1.3306-.1563 1.6503-.4799.3197-1.188.0985-1.582-.4941-.3944-.5927-.324-1.3307.1563-1.6504.4727-.315 1.1812-.1086 1.582.4941zM7.207 13.5273c.4803.3197.5506 1.0577.1563 1.6504-.394.5926-1.1038.8138-1.584.4941-.48-.3197-.5503-1.0577-.1563-1.6504.4008-.6021 1.1087-.8106 1.584-.4941z"/></svg>',
-  ios: '<svg viewBox="0 0 24 24" width="100%" height="100%" fill="#1a1a2e" xmlns="http://www.w3.org/2000/svg"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg>'
-};
-
-// Desktop OSes get a generated installer (see app/internal/care/certscript.go);
-// phones can't run one, so they keep the manual flow only.
-var AUTO = {
-  windows: { file: "install-cert.ps1", desc: "Right-click the file, then *Run with PowerShell*." },
-  macos: { file: "install-cert.sh", desc: "Then run this in *Terminal*:",
-    run: "sh ~/Downloads/install-cert.sh" },
-  linux: { file: "install-cert.sh", desc: "Then run this:",
-    run: "sh ~/Downloads/install-cert.sh" }
-};
-
 var GUIDES = {
-  windows: { label: "Windows", steps: [
-    "Tap *Download certificate* below.",
-    "Open the downloaded `root.crt` and click *Install Certificate*.",
-    "Choose *Local Machine*, then approve the admin prompt.",
-    "Place it in *Trusted Root Certification Authorities*, then finish.",
-    "Reopen your browser and visit *https://example.local*."
-  ] },
-  macos: { label: "macOS", steps: [
-    "Tap *Download certificate* below.",
-    "Double click `root.crt`, then add it to the *System* keychain.",
-    "Open *CARE Desktop Local CA*, set trust to *Always Trust*.",
-    "Reopen your browser and visit *https://example.local*."
-  ], code: "sudo security add-trusted-cert -d -r trustRoot \\\n  -k /Library/Keychains/System.keychain ~/Downloads/root.crt" },
-  linux: { label: "Linux", steps: [
-    "Tap *Download certificate* below.",
-    "Run the commands for your distribution.",
-    "Restart your browser and visit *https://example.local*."
-  ], code: "# Debian / Ubuntu\nsudo cp ~/Downloads/root.crt /usr/local/share/ca-certificates/care-root.crt\nsudo update-ca-certificates\n\n# Fedora / RHEL\nsudo cp ~/Downloads/root.crt /etc/pki/ca-trust/source/anchors/care-root.crt\nsudo update-ca-trust" },
-  android: { label: "Android", steps: [
-    "Tap *Download certificate* below.",
-    "Open *Settings*, then *Security*.",
-    "Go to *Encryption & credentials*, then *Install a certificate*, then *CA certificate*.",
-    "Tap *Install anyway*, then pick `root.crt`.",
-    "Open *https://example.local* in Chrome."
-  ] },
-  ios: { label: "iPhone / iPad", steps: [
-    "Tap *Download certificate* below, using *Safari*.",
-    "Open *Settings*, then *Profile Downloaded*, then *Install*.",
-    "Go to *General*, *About*, *Certificate Trust Settings*.",
-    "Turn *on* the switch for *CARE Desktop Local CA*.",
-    "Open *https://example.local*."
-  ] }
+  windows: {
+    title: "Allow it on your computer",
+    download: "This lets your computer recognise the clinic's CARE. Download the file, then follow step 2.",
+    steps: [
+      "Open your *Downloads* folder and double-click `root.crt`. In the certificate window, choose *Install Certificate*.",
+      "Select *Local Machine*, then *Next*. Approve the Windows prompt. If asked, enter your *computer administrator password*, not your CARE password.",
+      "Select *Place all certificates in the following store*. Click *Browse*, choose *Trusted Root Certification Authorities*, then *OK*.",
+      "Click *Next*, then *Finish*. If a confirmation appears, approve it only after your clinic administrator has confirmed this certificate. Look for *The import was successful*."
+    ],
+    note: "If you cannot approve the administrator prompt, ask your clinic administrator to finish this step."
+  },
+  macos: {
+    title: "Allow it on your Mac",
+    download: "This lets your Mac recognise the clinic's CARE. Download the file, then follow step 2.",
+    steps: [
+      "Open *Finder*, then *Downloads*. Double-click `root.crt` to open *Keychain Access*. If asked to add the certificate, choose the *System* keychain and click *Add*.",
+      "In *Keychain Access*, find *CARE Desktop Local CA*. Check the *login* or *System* keychain if you do not see it. Double-click the certificate.",
+      "Expand *Trust*. Next to *When using this certificate*, choose *Always Trust*.",
+      "Close the certificate window to save. If asked, enter your *Mac administrator password*, not your CARE password."
+    ],
+    note: "If the file does not open in Keychain Access, open that app using Spotlight, then choose File > Import Items and select root.crt."
+  },
+  ios: {
+    title: "Allow it in Settings",
+    download: "Use Safari for this download. If you are in another browser or a messaging app, open this setup page in Safari first. Tap Download certificate, then Allow when asked to download a profile.",
+    steps: [
+      "Open *Settings* and tap *Profile Downloaded*. If it is missing, look under *General* > *VPN & Device Management*.",
+      "Open the *CARE Desktop Local CA* profile. Tap *Install*, enter your *device passcode* if asked, then confirm *Install* and tap *Done*.",
+      "In *Settings*, go to *General* > *About* > *Certificate Trust Settings*.",
+      "Under *Enable Full Trust for Root Certificates*, turn on *CARE Desktop Local CA*. Tap *Continue* to confirm."
+    ],
+    note: "Both parts are needed: install the profile AND turn on full trust. Then return to Safari for step 3."
+  },
+  android: {
+    title: "Allow it in Settings",
+    download: "Use Chrome to download the certificate. This lets your device recognise the clinic's CARE.",
+    steps: [
+      "Open *Settings*. Search for *CA certificate*, or go to *Security* > *Encryption & credentials* > *Install a certificate* > *CA certificate*.",
+      "Android will show a security warning. Only continue if your clinic administrator has confirmed this certificate. Tap *Install anyway* and enter your *device PIN, pattern or password* if asked.",
+      "Choose *Downloads*, then select `root.crt`. If asked for a name, enter *CARE clinic* and confirm."
+    ],
+    note: "On some phones, look under Security & privacy > More security settings. Return to Chrome after installing."
+  },
+  linux: {
+    title: "Run the setup file",
+    download: "Linux setup uses a short command. If you are not comfortable with Terminal, ask your clinic administrator to do this step with you.",
+    steps: [
+      "Save `install-cert.sh` in your *Downloads* folder.",
+      "Open *Terminal* and run the command below. If you saved the file elsewhere, use that location instead.",
+      "Enter your *computer administrator password* if asked. Nothing appears as you type it; this is normal. Wait for the installer to finish before opening CARE."
+    ],
+    note: "If the command reports an error, stop and share that message with your clinic administrator."
+  }
 };
 
 var $ = function (id) { return document.getElementById(id); };
-var esc = function (s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-};
-var fmt = function (s) {
-  return esc(s).replace(/\*(.+?)\*/g, "<b>$1</b>").replace(/`(.+?)`/g, "<code>$1</code>");
+var fmt = function (text) {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/\*(.+?)\*/g, "<strong>$1</strong>").replace(/`(.+?)`/g, "<code>$1</code>");
 };
 
-Object.keys(GUIDES).forEach(function (k) {
-  var el = document.createElement("div");
-  el.className = "card";
-  el.tabIndex = 0;
-  el.setAttribute("role", "button");
-  el.innerHTML = '<span class="ico">' + ICON[k] + '</span><span class="name">' + GUIDES[k].label + "</span>";
-  el.onclick = function () { show(k); };
-  el.onkeydown = function (e) {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); show(k); }
-  };
-  $("grid").appendChild(el);
-});
-
-function show(os) {
-  var g = GUIDES[os];
-  var a = AUTO[os];
-  $("auto").hidden = !a;
-  $("manual-label").hidden = !a;
-  if (a) {
-    $("auto-desc").innerHTML = fmt(a.desc);
-    $("auto-dl").href = "/setup/" + a.file;
-    $("auto-dl").setAttribute("download", a.file);
-    $("auto-run-wrap").hidden = !a.run;
-    if (a.run) $("auto-run").textContent = a.run;
-  }
-  $("g-icon").innerHTML = ICON[os];
-  $("g-label").textContent = g.label;
-  $("g-steps").innerHTML = g.steps.map(function (t, i) {
-    return '<div class="step"><span class="n">' + (i + 1) + '</span><span class="t">' + fmt(t) + "</span></div>";
-  }).join("");
-  $("code-wrap").hidden = !g.code;
-  $("code-wrap").classList.remove("open");
-  $("code-btn").setAttribute("aria-expanded", "false");
-  $("code").hidden = true;
-  if (g.code) $("code").textContent = g.code;
-  $("picker").hidden = true;
-  $("guide").hidden = false;
-  location.hash = os;
-  window.scrollTo(0, 0);
+function detectDevice() {
+  var ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1)) return "ios";
+  if (/Android/i.test(ua)) return "android";
+  if (/Windows/i.test(ua)) return "windows";
+  if (/Macintosh|Mac OS X/i.test(ua)) return "macos";
+  if (/Linux/i.test(ua) && !/CrOS/i.test(ua)) return "linux";
+  return "";
 }
 
-$("back").onclick = function () {
-  $("guide").hidden = true;
-  $("picker").hidden = false;
-  location.hash = "";
-};
+function show(os) {
+  var known = Object.prototype.hasOwnProperty.call(GUIDES, os);
+  $("device").value = known ? os : "";
+  $("guide").hidden = !known;
+  $("device-hint").textContent = known
+    ? "Instructions for this device are below. Change the selection if needed."
+    : "Choose the device you are using now. If it is not listed, ask your clinic administrator for help.";
+  if (!known) return;
+  var g = GUIDES[os];
+  var linux = os === "linux";
+  $("download-title").textContent = linux ? "Download the setup file" : "Download the clinic's security certificate";
+  $("download-note").textContent = g.download;
+  $("download").href = linux ? "/setup/install-cert.sh" : "/root.crt?ok=1";
+  $("download").download = linux ? "install-cert.sh" : "root.crt";
+  $("download").textContent = linux ? "Download setup file" : "Download certificate";
+  $("download-hint").textContent = "The file is called " + (linux ? "install-cert.sh" : "root.crt") + ". Downloading it is only the first step.";
+  $("settings-title").textContent = g.title;
+  $("instructions").innerHTML = g.steps.map(function (step) { return "<li>" + fmt(step) + "</li>"; }).join("");
+  $("settings-note").textContent = g.note;
+  $("linux-command").hidden = !linux;
+  $("advanced").hidden = os === "ios" || os === "android";
+  $("advanced").open = false;
+  $("installer").hidden = linux;
+  $("linux-manual").hidden = !linux;
+  $("installer-download").href = os === "windows" ? "/setup/install-cert.ps1" : "/setup/install-cert.sh";
+  $("installer-download").download = os === "windows" ? "install-cert.ps1" : "install-cert.sh";
+  $("installer-note").textContent = os === "windows"
+    ? 'Right-click the downloaded file and choose "Run with PowerShell" (under "Show more options" on some versions). Approve the administrator prompt. If blocked, use the Settings steps above.'
+    : "Save the file in Downloads, then run this command in Terminal. Enter your Mac administrator password if asked.";
+  $("installer-command").hidden = os === "windows";
+}
 
-$("why-btn").onclick = function () {
-  var open = $("why").hidden;
-  $("why").hidden = !open;
-  this.setAttribute("aria-expanded", String(open));
-};
-
-$("code-btn").onclick = function () {
-  var open = $("code").hidden;
-  $("code").hidden = !open;
-  $("code-wrap").classList.toggle("open", open);
-  this.setAttribute("aria-expanded", String(open));
-};
-
-var hash = location.hash.slice(1);
-if (GUIDES[hash]) show(hash);
+$("device-picker").hidden = false;
+$("device").onchange = function () { location.hash = this.value; show(this.value); };
+window.addEventListener("hashchange", function () { show(location.hash.slice(1)); });
+// ponytail: device detection is a suggestion; keep a native picker for unusual browsers.
+show(location.hash ? location.hash.slice(1) : detectDevice());
 </script>
 </body>
 </html>
