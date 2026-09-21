@@ -528,6 +528,21 @@ that the embedded CA belongs to the intended physical clinic. In particular,
 downloading a root over the HTTP bootstrap route is not an authenticated trust
 decision by itself.
 
+The Windows download preserves failures from the elevated process and keeps
+import or approval errors visible until Enter is pressed. It uses a unique
+temporary certificate file. Windows execution policy or organisation policy can
+still block the initial downloaded `.ps1` before any script code runs; the script
+cannot catch that failure. Use the page's manual steps or ask the administrator,
+rather than changing the machine's execution policy.
+
+On Linux, the installer imports existing Chrome NSS and Firefox profile
+databases, including custom-named Firefox profiles. Missing `certutil` or running
+from a root login produces an explicit warning that browser stores were not
+updated. A failed browser import exits with an error. The scripts report system
+certificate installation, not verified browser connectivity; reopen the browser
+and check the clinic URL before using CARE. The Mac/Linux download still needs
+to be run with `sh` in a terminal, not simply double-clicked.
+
 ### Verifying this computer's trust
 
 `HostTrusts(host)` performs a real TLS handshake to **`127.0.0.1:443`**, with

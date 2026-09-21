@@ -64,11 +64,16 @@ Linux)
     echo "  https://` + host + `/setup" >&2
     exit 1
   fi
-  # Firefox and Chrome keep their own store, so the system one isn't enough.
-  if [ -n "${SUDO_USER:-}" ] && command -v certutil >/dev/null 2>&1; then
+  # Some browsers use their own store in addition to system trust.
+  if [ -z "${SUDO_USER:-}" ]; then
+    echo "Browser certificates were not updated: run this installer from your normal user account with sudo, not from a root login." >&2
+  elif ! command -v certutil >/dev/null 2>&1; then
+    echo "Browser certificates were not updated: certutil is missing. Ask your administrator to install libnss3-tools (Debian/Ubuntu) or nss-tools (Fedora/RHEL), then run this installer again." >&2
+  else
     sudo -H -u "$SUDO_USER" sh -c '
-      for db in "$HOME/.pki/nssdb" "$HOME"/.mozilla/firefox/*.default*; do
-        [ -d "$db" ] || continue
+      for file in "$HOME/.pki/nssdb/cert9.db" "$HOME"/.mozilla/firefox/*/cert9.db; do
+        [ -f "$file" ] || continue
+        db=${file%/cert9.db}
         if ! certutil -d "sql:$db" -A -t "C,," -n "CARE Desktop Local CA" -i "$1"; then
           echo "System trust was updated, but browser certificate import failed for $db. Close the browser and run this installer again." >&2
           exit 1
@@ -84,8 +89,9 @@ Linux)
 esac
 
 echo
-echo "Done - this computer now trusts the clinic."
-echo "Reopen your browser and visit https://` + host + `/"
+echo "Certificate installed in this computer's system trust store."
+echo "Reopen your browser and visit https://` + host + `/ to check the connection."
+echo "If a security warning remains, stop and ask your clinic administrator. Do not bypass it."
 `
 }
 
@@ -95,35 +101,51 @@ func WindowsInstaller(root, fp, host string) string {
 #
 # Certificate SHA-256: ` + fp + `
 $ErrorActionPreference = 'Stop'
+$exitCode = 0
 
-$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-$isAdmin = (New-Object Security.Principal.WindowsPrincipal $identity).IsInRole(
-  [Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-  Write-Host "Adding a certificate needs administrator rights - approve the prompt."
-  # Quoted by concatenation, not a backtick escape: this file is a Go raw string.
-  $quoted = '"' + $PSCommandPath + '"'
-  Start-Process powershell -Verb RunAs -Wait -ArgumentList @(
-    '-NoProfile','-ExecutionPolicy','Bypass','-File',$quoted)
-  exit
-}
+try {
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $isAdmin = (New-Object Security.Principal.WindowsPrincipal $identity).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)
+  if (-not $isAdmin) {
+    Write-Host "Adding a certificate needs administrator rights - approve the prompt."
+    # Quoted by concatenation, not a backtick escape: this file is a Go raw string.
+    $quoted = '"' + $PSCommandPath + '"'
+    $process = Start-Process powershell -Verb RunAs -Wait -PassThru -ArgumentList @(
+      '-NoProfile','-ExecutionPolicy','Bypass','-File',$quoted)
+    if ($process.ExitCode -ne 0) {
+      throw "Administrator setup did not finish (exit code $($process.ExitCode))."
+    }
+    exit 0
+  }
 
-$pem = @'
+  $pem = @'
 ` + strings.TrimSpace(root) + `
 '@
 
-$tmp = Join-Path $env:TEMP 'care-root.crt'
-Set-Content -LiteralPath $tmp -Value $pem -Encoding ASCII
-try {
-  Import-Certificate -FilePath $tmp -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
-} finally {
-  Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+  $tmp = [IO.Path]::GetTempFileName()
+  try {
+    Set-Content -LiteralPath $tmp -Value $pem -Encoding ASCII
+    Import-Certificate -FilePath $tmp -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+  } finally {
+    Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+  }
+
+  Write-Host ""
+  Write-Host "Certificate installed in this computer's system trust store."
+  Write-Host "Reopen your browser and visit https://` + host + `/ to check the connection."
+  Write-Host "If a security warning remains, stop and ask your clinic administrator. Do not bypass it."
+} catch {
+  $exitCode = 1
+  Write-Host ""
+  Write-Host "CARE setup could not finish." -ForegroundColor Red
+  Write-Host $_.Exception.Message -ForegroundColor Red
+  Write-Host "Share this message with your clinic administrator, or use the manual instructions:"
+  Write-Host "http://` + host + `/setup#windows"
 }
 
 Write-Host ""
-Write-Host "Done - this computer now trusts the clinic."
-Write-Host "Reopen your browser and visit https://` + host + `/"
-Write-Host ""
-Read-Host "Press Enter to close"
+Read-Host "Press Enter to close" | Out-Null
+exit $exitCode
 `
 }
