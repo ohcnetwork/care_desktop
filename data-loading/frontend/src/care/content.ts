@@ -1,4 +1,4 @@
-import { api, listAll, ApiError } from "@/lib/api";
+import { api, listAll, Paginated } from "@/lib/api";
 
 export type QuestionnaireFixture = {
   id?: string;
@@ -28,20 +28,27 @@ export type Questionnaire = { id: string; slug: string; title: string };
 export type Template = { id: string; slug: string; name: string };
 
 export async function findQuestionnaire(slug: string): Promise<Questionnaire | null> {
-  try {
-    return await api.get<Questionnaire>(`/questionnaire/${encodeURIComponent(slug)}/`);
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return null;
-    throw e;
-  }
+  const page = await api.get<Paginated<Questionnaire>>(
+    `/questionnaire/?slug=${encodeURIComponent(slug)}&limit=1`,
+  );
+  return page.results.find((q) => q.slug === slug) ?? null;
 }
 
-export function createQuestionnaire(
+// Instance-level questionnaires are shared with organizations through a separate
+// endpoint; the create payload only carries the questionnaire itself.
+export async function createQuestionnaire(
   fixture: QuestionnaireFixture,
   organizations: string[],
 ): Promise<Questionnaire> {
   const { id: _id, ...body } = fixture;
-  return api.post<Questionnaire>("/questionnaire/", { ...body, organizations });
+  const created = await api.post<Questionnaire>("/questionnaire/", {
+    ...body,
+    auth_context: "instance",
+  });
+  if (organizations.length > 0) {
+    await api.post(`/questionnaire/${created.id}/set_organizations/`, { organizations });
+  }
+  return created;
 }
 
 export function listTemplates(facilityId: string): Promise<Template[]> {
