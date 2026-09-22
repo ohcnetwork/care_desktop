@@ -4,6 +4,7 @@
 	},
 	"info": {
 		"0409": {
+			"FileVersion": "{{.Info.ProductVersion}}",
 			"ProductVersion": "{{.Info.ProductVersion}}",
 			"CompanyName": "{{.Info.CompanyName}}",
 			"FileDescription": "{{.Info.ProductName}}",
