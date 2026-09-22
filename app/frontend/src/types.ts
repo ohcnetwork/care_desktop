@@ -29,6 +29,8 @@ export type ToolPlan = {
   url: string;
 };
 export type AppState = {
+  role: "" | "server" | "client";
+  client_url: string;
   version: string;
   setup_done: boolean;
   mdns_name: string;

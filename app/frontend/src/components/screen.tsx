@@ -1,5 +1,7 @@
+import { ArrowLeft } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /** The scrolling column to the right of the rail. */
@@ -16,14 +18,30 @@ export function ScreenHead({
   title,
   subtitle,
   className,
+  onBack,
+  backDisabled,
 }: {
   kicker?: string;
   title: string;
   subtitle?: string;
   className?: string;
+  onBack?: () => void;
+  backDisabled?: boolean;
 }) {
   return (
     <div className={cn("px-[34px] pt-[30px] pb-5", className)}>
+      {onBack ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-ml-2.5 mb-3"
+          disabled={backDisabled}
+          onClick={onBack}
+        >
+          <ArrowLeft className="size-4" strokeWidth={2.2} />
+          Back
+        </Button>
+      ) : null}
       {kicker ? (
         <div className="mb-1.5 text-xs font-bold tracking-[0.04em] text-brand-ink uppercase">
           {kicker}

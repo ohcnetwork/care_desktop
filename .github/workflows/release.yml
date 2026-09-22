@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       version: ${{ steps.version.outputs.version }}
+      sign_windows: ${{ steps.signpath.outputs.sign_windows }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -62,20 +63,174 @@ jobs:
             echo "::error::Version $VERSION already has a release: $existing. Bump CARE_DESKTOP_VERSION; published assets are never replaced."
             exit 1
           fi
+      - name: Read SignPath configuration
+        id: signpath
+        env:
+          TOKEN_SET: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+          ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+        run: |
+          configured=()
+          if [ "$TOKEN_SET" = "true" ]; then configured+=(SIGNPATH_API_TOKEN); fi
+          if [ -n "$ORGANIZATION_ID" ]; then configured+=(SIGNPATH_ORGANIZATION_ID); fi
+          if [ -n "$PROJECT_SLUG" ]; then configured+=(SIGNPATH_PROJECT_SLUG); fi
+          if [ -n "$POLICY_SLUG" ]; then configured+=(SIGNPATH_SIGNING_POLICY_SLUG); fi
+          case "${#configured[@]}" in
+            0)
+              echo "::warning::SignPath is not configured; the Windows installer will be unsigned."
+              echo "sign_windows=false" >> "$GITHUB_OUTPUT" ;;
+            4)
+              echo "sign_windows=true" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error::SignPath is partly configured (${configured[*]}). Set the SIGNPATH_API_TOKEN secret and the SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG and SIGNPATH_SIGNING_POLICY_SLUG variables, or none of them."
+              exit 1 ;;
+          esac
 
   checks:
     name: Check and build selected commit
     needs: prepare
     uses: ./.github/workflows/ci.yml
 
+  # SignPath signs PE files but cannot open an NSIS installer, so the application
+  # is signed first and the installer is rebuilt around the signed file and signed
+  # in turn. Every signing request refers to an artifact uploaded by this run.
+  sign-windows-app:
+    name: Sign Windows application
+    needs: [prepare, checks]
+    if: needs.prepare.outputs.sign_windows == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Find the CI-built application artifact
+        id: artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select(.name == "desktop-windows-app" and .expired == false)]
+                  | if length == 1 then .[0].id else error("expected one desktop-windows-app artifact, found \(length)") end')
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+      - name: Submit to SignPath and wait for approval
+        uses: signpath/github-action-submit-signing-request@v3.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.artifact.outputs.id }}
+          parameters: |
+            version: "${{ needs.prepare.outputs.version }}"
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: "3600"
+          output-artifact-directory: signed-app
+      - run: test -s "signed-app/CARE Desktop.exe"
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desktop-windows-app-signed
+          path: signed-app/
+          if-no-files-found: error
+          retention-days: 7
+
+  windows-installer:
+    name: Build installer around the signed application
+    needs: [prepare, sign-windows-app]
+    runs-on: windows-2025
+    timeout-minutes: 20
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: desktop-windows-app-signed
+          path: signed-app
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: desktop-windows-installer-inputs
+          path: app/build/windows
+      - uses: ./.github/actions/install-nsis
+      - name: Build the installer with the signed application
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          $app = Join-Path $env:GITHUB_WORKSPACE "signed-app\CARE Desktop.exe"
+          $signature = Get-AuthenticodeSignature $app
+          if ($signature.Status -ne 'Valid') { throw "Application signature is $($signature.Status): $($signature.StatusMessage)" }
+          "Application signed by $($signature.SignerCertificate.Subject)"
+          git diff --exit-code -- app/build/windows/installer/project.nsi
+          if ($LASTEXITCODE -ne 0) { throw "Installer inputs do not match the checked-out project.nsi" }
+          New-Item -ItemType Directory -Force app/build/bin, installer | Out-Null
+          Push-Location app/build/windows/installer
+          makensis "-DARG_WAILS_AMD64_BINARY=$app" project.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
+          Pop-Location
+          $built = Get-ChildItem app/build/bin/*installer.exe
+          if ($built.Count -ne 1) { throw "Expected one installer, found $($built.Count)" }
+          $info = $built.VersionInfo
+          if ($info.ProductName -ne 'CARE Desktop' -or $info.CompanyName -ne 'Open Healthcare Network Foundation' -or $info.ProductVersion -ne $env:VERSION) {
+            throw "Installer metadata: product='$($info.ProductName)' company='$($info.CompanyName)' version='$($info.ProductVersion)'"
+          }
+          Copy-Item $built.FullName "installer/CARE-Desktop-$env:VERSION-windows-amd64-setup.exe"
+      - id: upload
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desktop-windows-installer
+          path: installer/
+          if-no-files-found: error
+          retention-days: 7
+
+  sign-windows-installer:
+    name: Sign Windows installer
+    needs: [prepare, windows-installer]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Submit to SignPath and wait for approval
+        uses: signpath/github-action-submit-signing-request@v3.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ needs.windows-installer.outputs.artifact-id }}
+          parameters: |
+            version: "${{ needs.prepare.outputs.version }}"
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: "3600"
+          output-artifact-directory: signed-installer
+      - run: test -s "signed-installer/CARE-Desktop-${{ needs.prepare.outputs.version }}-windows-amd64-setup.exe"
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desktop-windows-installer-signed
+          path: signed-installer/
+          if-no-files-found: error
+          retention-days: 7
+
   package:
     name: Package installers
-    needs: [prepare, checks]
+    needs: [prepare, checks, sign-windows-installer]
+    # Unsigned packaging is allowed only when signing was never configured;
+    # a failed or timed-out signing request fails the release.
+    if: >-
+      !cancelled() && needs.prepare.result == 'success' && needs.checks.result == 'success'
+      && (needs.prepare.outputs.sign_windows == 'true' && needs.sign-windows-installer.result == 'success'
+          || needs.prepare.outputs.sign_windows != 'true' && needs.sign-windows-installer.result == 'skipped')
     runs-on: macos-15
     timeout-minutes: 360
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
       SIGN_MACOS: ${{ secrets.MACOS_CERT_P12 != '' }}
+      SIGN_WINDOWS: ${{ needs.prepare.outputs.sign_windows }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -89,6 +244,12 @@ jobs:
           name: desktop-macos-unsigned
           path: incoming/macos
       - uses: actions/download-artifact@v8.0.1
+        if: env.SIGN_WINDOWS == 'true'
+        with:
+          name: desktop-windows-installer-signed
+          path: incoming/windows
+      - uses: actions/download-artifact@v8.0.1
+        if: env.SIGN_WINDOWS != 'true'
         with:
           name: desktop-windows-unsigned
           path: incoming/windows
@@ -178,9 +339,9 @@ jobs:
             xcrun stapler validate "$dmg"
             spctl -a -vvv -t open --context context:primary-signature "$dmg"
           fi
-          test -s incoming/windows/desktop-windows-unsigned-setup.exe
-          cp incoming/windows/desktop-windows-unsigned-setup.exe \
-            "release-assets/CARE-Desktop-$VERSION-windows-amd64-setup.exe"
+          installers=(incoming/windows/*.exe)
+          test "${#installers[@]}" -eq 1 && test -s "${installers[0]}"
+          cp "${installers[0]}" "release-assets/CARE-Desktop-$VERSION-windows-amd64-setup.exe"
           cp deployments/.env release-assets/release-config.env
       - name: Remove macOS signing credentials
         if: always() && env.SIGN_MACOS == 'true'
@@ -201,7 +362,7 @@ jobs:
             configuration_sha256: hash("release-assets/release-config.env"),
             signing: {
               macos: process.env.SIGN_MACOS === "true" ? "developer-id-notarized" : "ad-hoc",
-              windows: "unsigned",
+              windows: process.env.SIGN_WINDOWS === "true" ? "signpath-foundation" : "unsigned",
             },
             run_url: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
           };
@@ -227,6 +388,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       VERSION: ${{ needs.prepare.outputs.version }}
+      SIGN_WINDOWS: ${{ needs.prepare.outputs.sign_windows }}
     steps:
       - uses: actions/download-artifact@v8.0.1
         with:
@@ -256,10 +418,15 @@ jobs:
             gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
               -f "ref=refs/tags/$tag" -f "sha=$GITHUB_SHA"
           fi
+          if [ "$SIGN_WINDOWS" = "true" ]; then
+            windows_note="The Windows installer and application are signed with a certificate issued to SignPath Foundation (free code signing provided by SignPath.io)."
+          else
+            windows_note="Windows downloads are unsigned and may be blocked by SmartScreen."
+          fi
           cat > release-notes.md <<EOF
           ## CARE Desktop $VERSION
 
-          **Preview release.** Windows downloads are unsigned and may be blocked by SmartScreen.
+          **Preview release.** $windows_note
           See release-manifest.json for each platform's actual signing status.
           macOS uses the existing Developer ID/notarization configuration when enabled;
           otherwise its ad-hoc signature is not trusted by Gatekeeper.

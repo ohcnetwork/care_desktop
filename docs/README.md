@@ -2,6 +2,10 @@
 
 CARE Desktop is a local control application for a clinic's CARE installation. Its Go backend installs and operates a Docker Compose stack, maintains the computer's local networking, and manages encrypted backups. Wails connects that backend to the desktop control panel.
 
+At first run, choose a persisted **Server** role to host the clinic or **Client**
+to connect to its `.local` address using native certificate setup and automatic
+HTTPS verification. The server operations documented here do not run on clients.
+
 This documentation explains the current implementation, from operating-system primitives to the methods the desktop interface calls. It includes the deployment kit and the small part of the desktop frontend that defines the backend contract. It does not attempt to document the CARE medical application, its Django API, or React presentation components.
 
 ## Start here
@@ -18,6 +22,7 @@ This documentation explains the current implementation, from operating-system pr
 | [Native integrations](native-integrations.md) | Process execution, file persistence, logs, prerequisites, elevation, TLS trust, mDNS, and OS differences. |
 | [Development and release](development-and-release.md) | Local builds, embedded assets, release pins, CI, packaging, and changing the backend safely. |
 | [Releasing CARE Desktop](releases.md) | Preparing a version, manually running a release, reviewing the draft, signing limitations, and retrying safely. |
+| [Facility setup page](seed-data.md) | The browser wizard at `/seed-data` that loads a new clinic's first data through CARE's API, and the master-sheet converter behind it. |
 
 For a first reading, follow the table from top to bottom. If you are fixing one behavior, use the task map below instead.
 
@@ -33,9 +38,11 @@ For a first reading, follow the table from top to bottom. If you are fixing one 
 | "How are patient data and uploaded files stored?" | [Clinic lifecycle](clinic-lifecycle.md) and [backups](backups-and-restore.md). |
 | "What happens if restore or uninstall is interrupted?" | [Backups and restore](backups-and-restore.md) and [cleanup and uninstall](cleanup-and-uninstall.md). |
 | "The app works here but not on another device." | [Native integrations](native-integrations.md). |
+| "How do staff computers connect without Docker or Git?" | [Native client setup and initial trust](native-integrations.md#native-client-setup-and-trust-on-first-use). |
 | "This client previously hosted CARE and now cannot reach another server." | [Client recovery and earlier-install cleanup](client-recovery.md). |
 | "How do I reproduce the installed version?" | [Release identity](development-and-release.md#release-identity-and-pins). |
 | "How do I release a new version?" | [Release runbook](releases.md). |
+| "How does a new clinic get its facility, staff and master data?" | [Facility setup page](seed-data.md). |
 | "Which file should I change?" | [Repository map](repository-map.md). |
 
 ## Vocabulary

@@ -26,10 +26,17 @@ const installSubdir = "install"
 
 var installUserFiles = map[string]bool{"backend.env": true, "frontend.env": true}
 
+var installGeneratedDirs = []string{"seed-data"}
+
 const gitkeepPlaceholder = ".gitkeep"
 
 func (a *App) ensureInstallDir() (string, error) {
 	dest := a.installDir()
+	for _, dir := range installGeneratedDirs {
+		if err := os.RemoveAll(filepath.Join(dest, dir)); err != nil {
+			return "", err
+		}
+	}
 	err := fs.WalkDir(a.installFS, "install", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -72,16 +79,18 @@ func (a *App) engine() *clinic.Clinic {
 		BackupDir:  cfg.BackupDir,
 		Pins:       a.pins,
 		Log:        a.logln,
-		Confirm: func(title, message string) bool {
-			sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
-				Type:          wruntime.QuestionDialog,
-				Title:         title,
-				Message:       message,
-				Buttons:       []string{"Yes", "No"},
-				DefaultButton: "Yes",
-				CancelButton:  "No",
-			})
-			return err == nil && sel == "Yes"
-		},
+		Confirm:    a.confirmDialog,
 	}
+}
+
+func (a *App) confirmDialog(title, message string) bool {
+	sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
+		Type:          wruntime.QuestionDialog,
+		Title:         title,
+		Message:       message,
+		Buttons:       []string{"Yes", "No"},
+		DefaultButton: "Yes",
+		CancelButton:  "No",
+	})
+	return err == nil && sel == "Yes"
 }

@@ -94,7 +94,8 @@ func scan(o Options, inspectSystem func(proc.Runner) ([]Trace, error)) (Report, 
 
 	blocking := 0
 	for _, trace := range traces {
-		if trace.ID != "images" {
+		// Network repair creates firewall rules before setup; they are not an old clinic.
+		if trace.ID != "images" && trace.ID != "firewall" {
 			blocking++
 		}
 	}

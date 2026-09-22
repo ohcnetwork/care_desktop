@@ -21,6 +21,9 @@ func (a *App) startup(ctx context.Context) {
 	a.advStop = make(chan struct{})
 	a.startAdvertise()
 	go a.watchAdvertise()
+	if a.loadConfig().Role != roleServer {
+		return
+	}
 	go func() {
 		a.log.Writef("docker: %s", prereq.DockerCheck(a.engine().Runner()).Message)
 	}()
@@ -30,7 +33,7 @@ func (a *App) refreshInstallDir() {
 	updated := false
 	if err := a.withJob(func() error {
 		cfg := a.loadConfig()
-		if !cfg.SetupDone || cfg.Removing {
+		if cfg.Role != roleServer || !cfg.SetupDone || cfg.Removing {
 			return nil
 		}
 		pending, err := a.engine().Backups().PendingRestore()
@@ -96,6 +99,10 @@ func (a *App) beforeClose(context.Context) (prevent bool) {
 	if a.closing {
 		return false
 	}
+	if a.loadConfig().Role != roleServer {
+		a.closing = true
+		return false
+	}
 	answer := make(chan string, 1)
 	go func() { answer <- a.askBeforeQuit() }()
 
@@ -142,7 +149,7 @@ func (a *App) askBeforeQuit() string {
 
 func (a *App) clinicRunning() bool {
 	cfg := a.loadConfig()
-	if !cfg.SetupDone || cfg.Removing {
+	if cfg.Role != roleServer || !cfg.SetupDone || cfg.Removing {
 		return false
 	}
 	if _, err := os.Stat(filepath.Join(a.installDir(), "docker-compose.yml")); err != nil {
@@ -161,6 +168,9 @@ func (a *App) clinicRunning() bool {
 }
 
 func (a *App) stopForQuit() error {
+	if err := a.requireServer(); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), stopDeadline)
 	defer cancel()
 	run := a.engine().Runner()

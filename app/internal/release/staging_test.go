@@ -45,7 +45,7 @@ func TestWailsStagesMissingInstallBeforeGoBuild(t *testing.T) {
 	}
 	write("app/frontend/scripts/stage-install.mjs", string(script))
 	write("app/wails.json", `{"name":"care-desktop","info":{"productVersion":"9.9.9","productName":"CARE Desktop"}}`)
-	write("deployments/setup/index.html", "device setup")
+	write("deployments/minio/entrypoint.sh", "storage entrypoint")
 	write("app/main.go", `package main
 import ("embed"; "fmt")
 //go:embed all:install
@@ -78,6 +78,7 @@ func main() {
 			case "stale":
 				write("app/install/.env", "stale")
 				write("app/install/removed-file", "stale")
+				write("app/install/setup/index.html", "obsolete device setup")
 				write("app/install/.gitkeep", "")
 			}
 			// Wails executes pre-build hooks from its binary output directory.
@@ -108,8 +109,11 @@ func main() {
 			if output, err := cmd.CombinedOutput(); err != nil || string(output) != manifest {
 				t.Fatalf("compiled kit is missing or stale: %v\n%s", err, output)
 			}
-			if data, err := os.ReadFile(filepath.Join(install, "setup", "index.html")); err != nil || string(data) != "device setup" {
+			if data, err := os.ReadFile(filepath.Join(install, "minio", "entrypoint.sh")); err != nil || string(data) != "storage entrypoint" {
 				t.Fatalf("nested kit file was not staged: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(install, "setup")); !os.IsNotExist(err) {
+				t.Fatalf("obsolete device setup was staged: %v", err)
 			}
 			if tc.state == "stale" {
 				if _, err := os.Stat(filepath.Join(install, "removed-file")); !os.IsNotExist(err) {

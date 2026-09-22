@@ -209,7 +209,7 @@ missing, and a PR branch push does not trigger a duplicate push workflow.
 | Lint | Formatting, the Wails/internal boundary, pinned Actionlint workflow validation, and golangci-lint v2.13.2 through its v9 action. |
 | Go tests | Clean-checkout `go build ./...` and the full race-enabled test suite, including the release identity/CI gate contracts. Node, PostgreSQL fixture tools, OpenSSL, Python, Git, and Compose must be available rather than silently skipping their tests. |
 | Frontend | Node 22, `npm ci`, binding checks, TypeScript, and the Vite production build. Uploads the built frontend for native builds. |
-| Native builds | After the first three jobs pass: actual Wails macOS universal and Windows/amd64 builds for CARE Desktop. Windows must produce an NSIS installer. |
+| Native builds | After the first three jobs pass: actual Wails macOS universal and Windows/amd64 builds for CARE Desktop. Windows must produce an NSIS installer with NSIS 3.12 from [`install-nsis`](../.github/actions/install-nsis/action.yml), and its version metadata must match `wails.json` and `.env`; the bare application and the generated installer inputs are uploaded separately so a release can sign the application before rebuilding the installer. |
 | CI | Stable aggregate check; fails if any required job failed, was cancelled, or was skipped. Configure this check in branch protection. |
 
 Go comes from `app/go.mod`, and module writes are disallowed. Native jobs reuse
@@ -251,6 +251,28 @@ npm run build
 Use Actionlint v1.7.12 and golangci-lint v2.13.2, matching CI. Actionlint checks
 workflow syntax and expressions; it does not invoke ShellCheck or Pyflakes.
 Database/Compose tests need the same local prerequisites as the Go job.
+
+### Pre-commit fixes
+
+The repository includes [pre-commit](https://pre-commit.com/) hooks for the
+auto-fixable checks: trailing whitespace, final newlines, YAML syntax, Go
+formatting, and golangci-lint fixes. They use the same golangci-lint version
+and configuration as CI; package-wide linting runs from `app/`, not just on
+the staged Go files.
+
+Install pre-commit with your preferred package manager (for example,
+`uv tool install pre-commit` or `brew install pre-commit`), then install the
+hooks and the CI-matching Go linter once from the repository root:
+
+```sh
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+pre-commit install --install-hooks
+```
+
+Run `pre-commit run --all-files` after installing it, or rerun `git commit`
+after a hook changes files and stage those changes. The hooks intentionally do
+not replace CI's race tests, frontend production build, Actionlint validation,
+or native application builds.
 
 ## Regression-test organization
 
@@ -296,8 +318,14 @@ replaced. Only the draft job has write permission.
 
 macOS preserves the existing optional Developer ID signing/notarization flow and
 secret names; without credentials it retains Wails' ad-hoc signature. Windows
-installers are unsigned. The release manifest records each platform's actual
-status; these remain preview releases.
+application and installer are signed through SignPath when its configuration is
+present, otherwise left unsigned. The release manifest records each platform's
+actual status; these remain preview releases.
+
+The Windows installer definition lives in `app/build/windows/` (`info.json`,
+`wails.exe.manifest`, `installer/project.nsi`). Wails regenerates `icon.ico`,
+`installer/wails_tools.nsh` and the WebView2 bootstrapper from `wails.json` and
+its own module on every build, so those are ignored.
 
 Follow [Releasing CARE Desktop](releases.md) for the complete maintainer procedure
 and safe retry rules.

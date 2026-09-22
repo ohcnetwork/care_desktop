@@ -36,6 +36,10 @@ func (e *Clinic) baseEnv() []string {
 	env := os.Environ()
 	set := func(k, v string) { env = append(env, k+"="+v) }
 	set("PATH", proc.AugmentedPath())
+	if host := proc.DockerHost(); host != "" {
+		set("DOCKER_HOST", host)
+		set("DOCKER_CONTEXT", "default")
+	}
 	set("COMPOSE_PROJECT_NAME", composeProject)
 	set("COMPOSE_FILE", filepath.Join(e.InstallDir, "docker-compose.yml"))
 	set("BACKEND_IMAGE", e.Pins.BackendImage)

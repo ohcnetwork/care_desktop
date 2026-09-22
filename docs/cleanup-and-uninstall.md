@@ -7,6 +7,18 @@ Stopping a clinic and uninstalling it are fundamentally different operations.
 volumes. Stop does not.** Keeping the backup directory is not the same as
 keeping the running clinic's data volumes.
 
+**Client cleanup is different:** use **Uninstall client setup** to disconnect a
+staff computer. It removes only the saved connection and exact certificate
+installed by that client; it does not invoke server uninstall, touch hosts
+files, delete clinic data, or remove unrelated trusted roots. Failures retain
+state for retry. Pre-existing trusted certificates are preserved and may still
+permit browser access; cleanup is not a blanket access revocation.
+Successful client or server uninstall clears the saved role and returns to the
+Server/Client choice. Failed cleanup retains the role and retry state. Retained
+backups do not count as an active server installation. Uninstall the setup before
+using OS uninstall to remove the desktop executable. See
+[client removal](native-integrations.md#removing-client-access).
+
 For a former server now used as a browser client, see
 [client recovery](client-recovery.md): it distinguishes a hosts-only repair from
 the destructive standalone cleanup scripts used when the app is unavailable.
@@ -84,7 +96,7 @@ files, including their tests, have their own complete table in
 | [`clinic/images.go`](../app/internal/clinic/images.go) | Current pinned-image inventory, non-forced tag removal, and explicitly shared Docker build-cache pruning. |
 | [`clinic/leftovers.go`](../app/internal/clinic/leftovers.go) | End-of-engine logging that distinguishes removed resources from deliberately kept backups/images/cache. |
 | [`residue/residue.go`](../app/internal/residue/residue.go) | `Options`, `Trace`, `Report`, production `Scan`, private injectable `scan`, native `systemTraces`, earlier-install discovery, and image-presence classification. |
-| [`residue/residue_test.go`](../app/internal/residue/residue_test.go) | Fail-closed Docker/system inspection, nonblocking image caches, and the correct Docker working-directory template context. |
+| [`residue/residue_test.go`](../app/internal/residue/residue_test.go) | Fail-closed Docker/system inspection, nonblocking image caches and firewall rules, and the correct Docker working-directory template context. |
 
 Neighboring App entry points are linked only to explain their public contract:
 [`app_actions.go`](../app/app_actions.go),
@@ -134,7 +146,7 @@ shared project identity important.
 
 ### What is not an automatic cleanup target
 
-The engine does not uninstall Docker Desktop, Git, the desktop binary, or
+The engine does not uninstall Rancher Desktop, Docker Engine, Git, the desktop binary, or
 unrelated packages. It does not search every folder for copied backups,
 remove certificates from other devices, or prove that no clinical data
 exists elsewhere. It also does not own arbitrary volumes/networks merely
@@ -545,9 +557,9 @@ The public [`PurgeResidue`](../app/app_residue.go) flow:
 
 1. Acquires the App's mutation gate and rejects a normal installed clinic.
 2. Scans residue. If inspection fails, return the error.
-3. If the report is already `Clean`, return without purging. Because images
-   alone are nonblocking, **an images-only cache does not cause this UI path
-   to remove images**.
+3. If the report is already `Clean`, return without purging. Images and firewall
+   rules alone are nonblocking: **this UI path does not remove cached images or
+   undo network repair when no blocking residue exists**.
 4. Require a live desktop context and explicit destructive confirmation.
    Canceling is a normal no-op.
 5. Discover the earlier install directory. Check that the retained backup
@@ -671,16 +683,21 @@ not complete.
 | `config` | A nonempty supplied configuration path exists. | Yes. |
 | `hosts` | Native hosts inspection finds CARE's mapping. | Yes. |
 | `certificate` | Native trust inspection finds a CARE root. | Yes. |
-| `firewall` | Native networking inspection finds owned firewall rules. | Yes. |
+| `firewall` | Native networking inspection finds owned firewall rules. | **No**; network repair creates these before setup. They remain in `Traces`. |
 | `autostart` | Platform autostart reports enabled. | Yes. |
 | `secret` | The caller reports a saved backup password. | Yes. |
 
 Conceptually:
 
 ```text
-Clean = no traces except possibly "images"
+Clean = no traces except possibly "images" and "firewall"
         AND no inspection errors
 ```
+
+Firewall rules must not make the cleanup and network checks invalidate each
+other: network repair creates them before setup. The separate network check
+still validates their configuration. Uninstall and an actual residue purge
+still remove and verify owned firewall rules; only the first-run blocker changes.
 
 A failed Docker query, inaccessible install/config path, or failed native
 inspection makes `Clean=false` even when no positive trace could be produced.

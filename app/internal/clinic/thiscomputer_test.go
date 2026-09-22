@@ -30,6 +30,12 @@ func TestLocalSetupRequiresVerifiedHostsAndTrust(t *testing.T) {
 				(strings.Contains(message, "can now open") || !strings.Contains(message, "Other devices are unaffected")) {
 				t.Fatalf("optional local setup failure was misreported: %q", message)
 			}
+			if strings.Contains(message, "/setup") {
+				t.Fatalf("setup result refers to the retired web page: %q", message)
+			}
+			if (!tc.hostsReady || !tc.trustReady) && !strings.Contains(message, "try starting CARE again") {
+				t.Fatalf("setup failure must explain how to retry: %q", message)
+			}
 		})
 	}
 }

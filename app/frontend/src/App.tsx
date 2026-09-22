@@ -5,6 +5,8 @@ import { FailedScreen } from "@/screens/install/failed-screen";
 import { InstallingScreen } from "@/screens/install/installing-screen";
 import { PanelScreen } from "@/screens/panel/panel-screen";
 import { SetupScreen } from "@/screens/setup/setup-screen";
+import { RoleScreen } from "@/screens/role-screen";
+import { ClientScreen } from "@/screens/client-screen";
 import { useCare } from "@/state/care-store";
 import { EMPTY_SETUP_FORM, type SetupForm } from "@/state/forms";
 
@@ -32,9 +34,13 @@ export function App() {
 
   return (
     <div className="flex h-full">
-      <Rail />
+      {care.ready && care.flow !== "role" && care.flow !== "client" ? <Rail /> : null}
       {care.ready ? (
-        care.flow === "setup" ? (
+        care.flow === "role" ? (
+          <RoleScreen />
+        ) : care.flow === "client" ? (
+          <ClientScreen />
+        ) : care.flow === "setup" ? (
           <SetupScreen form={setupForm} patch={patchSetup} />
         ) : care.flow === "installing" ? (
           <InstallingScreen />

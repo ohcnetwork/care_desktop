@@ -1,0 +1,14 @@
+name: Install NSIS
+description: Install the NSIS release pinned here, replacing whatever the runner image ships.
+runs:
+  using: composite
+  steps:
+    - shell: pwsh
+      run: |
+        choco upgrade nsis --version=3.12.0 -y --no-progress --allow-downgrade
+        if ($LASTEXITCODE -ne 0) { throw "NSIS installation failed" }
+        $nsis = "C:\Program Files (x86)\NSIS"
+        $version = (& "$nsis\makensis.exe" /VERSION | Out-String).Trim()
+        if ($version -notmatch '^v3\.12') { throw "Unexpected NSIS version: $version" }
+        "makensis $version"
+        $nsis | Out-File -FilePath $env:GITHUB_PATH -Append

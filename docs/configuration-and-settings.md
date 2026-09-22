@@ -62,8 +62,6 @@ install/
 |   `-- backup.sh
 |-- minio/
 |   `-- entrypoint.sh
-|-- setup/
-|   `-- device-setup page and generated public trust material
 `-- keys/
     |-- backup-cert.pem
     `-- backup-key.pem.enc
@@ -73,10 +71,37 @@ Image building and restore add their own working material. See the relevant guid
 
 ## Persisted `Config`
 
+First run persists the choice to host a clinic (**Server**) or connect to one
+(**Client**). Clients retain the clinic address and use native certificate
+bootstrap, without provisioning Docker/Git or advertising mDNS. Role selection
+is not an ordinary settings toggle; it remains locked until successful uninstall.
+Failed-install cleanup/retry preserves it. The one exception is the **Back**
+button on the setup and client screens, which undoes a choice nothing has been
+built on yet (see `ClearRole` below). The server-specific fields below still govern hosted clinics.
+
+Client connection state includes the saved clinic URL, the public pinned
+certificate (`client_certificate`), and whether this client installed it
+(`client_certificate_owned`). Certificate ownership is used for exact-certificate
+cleanup, not broad removal of every CARE root. Neither the PEM nor ownership
+flag is exposed in `AppState`; its client fields are `role` and `client_url`.
+The pin and ownership state are
+persisted before OS elevation to preserve retry and cleanup information.
+Subsequent connects use the saved pin rather than silently accepting a new
+HTTP certificate. **Uninstall client setup** clears
+the connection, certificate state and role after successful removal;
+failures keep retry state. It does not uninstall the executable.
+Certificates not installed by this client remain trusted and may still permit
+browser access. Uninstall the setup before removing the executable through the OS.
+See [client removal](native-integrations.md#removing-client-access).
+
 [`app_config.go`](../app/app_config.go) defines a small JSON object:
 
 | JSON field | Go field | Meaning |
 | --- | --- | --- |
+| `role` | `Role` (`string`) | Persisted `server` or `client`; empty before selection and after successful uninstall. Failed-install cleanup does not reset it. |
+| `client_url` | `ClientURL` (`string`) | Normalized HTTPS clinic address for a client, empty when disconnected. |
+| `client_certificate` | `ClientCertificate` (`string`) | Pinned public root PEM; omitted when empty. |
+| `client_certificate_owned` | `ClientCertificateOwned` (`bool`) | Whether this client owns certificate installation/cleanup; omitted when false. |
 | `setup_done` | `SetupDone` | The full setup callback, including starting CARE, succeeded and that result was saved. |
 | `removing` | `Removing` | Destructive cleanup began but may not have completed. Omitted when false. |
 | `mdns_name` | `MDNSName` | Saved clinic name, normally such as `care.local`. |
@@ -91,13 +116,33 @@ A missing file is the only ordinary first-run fallback. Other read errors propag
 
 There is no versioned configuration migration framework. JSON decoding uses the current struct and tolerates unknown object fields; it does not make missing fields evidence that external clinic resources are absent.
 
+Existing server settings or a partial installation infer the Server role.
+`SelectRole(role string) error` persists the first-run choice and rejects a
+different choice once the role is set. `ClearRole() error` is the escape hatch
+for a misclick: it writes an empty `Config` and returns to the role choice, but
+only while the file holds nothing beyond `role` and `mdns_name` and the install
+directory is empty. The `mdns_name` allowance exists because the setup form
+pushes the default clinic address as soon as it opens, so a server choice that
+was never installed still carries one. Any other field — an admin hash, backup
+directory, `setup_done`, `removing`, a client URL, pinned certificate or
+certificate ownership — or a populated install directory means the role is in
+use and `ClearRole` refuses with the uninstall-first message. A client that has
+connected therefore has no Back button; **Uninstall client setup** is its way
+out. Client and unchosen state queries avoid Docker and backup inspection.
+
 `App` loads the file once into a cache guarded by `cfgMu`. `App.loadConfig()` returns a struct copy. Editing `config.json` externally does not update the running cache; it is not a watched configuration file.
 
 ### Write and forget rules
 
 `saveConfig()` serializes indented JSON and uses `atomicfile.Write` with mode `0600`. It updates the in-memory copy only after the write succeeds. The atomic helper uses a temporary file in the destination directory, syncing and replacing it through platform-specific code.
 
-`forgetConfig()` removes the saved file, tolerates it already being absent, and clears the cache only when removal succeeds. Cleanup must not forget this state before it has finished the resource-removal steps that may need retry information.
+`forgetConfig()` retains the role: for a server it writes a role-only
+configuration after cleanup; for a client it preserves the current
+configuration. Client connection/certificate cleanup belongs to
+`DisconnectClient()`. Successful client/server uninstall calls
+`resetConfigAfterUninstall()` to atomically clear all configuration, including the
+role. Retained backups do not re-infer a server role. Cleanup must not discard
+state needed to retry incomplete resource removal.
 
 Atomic replacement protects a single file. It is not a transaction across Docker resources, the keyring, two environment files, and `config.json`.
 
@@ -116,6 +161,8 @@ A failure after configuration or files were created is therefore a partial setup
 `ensureInstallDir()` walks the embedded `install` tree. It skips the placeholder, creates directories, writes shell scripts as executable, and copies other kit files with ordinary file modes.
 
 Its preservation allow-list contains exactly `backend.env` and `frontend.env`: existing copies are not overwritten. Other kit files are refreshed from the executable. This includes `.env`, so the shipped pins do not become an independently editable runtime release mechanism.
+
+Generated directories listed in `installGeneratedDirs` (currently `seed-data/`, the [facility setup page](seed-data.md)) are deleted before the walk and copied fresh, because their contents are hashed build assets whose names change every release and would otherwise pile up.
 
 Refresh copies the current kit but is not a general recursive deletion or a migration framework for all generated files. Similarly, preserving environments means a new template key is not automatically merged into an existing environment.
 

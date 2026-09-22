@@ -42,7 +42,7 @@ export function SetupScreen({
   form: SetupForm;
   patch: (values: Partial<SetupForm>) => void;
 }) {
-  const { openStep, setOpenStep, setStepDone, startInstall } = useCare();
+  const { openStep, setOpenStep, setStepDone, startInstall, clearRole } = useCare();
   const host = normaliseHost(form.hostInput);
   const { checks, overall, recheckAll, checkMDNS } = useRequirementChecks(host);
 
@@ -53,35 +53,59 @@ export function SetupScreen({
   const [showAdminInfo, setShowAdminInfo] = useState(false);
   const [backupDirProblem, setBackupDirProblem] = useState("");
   const [restart, setRestart] = useState<RestartPlan | null>(null);
+  const [leaving, setLeaving] = useState(false);
+  const leavingRef = useRef(false);
+  const verifyingRef = useRef(false);
+  const hostSave = useRef<Promise<boolean>>(Promise.resolve(false));
+  const hostTimer = useRef(0);
 
   const adminStrength = usePasswordStrength(form.adminPassword);
   const backupStrength = usePasswordStrength(form.backupPassword);
 
-  const pushHost = useCallback(async (raw: string): Promise<boolean> => {
-    const trimmed = raw.trim();
-    const problem = await bridge.ValidateDomain(trimmed);
-    if (problem) {
-      setHostProblem(problem);
-      return false;
-    }
-    try {
-      await bridge.SetMDNSName(normaliseHost(trimmed));
-    } catch (e) {
-      setHostProblem(errorText(e));
-      return false;
-    }
-    setHostProblem("");
-    return true;
+  const pushHost = useCallback((raw: string): Promise<boolean> => {
+    // Serialize saves so Back can wait for every native write before clearing the role.
+    const pending = hostSave.current.then(async () => {
+      if (leavingRef.current) return false;
+      try {
+        const trimmed = raw.trim();
+        const problem = await bridge.ValidateDomain(trimmed);
+        if (leavingRef.current) return false;
+        if (problem) {
+          setHostProblem(problem);
+          return false;
+        }
+        await bridge.SetMDNSName(normaliseHost(trimmed));
+        setHostProblem("");
+        return true;
+      } catch (e) {
+        setHostProblem(errorText(e));
+        return false;
+      }
+    });
+    hostSave.current = pending;
+    return pending;
   }, []);
 
   // Every re-check asks about the restart, not just the one straight after an
   // install: the operator can put the restart off, and until they do it Docker
   // cannot start, so pressing "Check again" has to keep saying so.
   const verify = useCallback(async () => {
-    await pushHost(form.hostInput);
-    await recheckAll();
-    const plan = await bridge.RestartPlan();
-    setRestart(plan.needed ? plan : null);
+    if (verifyingRef.current || leavingRef.current) return;
+    verifyingRef.current = true;
+    window.clearTimeout(hostTimer.current);
+    setVerifying(true);
+    setVerifyNote("");
+    try {
+      await pushHost(form.hostInput);
+      await recheckAll();
+      const plan = await bridge.RestartPlan();
+      setRestart(plan.needed ? plan : null);
+    } catch (e) {
+      setVerifyNote(errorText(e));
+    } finally {
+      verifyingRef.current = false;
+      setVerifying(false);
+    }
   }, [pushHost, form.hostInput, recheckAll]);
 
   const hostOk = hostProblem === "";
@@ -100,7 +124,6 @@ export function SetupScreen({
 
   // The address is applied before the name check runs, so step 1 verifies the
   // name the clinic actually picked rather than the default.
-  const hostTimer = useRef(0);
   const applyHost = useCallback(
     async (raw: string) => {
       if (await pushHost(raw)) void checkMDNS();
@@ -136,30 +159,50 @@ export function SetupScreen({
     patch({ backupDir: chosen });
   };
 
+  const goBack = async () => {
+    if (leavingRef.current || verifyingRef.current) return;
+    leavingRef.current = true;
+    window.clearTimeout(hostTimer.current);
+    setLeaving(true);
+    try {
+      await hostSave.current;
+      if (!(await clearRole())) leavingRef.current = false;
+    } finally {
+      setLeaving(false);
+    }
+  };
+
   const onContinue = async () => {
+    if (verifyingRef.current || leavingRef.current) return;
+    verifyingRef.current = true;
+    window.clearTimeout(hostTimer.current);
     setVerifying(true);
     setVerifyNote("");
-    const [state, dirProblem] = await Promise.all([
-      recheckAll(),
-      bridge.ValidateBackupDir(form.backupDir),
-    ]);
-    setBackupDirProblem(dirProblem);
-    setVerifying(false);
-    if (state !== "ok" || !hostOk || !adminDone || !backupDone || dirProblem !== "") {
-      setVerifyNote("A step is no longer met — fix it and try again.");
-      return;
+    try {
+      if (!(await pushHost(form.hostInput))) return;
+      const [state, dirProblem] = await Promise.all([
+        recheckAll(),
+        bridge.ValidateBackupDir(form.backupDir),
+      ]);
+      setBackupDirProblem(dirProblem);
+      if (state !== "ok" || !hostOk || !adminDone || !backupDone || dirProblem !== "") {
+        setVerifyNote("A step is no longer met — fix it and try again.");
+        return;
+      }
+      // Record the pass before this screen unmounts and its mirroring effect stops.
+      setStepDone("checks", true);
+      startInstall({
+        host,
+        adminPassword: form.adminPassword,
+        backupPassword: form.backupPassword,
+        backupDir: form.backupDir,
+      });
+    } catch (e) {
+      setVerifyNote(errorText(e));
+    } finally {
+      verifyingRef.current = false;
+      setVerifying(false);
     }
-    // Record the pass before starting: this screen unmounts on the next commit,
-    // so the effect that mirrors `overall` into the rail would never see the
-    // result and the step would keep the "Checking" state it was put into a
-    // moment ago.
-    setStepDone("checks", true);
-    startInstall({
-      host,
-      adminPassword: form.adminPassword,
-      backupPassword: form.backupPassword,
-      backupDir: form.backupDir,
-    });
   };
 
   const issues = checks.filter((c) => c.state === "bad").length;
@@ -184,6 +227,8 @@ export function SetupScreen({
       <ScreenHead
         title="Set up your clinic"
         subtitle="One time, on this computer. About 15 minutes."
+        onBack={() => void goBack()}
+        backDisabled={leaving || verifying}
       />
 
       <ScreenBody>
@@ -241,6 +286,7 @@ export function SetupScreen({
                     spellCheck={false}
                     autoCapitalize="none"
                     autoComplete="off"
+                    disabled={leaving || verifying}
                     onChange={(e) => onHostChange(e.target.value)}
                     className="h-full flex-1 rounded-none border-none bg-transparent px-0 focus-visible:border-none"
                   />
@@ -252,6 +298,7 @@ export function SetupScreen({
 
               <div className="flex items-center gap-2.5">
                 <Button
+                  disabled={leaving || verifying}
                   onClick={(e) => {
                     e.stopPropagation();
                     setVerifyNote("");
@@ -387,7 +434,7 @@ export function SetupScreen({
           variant="primary"
           size="lg"
           className="shadow-lift disabled:shadow-none"
-          disabled={!ready || verifying}
+          disabled={!ready || verifying || leaving}
           onClick={() => void onContinue()}
         >
           <Download className="size-[17px]" strokeWidth={2.2} />

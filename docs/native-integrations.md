@@ -8,8 +8,10 @@ resolution, certificates, LAN discovery, Windows networking, prerequisite tools,
 login startup, and restart detection. It also explains what the health checks
 actually prove.
 
-**CARE Desktop is the native Wails management application.** Its Go backend
-installs and manages the clinic and performs these operating-system operations.
+**CARE Desktop is the native Wails application.** First run persists a Server
+or Client role, without an ordinary role-switching control. Server mode
+installs and manages the clinic; Client mode connects to an existing clinic and
+performs native certificate setup without Docker, Git, or mDNS advertising.
 The **CARE frontend** is the clinical web application served through Caddy and
 opened in a browser, including browsers on other devices. Trusting a certificate
 or adding a hosts entry on the server computer does not configure every browser
@@ -54,13 +56,15 @@ flowchart TD
     App --> Ready["prereq and health"]
     App --> Native["sys packages"]
     Clinic --> Local["thiscomputer.go"]
-    Clinic --> Export["caddyroot.go and devicescripts.go"]
+    Clinic --> Export["caddyroot.go"]
     Local --> Native
     Export --> Native
     Ready --> Proc["sys/proc"]
     Native --> OS["Host files, processes, trust stores, and networking"]
     Export --> Caddy["Running Caddy container"]
-    Caddy --> Browser["Browser CARE frontend and device setup"]
+    App --> Client["Native client certificate bootstrap"]
+    Client --> Caddy
+    Caddy --> Browser["Browser CARE frontend"]
 ```
 
 There are three different kinds of ownership:
@@ -68,8 +72,8 @@ There are three different kinds of ownership:
 1. **Application lifetime:** the Wails layer owns the in-memory mDNS advertiser,
    its renewal loop, log delivery to the desktop, and second-instance behavior.
 2. **Clinic data and generated files:** the clinic layer owns the installation
-   directory and chooses when to extract Caddy's root certificate and generate
-   device installers. It passes ordinary logging and confirmation callbacks to
+   directory and chooses when to extract Caddy's root certificate for local
+   trust. It passes ordinary logging and confirmation callbacks to
    native helpers rather than making those helpers depend on Wails.
 3. **Host integration artifacts:** each native package identifies the files,
    certificate names, registry values, or firewall names it can change. Removal
@@ -95,13 +99,12 @@ environment, browser, or architecture is supported or has been integration-teste
 | Batched administrator approval | AppleScript `do shell script ... with administrator privileges`. | One elevated PowerShell child through `Start-Process -Verb RunAs`. | `pkexec sh -c`; requires the relevant policy/desktop support. |
 | Server hosts file | `/etc/hosts`. | `%WINDIR%\System32\drivers\etc\hosts`; path helper falls back to `C:\Windows`. | `/etc/hosts`. |
 | Local certificate installation | Try login keychain first, then offer System keychain installation. | Try machine `Root` through `certutil`, then offer elevation. | Try system anchors/bundle update first, then offer elevation. |
-| Downloadable trust installer | Installs in System keychain using `sudo` when needed. | Imports into `Cert:\LocalMachine\Root` after UAC approval. | Debian-style or Fedora-style anchors; conditional browser NSS imports. |
 | mDNS | Shared IPv4 address-selection and response-probing implementation. | Same implementation; firewall/profile repair is separate. | Same implementation; no Linux firewall manager is configured here. |
 | Network repair | `netfix` reports not applicable; no repair. | Public profiles can become Private; three owned inbound rules cover HTTP, HTTPS, and mDNS on Private and Domain profiles. | `netfix` reports not applicable; no repair. |
 | Atomic replacement | Rename within the destination directory, then sync that directory. | `MoveFileEx` with replacement and write-through flags. | Same Unix replacement implementation as macOS. |
 | Login startup | Per-user LaunchAgent plist. | Per-user `HKCU` Run value. | Per-user `.desktop` autostart file under `~/.config`. |
 | Restart detection/action | No pending-restart detection; `Now` returns an unsupported error. | Two registry-key probes; restart action schedules `shutdown /r` after five seconds. | No pending-restart detection; `Now` returns an unsupported error. |
-| Automated Docker setup | Download architecture-selected Docker Desktop DMG. | Prefer `winget`, otherwise download the amd64 installer. | Package-manager commands plus `systemctl` and `usermod`. |
+| Automated Docker setup | Download architecture-selected Rancher Desktop DMG. | Prefer `winget`, otherwise download and run the Rancher Desktop MSI. | Package-manager commands plus `systemctl` and `usermod`. |
 | Automated Git setup | Launch Command Line Tools installer with `xcode-select --install`. | `winget`, otherwise a manual-download plan. | Supported package manager, otherwise a manual plan. |
 
 Other `GOOS` values are not a general supported-platform promise. For example,
@@ -159,10 +162,12 @@ construction; see the integration point in [app.go](../app/app.go).
   `SHELL` is unset. It has a three-second context deadline. The command emits a
   line prefixed with `__care_path__`, so unrelated shell startup output is not
   mistaken for PATH. Failure simply omits this part.
-- `AugmentedPath` prepends `/opt/homebrew/bin`, `/opt/homebrew/sbin`,
-  `/usr/local/bin`, `/usr/bin`, `/bin`, `/usr/sbin`, and `/sbin` on Unix.
+- `AugmentedPath` prepends `$HOME/.rd/bin` (Rancher Desktop's CLI directory),
+  `/opt/homebrew/bin`, `/opt/homebrew/sbin`, `/usr/local/bin`, `/usr/bin`,
+  `/bin`, `/usr/sbin`, and `/sbin` on Unix.
 - On Windows it prepends
-  `C:\Program Files\Docker\Docker\resources\bin`,
+  `%LOCALAPPDATA%\Programs\Rancher Desktop\resources\resources\win32\bin`,
+  `C:\Program Files\Rancher Desktop\resources\resources\win32\bin`,
   `C:\Program Files\Git\bin`, and `C:\Program Files\Git\cmd`.
 - The existing PATH is appended. The login-shell result, when available, precedes
   the augmented path. There is no directory-existence check or deduplication.
@@ -215,7 +220,7 @@ The limits matter:
 - Staging cleanup is best effort: the deferred `os.Remove` result is ignored.
 
 Do not infer that every native file write uses `atomicfile`. In this scope,
-autostart registrations and device installer scripts use `os.WriteFile`, logs are
+autostart registrations use `os.WriteFile`, logs are
 appended, and Unix hosts removal deliberately rewrites the existing hosts inode.
 See [Configuration and settings](configuration-and-settings.md) and
 [Backups and restore](backups-and-restore.md) for higher-level persistence users.
@@ -355,7 +360,7 @@ flowchart TD
     Elevate --> Verify
     Verify --> Ready{"Hosts and TLS trust both verified?"}
     Ready -- Yes --> Success["Report that this computer can open the clinic"]
-    Ready -- No --> Pending["Log incomplete hosts and/or trust; offer localhost setup"]
+    Ready -- No --> Pending["Log incomplete hosts and/or trust; offer retry or administrator help"]
     Success --> Cleanup["Attempt temporary certificate cleanup"]
     Pending --> Cleanup
     Skipped --> Cleanup
@@ -370,8 +375,8 @@ Important result rules:
 - Both checks must pass for the positive message. Verified state wins even if an
   earlier command reported an error.
 - Otherwise it names the unconfirmed hosts entry, certificate trust, or both,
-  includes an elevation error when available, and points to
-  `http://localhost/setup`.
+  includes an elevation error when available, and recommends starting CARE
+  again to retry or asking an administrator for help.
 - This method returns no error to stop clinic startup. Its warning that other
   devices are unaffected means these **local changes** do not configure or
   disable them; it is not proof that LAN access or remote trust already works.
@@ -429,9 +434,8 @@ while `Present` conservatively returns true when inspection errors.
 ## Certificate trust and device bootstrap
 
 Sources: [trust.go](../app/internal/sys/trust/trust.go),
-[installer.go](../app/internal/sys/trust/installer.go),
-[caddyroot.go](../app/internal/clinic/caddyroot.go), and
-[devicescripts.go](../app/internal/clinic/devicescripts.go). The adjacent serving
+[client.go](../app/internal/sys/trust/client.go), and
+[caddyroot.go](../app/internal/clinic/caddyroot.go). The adjacent serving
 contract is in [Caddyfile](../deployments/Caddyfile) and the Caddy service in
 [docker-compose.yml](../deployments/docker-compose.yml).
 
@@ -446,25 +450,83 @@ The configured identities are:
 | `CARE Desktop Local CA - Intermediate` | Intermediate Common Name in the Caddyfile. |
 | `/data/caddy/pki/authorities/local/root.crt` | Public root certificate read by `caddyRootPEM`. |
 | Caddy `/data` | Backed by the Compose `caddy-data` volume; contains Caddy state, including private PKI material. |
-| `<InstallDir>/setup/install-cert.sh` and `install-cert.ps1` | Generated download scripts containing the public root certificate. |
 
 A root certificate is public material, not its private signing key. Remote
 devices need the public root to verify the clinic's certificate chain. They do
 not need Caddy's private keys or a copy of the full `/data` volume.
 
-The bootstrap Caddy routes expose `/setup` and the exact `/root.crt` resource,
-not the entire private PKI directory. The root-download route redirects a direct
-request to setup unless the request satisfies its query/referrer conditions.
-That is a setup-flow guard, not authentication: do not treat it as protection
-for private material. Generated installers are served as attachments from the
-read-only setup-directory mount.
+The bootstrap Caddy routes expose only the exact `/root.crt` resource from the
+private PKI directory. HTTP requests need neither a referer nor a query flag.
+`/setup` and `/setup/` serve a mobile-only page from the read-only setup-directory mount.
+The server panel's **Connect phone or tablet** button opens its HTTP address,
+which staff can enter on their phone. iOS instructions cover profile installation
+and full trust in Safari; Android instructions cover CA installation in Settings.
+The matching device instructions expand automatically. Desktop clients use the
+native app; no generated script installers are served.
+Old files may remain unused in an installed kit; refreshing routes and mounts
+does not require deleting that directory.
 
-The HTTP bootstrap avoids a circular dependency on certificate trust. The server
-computer can use `http://localhost/setup`; another device can use
-`http://<clinic-label>.local/setup` when name resolution works, or
-`http://<server-LAN-IPv4>/setup` when its address is known. `localhost` on a tablet
-means the tablet, not the clinic server. Reaching setup by IP does not make an
-HTTPS certificate valid for that IP or repair the clinic hostname's resolution.
+### Native client setup and trust on first use
+
+On a staff computer, install CARE Desktop, select **Client** at first run, and
+enter the clinic's `.local` address shown on the server. The saved role is not a
+routine toggle between hosting and connecting. Clients do not provision Docker
+or Git, run the server stack, or advertise a clinic over mDNS; their operating
+system still needs to resolve the server's address.
+
+The address field accepts a bare clinic label, `name.local`, or an HTTP/HTTPS
+URL with only its root path. It normalizes these to the clinic's HTTPS address.
+IP addresses, custom ports, and URLs containing application paths are not
+accepted.
+
+The client downloads `http://<host>/root.crt?ok=1`. The query flag keeps this
+native flow compatible with older servers; new servers do not require it.
+The HTTP request is bounded by timeouts and follows neither redirects nor a
+configured proxy. CARE requires a single self-signed CARE CA certificate within
+its validity dates, then verifies the actual clinic's TLS chain and hostname
+against that root **before installing it**. Remote verification targets that
+host, not the server's loopback-only `HostTrusts` check.
+
+CARE persists the pinned public root and ownership state before requesting OS
+elevation so interrupted or failed installation can be retried and cleaned up.
+Subsequent connections use that pinned root; they do not silently replace it
+with another HTTP download. OS installation uses the Windows LocalMachine Root
+store, the macOS System keychain, or fingerprint-specific Linux anchors.
+Administrator approval may be needed. The client automatically checks HTTPS
+before opening CARE; a download or approved prompt alone does not count as a
+successful connection. No manual fingerprint comparison or downloaded
+shell/PowerShell installer is part of this flow.
+
+This is **trust on first use on the local network**. HTTP bootstrap avoids
+requiring trust before retrieving the root, but does not authenticate its source.
+An attacker controlling name resolution or the network could substitute a root
+and impersonate the clinic during first connection. Certificate validation and
+the subsequent TLS check confirm cryptographic consistency, not independent
+physical-server identity. Use the administrator-provided address on a trusted
+clinic network; these checks do not eliminate that initial trust decision.
+
+This flow does not provide a phone/tablet installer. Separate servers with
+unique clinic names remain valid; there is no signed, network-wide enforcement
+of a single clinic.
+
+### Removing client access
+
+On a client, choose **Uninstall client setup** and confirm the native
+client cleanup. It removes this device's saved connection and only the exact
+certificate that this client installed. Previously trusted certificates and
+unrelated CARE roots are not removed and may still enable browser access.
+This is not a blanket revocation of access to the clinic. It does not run server uninstall,
+change hosts files, or delete any clinic data.
+
+The app clears its saved URL, pinned certificate, and ownership record only
+after cleanup succeeds. If removal fails, it reports the error and retains the
+state needed to retry. Remove the current clinic access before connecting to a
+different clinic.
+
+Successful cleanup clears the saved role and returns to the Server/Client
+choice. Server uninstall does the same after all required cleanup succeeds.
+It does not uninstall the CARE Desktop executable. To leave the clinic permanently,
+uninstall the setup first, then remove the executable using the operating system.
 
 ### Root extraction is deliberately non-fatal
 
@@ -474,38 +536,18 @@ creates a scratch `.crt` file, uses `docker compose cp` from the same container
 path, and reads the result. It attempts to remove the scratch file on return.
 
 This helper returns `""`, not an error, if extraction cannot be completed. It
-checks for the certificate marker, not full certificate validity. Fingerprint
-helpers and native import tools do more validation later. It neither exports
+checks for the certificate marker, not full certificate validity. Native import
+tools and the final TLS handshake provide later checks. It neither exports
 private keys nor generates a replacement CA when Caddy is unavailable.
-
-`writeDeviceSetupScripts` returns without writing when no root is available or
-the setup directory cannot be statted. Otherwise it computes the SHA-256
-fingerprint, generates both scripts, and writes them with mode `0644`. Individual
-write failures are logged as notes and do not abort startup. The function does
-not create the setup directory, use atomic replacement, or remove an older
-script when it cannot obtain a new root. Do not assume scripts were refreshed
-merely because the clinic otherwise started.
 
 ```mermaid
 flowchart TD
     Caddy["Caddy internal CA in private volume"] --> Root["Read public root.crt: exec, then cp fallback"]
     Root --> Available{"Root available?"}
-    Available -- No --> Deferred["Skip script refresh; trust preparation may warn"]
+    Available -- No --> Deferred["Trust preparation may warn; retry starting CARE"]
     Available -- Yes --> Local["trust.Step for server computer"]
-    Available -- Yes --> Scripts["Write two setup scripts with embedded public root"]
-    Scripts --> Download["Remote operator obtains setup files"]
-    Download --> Compare["Compare SHA-256 using an independently trusted source"]
-    Compare --> Approve["Approve trust installation on that device"]
-    Approve --> Store["Update that device's supported certificate stores"]
-    Store --> Browser["Reopen browser and test the clinic URL"]
     Local --> LocalCheck["Verified TLS to loopback using clinic hostname"]
 ```
-
-Fingerprint comparison in this flow is an operator responsibility. The scripts
-display the supplied fingerprint as a comment; they do not independently verify
-that the embedded CA belongs to the intended physical clinic. In particular,
-downloading a root over the HTTP bootstrap route is not an authenticated trust
-decision by itself.
 
 ### Verifying this computer's trust
 
@@ -563,61 +605,12 @@ after confirmation, elevation, and final verification. Deleting it inside
 temporary-file defaults; the content is public, but access under a different
 elevated identity is still an OS-dependent concern. Cleanup errors are ignored.
 
-### What the downloadable installers do
-
-These scripts configure the computer on which they are run. They do not use the
-Wails bridge, change the server's hosts file, set up mDNS, repair the remote
-network, or install CARE Desktop.
-
-**Unix installer**
-
-- Uses `set -eu`, re-executes through `sudo` when not root, and writes an embedded
-  root into a temporary PEM file with cleanup traps.
-- On macOS, installs in the System keychain.
-- On Linux, selects the Debian-style anchor directory first, otherwise the
-  Fedora-style directory, and runs its certificate-update command. Unsupported
-  layouts produce instructions and an error.
-- Sets the Linux anchor's mode to `0644`. This matters because the subsequent
-  browser import runs as the original user and must be able to read the
-  certificate; it reads the persistent public anchor, not the root-only
-  temporary file.
-- If `SUDO_USER` is set and the NSS `certutil` command is available, it checks
-  existing `$HOME/.pki/nssdb` and `$HOME/.mozilla/firefox/*.default*` directories
-  as that user and imports with nickname `CARE Desktop Local CA`.
-- A failed attempted NSS import produces an explicit error, advises closing the
-  browser and retrying, and prevents the final success message. It does not undo
-  the already-updated system store.
-- Missing NSS tooling, absent matching profiles, running directly as root
-  without `SUDO_USER`, or browsers with different storage models mean those
-  browser stores are not handled. A script success is not universal browser
-  coverage.
-
-**Windows installer**
-
-- Checks administrator membership and, when needed, relaunches its file with
-  UAC, `-NoProfile`, and `-ExecutionPolicy Bypass`.
-- Writes the embedded root as ASCII to `%TEMP%\care-root.crt`, imports with
-  `Import-Certificate` into `Cert:\LocalMachine\Root`, and attempts deletion in
-  a `finally` block around the import.
-- Uses a fixed scratch filename, unlike the uniquely named Go scratch files.
-  It is not designed as a concurrent-installer coordination mechanism.
-- Reports completion and waits for Enter in the elevated instance. Its outer
-  self-elevation wrapper waits but does not use `-PassThru` to propagate that
-  instance's exit code.
-
-Neither generated installer performs `HostTrusts`, validates the clinic's HTTP
-response, or installs a new mDNS resolver. Native iOS/Android certificate
-installation is not implemented by these scripts; device-specific setup and
-browser behavior remain separate. See the setup serving context in
-[Clinic lifecycle](clinic-lifecycle.md).
-
 ### Fingerprints, stable identity, and removal
 
 `SHA1Hex` parses an X.509 `CERTIFICATE` PEM block and returns an uppercase SHA-1
 digest without separators. This is an identifier accepted by platform removal
-tools, not the recommended display fingerprint. `SHA256Colons` also validates
-the certificate and returns uppercase, colon-separated SHA-256 bytes for
-operator comparison. Both return an empty string for invalid certificate data.
+tools, not an operator comparison step. It returns an empty string for invalid
+certificate data.
 
 The constant `CARE Desktop Local CA` is a cleanup compatibility identifier:
 fresh installations can produce different certificates and fingerprints while
@@ -793,9 +786,10 @@ hide, close, quit, and second-instance behavior.
 
 ### Client independence and network limits
 
-Name discovery runs on the CARE computer; browsers do not need a client script,
-extension, or hosts-file change. A successful check on the server does not prove
-that an access point forwards multicast to every phone. Guest-network isolation,
+Name advertising runs only on the CARE server. CARE Desktop clients use their
+operating system's resolver; they do not advertise mDNS or install a hosts-file
+override as normal onboarding. A successful check on the server does not prove
+that an access point forwards multicast to every client. Guest-network isolation,
 separate VLANs without an mDNS gateway, and clients without `.local` support
 cannot be repaired by the responder alone.
 
@@ -823,14 +817,14 @@ and available transport family. It withdraws that name afterwards. QU framing
 is covered by deterministic tests; observing a QU reply on a second machine is
 still necessary because unicast port-5353 packets on one host can be consumed
 by its existing OS responder. Windows/Linux builds do not substitute for
-running the live check on those platforms or on an affected phone.
+running the live check on those platforms or on an affected client.
 
 ## Windows network repair
 
 Source: [netfix.go](../app/internal/sys/netfix/netfix.go).
 
-This package changes Windows profile/firewall settings that can prevent phones
-and tablets from reaching the server. It does not disable Windows Firewall, and
+This package changes Windows server profile/firewall settings that can prevent
+clients from reaching the server. It does not disable Windows Firewall, and
 its success is a settings check rather than a packet test from a remote device.
 
 ### Inspection before repair
@@ -861,7 +855,7 @@ exactly one rule for each of:
 | `CARE Desktop HTTPS` | TCP, or protocol number 6 | 443 | Enabled, inbound, allow, Private and Domain |
 | `CARE Desktop HTTP` | TCP, or protocol number 6 | 80 | Enabled, inbound, allow, Private and Domain |
 
-HTTP matters because bootstrap/setup is available before HTTPS trust is
+HTTP matters because public certificate bootstrap is available before HTTPS trust is
 installed. Current code requires all three rules, not just HTTPS and mDNS.
 
 The exact profile mask is `3` for Private plus Domain. Disabled, outbound,
@@ -986,34 +980,89 @@ flowchart LR
 
 **macOS Docker**
 
-The downloader chooses
-`https://desktop.docker.com/mac/main/arm64/Docker.dmg` for an arm64 build and
-`https://desktop.docker.com/mac/main/amd64/Docker.dmg` otherwise. It downloads the
-DMG, requests administrator approval, attaches it without browsing, invokes
-`/Volumes/Docker/Docker.app/Contents/MacOS/install` with license acceptance and
-the current user, then detaches it.
+The engine supplied on macOS and Windows is
+[Rancher Desktop](https://rancherdesktop.io/) (Apache-2.0), not Docker Desktop:
+Docker Desktop requires a paid subscription for organizations above its size
+threshold, and that threshold applies to the clinic running the installation.
+Rancher Desktop ships dockerd (moby) and the same `docker` CLI and Compose v2
+plugin, so nothing in `internal/clinic` or `internal/compose` changes. Docker
+Desktop may be installed alongside it for unrelated reasons, so the app never
+lets the CLI pick the engine: every command runs
+with `DOCKER_HOST` pinned to Rancher Desktop's socket or named pipe (see
+[Clinic lifecycle](clinic-lifecycle.md#3-one-subprocess-environment-for-the-clinic)). `DockerCheck` reports "not
+installed" rather than "not running" when the Rancher Desktop application is
+absent, even if some other `docker` binary is on PATH.
+
+Asset names carry the release version, so there is no fixed download URL.
+`latestRancherVersion` sends a `HEAD` request to
+`https://github.com/rancher-sandbox/rancher-desktop/releases/latest` with
+redirects disabled and reads the version out of the `Location` tag URL.
+`versionFromTagURL` rejects a missing or unexpected location rather than
+building a download URL for an empty version. This avoids both a pinned version
+that rots and the rate-limited JSON API.
+
+The downloader then fetches
+`.../releases/download/v<version>/Rancher.Desktop-<version>.aarch64.dmg` for an
+arm64 build, or the `x86_64` asset otherwise. It requests administrator
+approval to attach the image on a temporary mount point it owns, replace
+`/Applications/Rancher Desktop.app`, and detach.
 
 The shell sequence is joined with `&&`. On failure it also attempts an ordinary
 detach so the image is not intentionally left mounted. Downloaded media is
-removed on return. It then launches Docker using `open -a Docker` and waits for
-readiness.
+removed on return. It then launches Rancher Desktop with
+`open -a "/Applications/Rancher Desktop.app"` and waits for readiness.
 
 **Windows Docker**
 
-It first tries `winget install -e --id Docker.DockerDesktop` with package/source
-agreement acceptance. If that command fails, it logs the fallback and downloads
-`https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe`.
-There is no architecture-selection branch for that Windows download.
+It first tries `winget install -e --id SUSE.RancherDesktop` with package/source
+agreement acceptance. If that command fails, it logs the fallback, resolves the
+latest version the same way macOS does, and downloads
+`.../releases/download/v<version>/Rancher.Desktop.Setup.<version>.msi`. There is
+no architecture-selection branch for that Windows download.
 
-The direct installer runs elevated with `install --quiet --accept-license
---backend=wsl-2`; this helper waits and propagates the installer exit code.
-After either installation route, it launches Docker Desktop and waits.
-`afterWindowsDockerInstall` does not itself edit group membership or inspect
-restart registry keys. It reports a start failure with advice that Windows may
-need a WSL 2 restart.
+The direct installer runs elevated as `msiexec /i <msi> /qn /norestart`; this
+helper waits and propagates the installer exit code. After either installation
+route, it launches Rancher Desktop and waits. `afterWindowsDockerInstall` does
+not itself edit group membership or inspect restart registry keys. It reports a
+start failure with advice that Windows may need a WSL 2 restart.
 
-Docker Desktop executable lookup checks `ProgramFiles`, `ProgramW6432`, and
-`C:\Program Files`, each with `Docker\Docker\Docker Desktop.exe`.
+Rancher Desktop executable lookup checks `%LOCALAPPDATA%\Programs`,
+`ProgramFiles`, `ProgramW6432`, and `C:\Program Files`, each with
+`Rancher Desktop\Rancher Desktop.exe`.
+
+### The Rancher Desktop deployment profile
+
+Source: [profile.go](../app/internal/prereq/profile.go).
+
+The profile carries a `version` field, pinned to `rancherProfileVersion = 18`,
+the schema version the format is documented against. Rancher Desktop migrates an
+older profile version forward, so this does not need to track every release.
+
+Before installing, `writeRancherProfile` writes a *defaults* deployment profile
+so the operator never meets the first-run wizard and the clinic's requirements
+are already answered:
+
+| Setting | Why CARE needs it |
+| --- | --- |
+| `application.adminAccess: true` | Rancher Desktop only forwards host ports below 1024 with administrative access. Without it Caddy cannot take 80/443, every container still reports healthy, and `health.Wait` times out with no obvious cause. |
+| `containerEngine.name: moby` | Supplies dockerd and the `docker` CLI the engine calls. The containerd/nerdctl engine would fail every Compose command. |
+| `kubernetes.enabled: false` | k3s would consume roughly 1.5GB of RAM the clinic never uses. |
+| `application.pathManagementStrategy: rcfiles` | Lets Rancher Desktop put `~/.rd/bin` on the shell PATH, matching what `AugmentedPath` already prepends. Ignored on Windows. |
+
+| Platform | Profile location |
+| --- | --- |
+| macOS | `~/Library/Preferences/io.rancherdesktop.profile.defaults.plist` |
+| Windows | `HKCU\Software\Policies\Rancher Desktop\Defaults` through `reg add` |
+| Linux | Not written; Linux uses its native Docker Engine. |
+
+Defaults are applied on first run only. An operator's later preference changes
+are kept, and an administrator's managed profile in `/Library/Managed
+Preferences` or `HKLM` still takes precedence over this user profile. Because of
+that, an installation that had already run would ignore the profile, so
+`applyRancherProfileNow` additionally attempts `rdctl set` for the same three
+values. That attempt is best-effort: `rdctl` may be absent, or the values may be
+locked by an administrator. A profile write failure is logged as a warning and
+does not stop the installation.
 
 **Linux Docker**
 
@@ -1048,12 +1097,13 @@ that every installation step was rolled back.
   installer fallback in this implementation.
 - Linux installs `git` with the selected package manager under elevation.
 
-Manual information URLs are `https://www.docker.com/products/docker-desktop/`
-and `https://git-scm.com/downloads`.
+Manual information URLs come from `dockerHelpURL()`: `https://rancherdesktop.io/`
+on macOS and Windows, `https://docs.docker.com/engine/install/` on Linux. Git
+uses `https://git-scm.com/downloads`.
 
 ### Waiting, downloads, and side effects
 
-`OpenDocker` launches Docker Desktop on macOS/Windows. On Linux it elevates
+`OpenDocker` launches Rancher Desktop on macOS/Windows. On Linux it elevates
 `systemctl start docker`. It then uses `dockerReadyTimeout = 3 * time.Minute`,
 checking full `DockerCheck` readiness and sleeping three seconds between
 unsuccessful checks. Poll deadlines are checked between probes; they are not
@@ -1212,7 +1262,7 @@ must be understood alongside that possible registration failure.
 | --- | --- |
 | Tool readiness is false | Return actionable status and a plan; do not treat a failed probe as an installed-and-ready tool. |
 | Installer returned an error after changing the machine | Report the error and recheck. Installation, service startup, group membership, and restart readiness are not one rollback transaction. |
-| Root unavailable or device-script write fails | Local/device trust setup can remain pending; the clinic workflow is not automatically fatal. An older script may still exist. |
+| Server root unavailable | Local trust setup can remain pending; server startup is not automatically fatal. Retry starting CARE or ask an administrator. |
 | Local hosts/trust approval declined | Log skipped optional setup. Do not claim both checks passed, and do not claim remote devices were configured. |
 | Privileged command succeeded | Inspect the requested outcome. This is mandatory for local setup and Windows network repair. |
 | Privileged command failed but local hosts/trust now verify | `localSetupResult` reports verified readiness. This is a deliberate local result rule, not the rule used by every cleanup function. |
@@ -1238,7 +1288,6 @@ one package's boolean into another's guarantee.
 | Hosts marker `# care-desktop` | CARE-managed hosts lines across clinic names; preserve unmarked lines. |
 | Root Common Name and known anchors | CARE trust integration on this computer; do not infer that browser-specific or remote trust is gone. |
 | Temporary root PEM | The extraction/preparation operation; preserve it until its consumer has finished, then attempt removal. |
-| Public device installers | The clinic setup directory; useful beyond the call that generated them, so they are not scratch files to delete immediately. |
 | mDNS responder | Application lifetime; renew after detected address changes/probe failures and stop on shutdown. |
 | `CARE Desktop ` firewall prefix | CARE-owned rule namespace. Repair exact current names; removal can sweep the prefix. |
 | Windows network category | Shared profile state, not an owned rule; no previous-category rollback is recorded. |
@@ -1285,7 +1334,7 @@ For the rest of the repository, use [Repository map](repository-map.md).
 | [sys/hosts/hosts.go](../app/internal/sys/hosts/hosts.go) | Hosts-file parsing, local append planning, marker-scoped removal, and explicit residue inspection. |
 | [sys/hosts/hosts_test.go](../app/internal/sys/hosts/hosts_test.go) | Loopback/conflicting-entry parsing; POSIX removal fixtures preserve unowned lines, empty output, write errors, scratch cleanup, and state-based/unknown results. |
 | [sys/trust/trust.go](../app/internal/sys/trust/trust.go) | Local root preparation/install/removal, verified loopback TLS, store/bundle inspection, stable CA identity, and SHA-1 identification. |
-| [sys/trust/installer.go](../app/internal/sys/trust/installer.go) | Validated SHA-256 display fingerprint and generated Unix/Windows remote-device trust installers. |
+| [sys/trust/client.go](../app/internal/sys/trust/client.go) | Native HTTP certificate bootstrap and remote-host TLS verification for clients. |
 | [sys/trust/trust_test.go](../app/internal/sys/trust/trust_test.go) | Generated certificate fixtures test Linux anchor/bundle residue, partial removal, approval/retry, unreadable bundles, and fresh trust-pool loading. |
 | [sys/trust/installer_test.go](../app/internal/sys/trust/installer_test.go) | Redirected POSIX installer fixtures verify readable Debian/Fedora public anchors, NSS profile imports including spaces, and visible NSS failures; not live trust-store installation. |
 | [sys/mdns/advertise.go](../app/internal/sys/mdns/advertise.go) | DNS labels, usable interfaces, responder lifetime, topology comparison, and bounded hostname probes. |
@@ -1309,16 +1358,15 @@ For the rest of the repository, use [Repository map](repository-map.md).
 | [clinic/thiscomputer.go](../app/internal/clinic/thiscomputer.go) | Assemble optional hosts/trust work, confirm once, elevate, verify final local usability, and report partial setup. |
 | [clinic/thiscomputer_test.go](../app/internal/clinic/thiscomputer_test.go) | Pure result-message tests require both hosts and trust, cover errors and verified state despite command failure, and prevent false success. |
 | [clinic/caddyroot.go](../app/internal/clinic/caddyroot.go) | Best-effort public root extraction from running Caddy through exec/copy fallback. |
-| [clinic/devicescripts.go](../app/internal/clinic/devicescripts.go) | Best-effort generation of public-root-bearing device installers under the existing setup directory. |
 
 ## Verification boundaries and historical differences
 
 The included tests cover important error and ownership decisions, but many use
 injected queries, generated command strings, redirected filesystem fixtures, or
 fake executables. They are not evidence of real UAC, macOS keychain, LAN
-multicast, Docker Desktop installation, or distribution-wide browser support.
+multicast, Rancher Desktop installation, or distribution-wide browser support.
 This scope has no separate test files for `applog`, `autostart`, `reboot`,
-`health`, root extraction, or device-script writing. The documentation work does
+`health` or root extraction. The documentation work does
 not require running installers, native removal scripts, or broad test suites.
 
 When comparing the implementation with older design notes, retain these

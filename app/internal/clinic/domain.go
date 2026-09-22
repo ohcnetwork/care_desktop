@@ -23,8 +23,8 @@ var domainEnvKeys = map[string][]string{
 }
 
 var hostTokenRe = regexp.MustCompile(`[A-Za-z0-9_.-]+`)
+var setupHostRe = regexp.MustCompile(`id="clinic-address" href="https://([A-Za-z0-9-]+\.local)"`)
 var caddyHostRe = regexp.MustCompile(`(?m)^([A-Za-z0-9-]+\.local):443[ \t]*\{\r?\n[ \t]*tls internal\r?\n[ \t]*import bootstrap\r?\n[ \t]*import site\r?\n\}`)
-var setupHostRe = regexp.MustCompile(`Install the certificate once to open <b>https://([A-Za-z0-9-]+\.local)</b> without warnings\.`)
 var domainAssignmentRe = regexp.MustCompile(`^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*(?:=[ \t]*|:[ \t]+)`)
 
 func (e *Clinic) ApplyDomain() error {

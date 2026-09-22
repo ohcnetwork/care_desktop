@@ -8,11 +8,13 @@ to start a build. The workflow reads the selected commit's
 applications, creates a tag automatically, and creates a **draft prerelease**.
 Nothing is published to clinic users automatically.
 
-Windows downloads are unsigned previews. macOS retains the existing optional
-Developer ID signing and notarization flow, using the same secrets listed below.
-Without those credentials it retains Wails' ad-hoc signature only. The release
-manifest records signing status separately for each platform. Do not tell users
-to disable OS protection.
+Windows builds are signed through SignPath when the
+[SignPath configuration](#windows-signing-signpath) is present; otherwise they
+are unsigned previews. macOS retains the existing optional Developer ID signing
+and notarization flow, using the same secrets listed below. Without those
+credentials it retains Wails' ad-hoc signature only. The release manifest records
+signing status separately for each platform. Do not tell users to disable OS
+protection.
 
 ## Prepare a version
 
@@ -68,8 +70,9 @@ succeeds. For `CARE_DESKTOP_VERSION=0.1.1`, the tag is `v0.1.1`.
 | --- | --- |
 | Validate | Reject malformed/duplicate version values, moving FE/BE refs, and a version that already has a draft or published release. |
 | Check and build | Call the same CI workflow used by PRs: lint, race tests, frontend checks, and real macOS/Windows native builds. No separate untested release rebuild. |
+| Windows signing | With the SignPath configuration, submit the CI-built `CARE Desktop.exe` for signing, rebuild the NSIS installer around the signed file with the installer inputs CI produced, and submit the installer for signing. Each request waits for an approver. Without the configuration, both jobs are skipped and the CI installer is used unsigned. |
 | macOS signing | With the existing credentials, sign the app with hardened runtime, notarize/staple it, then sign and notarize/staple the DMG. Otherwise explicitly report ad-hoc signing. |
-| Package | Wrap the CI macOS app in a DMG and copy the CI Windows NSIS installer. Verify macOS metadata matches the release version. |
+| Package | Wrap the CI macOS app in a DMG and copy the signed (or CI-built unsigned) Windows installer. Verify macOS metadata matches the release version. |
 | Record | Save the exact release configuration, source commit, workflow run URL, signing status, and SHA-256 file checksums. |
 | Draft | Verify the complete asset set, create/reuse the tag at the exact source commit, and create a draft marked as a prerelease. Never replace an existing release. |
 
@@ -140,6 +143,61 @@ bundle Docker/prerequisite installers, or prebuild the upstream CARE container
 images. Initial clinic setup still needs the dependencies and source downloads
 described in the installation guides. Image tags and downstream dependency
 downloads are not guaranteed immutable merely because FE/BE commits are pinned.
+
+## Windows signing (SignPath)
+
+Windows releases are signed with a certificate issued to
+[SignPath Foundation](https://signpath.org) under its free open-source program.
+The obligations that come with it are published in the README's
+[code signing policy](../README.md#code-signing-policy); keep that section
+accurate when the team or the app's network behaviour changes.
+
+### Configuration
+
+| Setting | Kind | Purpose |
+| --- | --- | --- |
+| `SIGNPATH_API_TOKEN` | secret | API token of a SignPath user with the Submitter role. |
+| `SIGNPATH_ORGANIZATION_ID` | variable | SignPath organization ID. |
+| `SIGNPATH_PROJECT_SLUG` | variable | SignPath project slug. |
+| `SIGNPATH_SIGNING_POLICY_SLUG` | variable | Slug of the release signing policy. |
+
+Set all four or none. A partial configuration fails the release at validation
+instead of silently producing unsigned installers.
+
+### SignPath project
+
+- Repository `https://github.com/ohcnetwork/care_desktop`, trusted build system
+  GitHub.
+- Artifact configuration:
+  [`.github/signpath/artifact-configuration.xml`](../.github/signpath/artifact-configuration.xml).
+  It signs the one PE file inside a GitHub artifact and rejects it unless product
+  name, company name and product version match `app/wails.json` and the release
+  version, which is the same check CI runs. Both requests use it.
+- Release signing policy: origin verification on, allowed branch `main`, manual
+  approval required. The workflow passes `version` as a parameter.
+
+### During a release
+
+1. **Sign Windows application** submits the CI-built `CARE Desktop.exe` and waits
+   up to an hour for an approver.
+2. **Build installer around the signed application** verifies the signature, then
+   runs makensis with the installer inputs CI produced and the signed file.
+3. **Sign Windows installer** submits the installer; approve that request too.
+4. Packaging continues with the signed installer, and the manifest records
+   `"windows": "signpath-foundation"`.
+
+A rejected or timed-out request fails the release. Fix the cause and rerun the
+same run; SignPath evaluates up to three re-runs of a build. Never submit a file
+built anywhere other than this workflow.
+
+### Before the first signed release
+
+1. Once SignPath approves the project, create the artifact configuration and the
+   signing policy there, then store the four settings above in the repository.
+2. Bump `CARE_DESKTOP_VERSION`: `0.1.0` already has a tag, and versions are never
+   reused.
+3. Run the release workflow and approve both signing requests.
+4. Check `release-manifest.json`, then publish the draft.
 
 ## Existing macOS signing configuration
 

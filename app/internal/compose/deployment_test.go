@@ -71,6 +71,87 @@ func TestCaddyRoutesConfiguredBuckets(t *testing.T) {
 	}
 }
 
+func TestCaddyBootstrapServesMobileSetupAndPublicRoot(t *testing.T) {
+	data, err := os.ReadFile("../../../deployments/Caddyfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	start := strings.Index(text, "(bootstrap) {")
+	end := strings.Index(text, "(site) {")
+	if start < 0 || end <= start {
+		t.Fatal("missing bootstrap route group")
+	}
+	bootstrap := text[start:end]
+	for _, want := range []string{
+		"@mobileSetup path /setup /setup/",
+		"handle @mobileSetup {\n\t\troot * /setup\n\t\trewrite * /index.html\n\t\tfile_server\n\t}",
+		"handle /root.crt {\n\t\theader Content-Type application/x-x509-ca-cert\n\t\troot * /data/caddy/pki/authorities/local\n\t\tfile_server\n\t}",
+	} {
+		if !strings.Contains(bootstrap, want) {
+			t.Fatalf("missing bootstrap contract: %s", want)
+		}
+	}
+	for _, forbidden := range []string{"Referer", "query", "redir", "root.crt*", "install-cert"} {
+		if strings.Contains(bootstrap, forbidden) {
+			t.Fatalf("bootstrap contains obsolete or unsafe directive: %s", forbidden)
+		}
+	}
+	if !strings.Contains(text, ":80 {\n\timport bootstrap") {
+		t.Fatal("public root is not available over HTTP")
+	}
+	compose, err := os.ReadFile("../../../deployments/docker-compose.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(compose), "./setup:/setup:ro") {
+		t.Fatal("mobile setup directory is not mounted read-only")
+	}
+	page, err := os.ReadFile("../../../deployments/setup/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`id="ios"`, `id="android"`, "Certificate Trust Settings", "/root.crt?ok=1"} {
+		if !strings.Contains(string(page), want) {
+			t.Fatalf("mobile setup is missing %s", want)
+		}
+	}
+	if strings.Contains(string(page), "install-cert") {
+		t.Fatal("mobile setup includes a retired desktop installer")
+	}
+}
+
+func TestCaddyServesClinicSetupPageOverHTTPSOnly(t *testing.T) {
+	data, err := os.ReadFile("../../../deployments/Caddyfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	start := strings.Index(text, "(site) {")
+	end := strings.Index(text, ":80 {")
+	if start < 0 || end <= start {
+		t.Fatal("missing site route group")
+	}
+	site := text[start:end]
+	route := "handle_path /seed-data* {\n\t\troot * /seed-data\n\t\ttry_files {path} /index.html\n\t\tfile_server\n\t}"
+	if !strings.Contains(site, route) {
+		t.Fatal("clinic setup page is not served from the site group")
+	}
+	if strings.Contains(text[:start], "seed-data") {
+		t.Fatal("clinic setup page must not be reachable over plain HTTP")
+	}
+	if strings.Index(site, "handle /api/*") > strings.Index(site, "handle_path /seed-data*") {
+		t.Fatal("API route must be matched before the setup page")
+	}
+	compose, err := os.ReadFile("../../../deployments/docker-compose.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(compose), "./seed-data:/seed-data:ro") {
+		t.Fatal("clinic setup page directory is not mounted read-only")
+	}
+}
+
 func TestComposePassesSharedStorageSettings(t *testing.T) {
 	if !proc.Exists("docker") {
 		t.Skip("Docker Compose is not installed")

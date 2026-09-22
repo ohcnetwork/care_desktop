@@ -19,6 +19,8 @@ import (
 )
 
 type AppState struct {
+	Role           string        `json:"role"`
+	ClientURL      string        `json:"client_url"`
 	Version        string        `json:"version"`
 	SetupDone      bool          `json:"setup_done"`
 	MDNSName       string        `json:"mdns_name"`
@@ -28,11 +30,16 @@ type AppState struct {
 
 func (a *App) GetState() (AppState, error) {
 	cfg := a.loadConfig()
+	if cfg.Role != roleServer {
+		return AppState{Version: a.pins.AppVersion, Role: cfg.Role, ClientURL: cfg.ClientURL}, nil
+	}
 	pending, err := a.engine().Backups().PendingRestore()
 	if err != nil {
 		return AppState{}, err
 	}
 	return AppState{
+		Role:           cfg.Role,
+		ClientURL:      cfg.ClientURL,
 		Version:        a.pins.AppVersion,
 		SetupDone:      cfg.SetupDone && !cfg.Removing,
 		MDNSName:       cfg.MDNSName,
@@ -48,7 +55,7 @@ func (a *App) ClinicHealth() health.Health { return health.Ping() }
 func (a *App) NetworkStatus() netfix.Status { return netfix.Check(a.engine().Runner()) }
 
 func (a *App) FixNetwork() error {
-	return a.withJob(func() error { return netfix.Fix(a.engine().Log) })
+	return a.withServerJob(func() error { return netfix.Fix(a.engine().Log) })
 }
 
 func (a *App) DockerPlan() prereq.ToolPlan { return a.provisioner().DockerPlan() }
@@ -56,7 +63,7 @@ func (a *App) GitPlan() prereq.ToolPlan    { return a.provisioner().GitPlan() }
 
 func (a *App) InstallDocker() (string, error) {
 	var result string
-	err := a.withJob(func() error {
+	err := a.withServerJob(func() error {
 		var err error
 		result, err = a.provisioner().InstallDocker()
 		return err
@@ -66,7 +73,7 @@ func (a *App) InstallDocker() (string, error) {
 
 func (a *App) InstallGit() (string, error) {
 	var result string
-	err := a.withJob(func() error {
+	err := a.withServerJob(func() error {
 		var err error
 		result, err = a.provisioner().InstallGit()
 		return err
@@ -75,7 +82,7 @@ func (a *App) InstallGit() (string, error) {
 }
 
 func (a *App) OpenDocker() error {
-	return a.withJob(func() error { return a.provisioner().OpenDocker() })
+	return a.withServerJob(func() error { return a.provisioner().OpenDocker() })
 }
 
 func (a *App) provisioner() *prereq.Provisioner {
@@ -86,7 +93,7 @@ func (a *App) provisioner() *prereq.Provisioner {
 func (a *App) RestartPlan() reboot.Plan { return reboot.Check() }
 
 func (a *App) RestartNow() error {
-	return a.withJob(func() error {
+	return a.withServerJob(func() error {
 		if err := autostart.Set(true); err != nil {
 			a.logln("note: couldn't set CARE Desktop to open after the restart (" + err.Error() +
 				") - open it yourself once the computer is back")
@@ -110,6 +117,9 @@ func (a *App) ValidateDomain(name string) string {
 }
 
 func (a *App) ValidateBackupDir(dir string) string {
+	if err := a.requireServer(); err != nil {
+		return err.Error()
+	}
 	dir = strings.TrimSpace(dir)
 	target := a.engine().BackupDirPath()
 	if dir != "" {
@@ -167,7 +177,7 @@ func (a *App) SetMDNSName(name string) error {
 	if err := mdns.ValidateLabel(name); err != nil {
 		return err
 	}
-	return a.withJob(func() error {
+	return a.withServerJob(func() error {
 		cfg := a.loadConfig()
 		if cfg.SetupDone || cfg.Removing {
 			return errors.New("the clinic address can only be chosen before installation")

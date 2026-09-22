@@ -16,27 +16,17 @@
 }
 
 (bootstrap) {
-	handle_path /setup* {
+	@mobileSetup path /setup /setup/
+	handle @mobileSetup {
 		root * /setup
-		@installer path /install-cert.sh /install-cert.ps1
-		header @installer Content-Disposition "attachment"
-		header @installer Content-Type "application/octet-stream"
-		file_server {
-			index index.html
-		}
+		rewrite * /index.html
+		file_server
 	}
 
 	handle /root.crt {
-		@direct {
-			not query ok=1
-			not header Referer *example.local*
-		}
-		route {
-			redir @direct /setup 302
-			header Content-Type application/x-x509-ca-cert
-			root * /data/caddy/pki/authorities/local
-			file_server
-		}
+		header Content-Type application/x-x509-ca-cert
+		root * /data/caddy/pki/authorities/local
+		file_server
 	}
 }
 
@@ -66,6 +56,12 @@
 	@buckets path /{$FILE_UPLOAD_BUCKET:patient-bucket}/* /{$FACILITY_S3_BUCKET:facility-bucket}/*
 	handle @buckets {
 		reverse_proxy minio:9000
+	}
+
+	handle_path /seed-data* {
+		root * /seed-data
+		try_files {path} /index.html
+		file_server
 	}
 
 	handle {

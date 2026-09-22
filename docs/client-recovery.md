@@ -1,12 +1,21 @@
 # Cannot open CARE from a computer that previously hosted a clinic
 
 Use this guide when a Windows, macOS, or Linux computer **previously ran CARE
-Desktop as a server**, but is now a browser client of a different CARE server.
+Desktop as a server**, but now needs to connect to a different CARE server.
 Other devices may open the clinic normally while this computer times out.
 
 This is a recovery procedure for an earlier installation, not a setup
-requirement for every client. It does not explain iPhone/iPad failures: CARE
-Desktop does not add hosts entries to those devices.
+requirement for every client. The saved Server/Client role is not an ordinary
+switch: do not delete configuration or clinic data merely to change it.
+
+For an ordinary CARE Desktop client leaving a clinic, use **Uninstall client
+setup**, not the server-uninstall procedures below. It removes only that
+client's saved connection and certificate it installed, preserving all server data.
+Successful uninstall clears the role so Server or Client can be selected again.
+If you also want to remove the desktop executable, uninstall it through the
+operating system afterwards. Pre-existing trusted certificates are intentionally
+preserved and may still allow browser access.
+See [client removal](native-integrations.md#removing-client-access).
 
 ## Why this happens
 
@@ -94,7 +103,8 @@ Before proceeding, confirm this is not the active clinic server and preserve a
 current, verified backup and its recovery material outside the installation.
 Download the appropriate script as a file and review it; do not pipe a download
 directly into a shell. Run it as the normal user who installed CARE, from the
-folder containing the downloaded script. Docker Desktop must be running if
+folder containing the downloaded script. The Docker engine (Rancher Desktop on
+macOS and Windows) must be running if
 Docker resources are to be inspected and removed.
 
 ### Windows
@@ -148,10 +158,12 @@ described above. Open the clinic URL again. On Windows,
 whether HTTPS is reachable: it should target the real server, not `127.0.0.1`
 or `::1`.
 
-Because full cleanup removes CARE certificates, you may then need to trust the
-**current server's** certificate through its Add a device page at
-`http://care.local/setup`. Verify the server with the clinic administrator before
-installing its certificate. Do not bypass browser certificate warnings.
+Because full cleanup removes CARE certificates, use CARE Desktop's native
+client setup to trust the **current server's** certificate. Enter the `.local`
+address shown on that server, approve the operating-system prompt if requested,
+and let CARE verify HTTPS automatically. Use a trusted clinic network: the
+initial HTTP certificate download is trust on first use, not independent proof
+of the server's identity. Do not bypass browser certificate warnings.
 
 If the hostname still cannot be found or the connection still times out, do not
 keep rerunning the cleanup script. There may be a separate Wi-Fi, mDNS, routing,

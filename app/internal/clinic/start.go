@@ -58,7 +58,6 @@ func (e *Clinic) Start() error {
 	}
 	e.logln("")
 	e.logln("CARE is up -> https://" + e.host() + "/   (login: admin)")
-	e.writeDeviceSetupScripts()
 	e.setUpThisComputer()
 	return nil
 }

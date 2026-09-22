@@ -87,6 +87,12 @@ export function useRequirementChecks(host: string, mode: ChecksMode = "setup") {
    * Docker-side traces are invisible while Docker is down, so this is
    * deliberately re-run as part of recheckAll - once Docker goes green the scan
    * sees the containers, volumes, and images it could not see before.
+   *
+   * Until then the scan cannot answer at all, and the host says so rather than
+   * reporting a clean machine. That is "unknown", not "dirty", so the row waits
+   * on the Docker row instead of showing the operator a second red failure with
+   * the same single cause. Waiting still blocks Continue, which needs every row
+   * green, so the volume-reattachment blocker above is unaffected.
    */
   const checkResidue = useCallback(async (): Promise<Result> => {
     setResidue(WAITING);
@@ -106,7 +112,11 @@ export function useRequirementChecks(host: string, mode: ChecksMode = "setup") {
             },
           };
     } catch (e) {
-      result = { state: "bad", how: String(e) };
+      const docker = await bridge.DockerStatus().catch(() => null);
+      result =
+        docker && !docker.ok
+          ? { state: "wait", how: "Waiting for Docker before this can be checked." }
+          : { state: "bad", how: String(e) };
     }
     setResidue(result);
     return result;

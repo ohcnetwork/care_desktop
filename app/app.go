@@ -52,8 +52,16 @@ func NewApp(installFS fs.FS, log *applog.Logger) (*App, error) {
 		return nil, err
 	}
 	a := &App{installFS: installFS, pins: pins, log: log, cfg: cfg, configFile: path}
-	if _, err := a.engine().Backups().PendingRestore(); err != nil {
+	if err := a.inferInstalledRole(); err != nil {
 		return nil, err
+	}
+	if a.loadConfig().Role == roleServer {
+		if err := a.saveConfig(a.loadConfig()); err != nil {
+			return nil, err
+		}
+		if _, err := a.engine().Backups().PendingRestore(); err != nil {
+			return nil, err
+		}
 	}
 	return a, nil
 }
@@ -84,7 +92,7 @@ func (a *App) startAdvertise() {
 	}
 	cfg := a.loadConfig()
 	name := cfg.MDNSName
-	if name == "" || cfg.Removing {
+	if cfg.Role != roleServer || name == "" || cfg.Removing {
 		return
 	}
 	adv, err := mdns.Advertise(name, a.logln)

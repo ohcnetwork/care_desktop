@@ -10,11 +10,13 @@
     "*/*": "node ../../frontend/scripts/stage-install.mjs"
   },
   "author": {
-    "name": "Open Healthcare Network"
+    "name": "Open Healthcare Network Foundation"
   },
   "info": {
+    "companyName": "Open Healthcare Network Foundation",
     "productName": "CARE Desktop",
     "productVersion": "0.1.0",
+    "copyright": "Copyright (c) 2026 Open Healthcare Network Foundation",
     "comments": "Self-contained, offline CARE for a small clinic."
   }
 }
