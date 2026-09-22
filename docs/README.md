@@ -22,6 +22,7 @@ This documentation explains the current implementation, from operating-system pr
 | [Native integrations](native-integrations.md) | Process execution, file persistence, logs, prerequisites, elevation, TLS trust, mDNS, and OS differences. |
 | [Development and release](development-and-release.md) | Local builds, embedded assets, release pins, CI, packaging, and changing the backend safely. |
 | [Releasing CARE Desktop](releases.md) | Preparing a version, manually running a release, reviewing the draft, signing limitations, and retrying safely. |
+| [Facility setup page](seed-data.md) | The browser wizard at `/seed-data` that loads a new clinic's first data through CARE's API, and the master-sheet converter behind it. |
 
 For a first reading, follow the table from top to bottom. If you are fixing one behavior, use the task map below instead.
 
@@ -41,6 +42,7 @@ For a first reading, follow the table from top to bottom. If you are fixing one 
 | "This client previously hosted CARE and now cannot reach another server." | [Client recovery and earlier-install cleanup](client-recovery.md). |
 | "How do I reproduce the installed version?" | [Release identity](development-and-release.md#release-identity-and-pins). |
 | "How do I release a new version?" | [Release runbook](releases.md). |
+| "How does a new clinic get its facility, staff and master data?" | [Facility setup page](seed-data.md). |
 | "Which file should I change?" | [Repository map](repository-map.md). |
 
 ## Vocabulary

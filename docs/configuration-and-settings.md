@@ -162,6 +162,8 @@ A failure after configuration or files were created is therefore a partial setup
 
 Its preservation allow-list contains exactly `backend.env` and `frontend.env`: existing copies are not overwritten. Other kit files are refreshed from the executable. This includes `.env`, so the shipped pins do not become an independently editable runtime release mechanism.
 
+Generated directories listed in `installGeneratedDirs` (currently `seed-data/`, the [facility setup page](seed-data.md)) are deleted before the walk and copied fresh, because their contents are hashed build assets whose names change every release and would otherwise pile up.
+
 Refresh copies the current kit but is not a general recursive deletion or a migration framework for all generated files. Similarly, preserving environments means a new template key is not automatically merged into an existing environment.
 
 The startup refresh is skipped for incomplete setup, incomplete removal, and pending restore. A pending restore must keep the configuration its recovery metadata expects.
