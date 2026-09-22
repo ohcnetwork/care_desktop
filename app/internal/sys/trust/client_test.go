@@ -91,7 +91,7 @@ func TestClientTLSUsesClinicNameAndPinnedRoot(t *testing.T) {
 			}
 			conn, err := tls.Dial("tcp", server.Listener.Addr().String(), config)
 			if conn != nil {
-				conn.Close()
+				_ = conn.Close()
 			}
 			if (err == nil) != tc.ok {
 				t.Fatalf("TLS verification: %v", err)

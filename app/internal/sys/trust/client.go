@@ -73,7 +73,7 @@ func FetchClientCertificate(ctx context.Context, clinicURL string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("could not reach the clinic; check its address, network and main computer: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	return readClientCertificate(response)
 }
 
@@ -246,7 +246,7 @@ func InstallClientCertificate(rootPEM string) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	if _, err := f.WriteString(rootPEM); err != nil {
 		_ = f.Close()
 		return err

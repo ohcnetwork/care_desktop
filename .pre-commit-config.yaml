@@ -1,0 +1,28 @@
+minimum_pre_commit_version: "4.0.0"
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+
+  # Keep the locally run Go tools aligned with CI. golangci-lint deliberately
+  # runs against the whole app module: package-wide checks such as `unused`
+  # cannot give correct results from only the staged files.
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: format Go
+        entry: gofmt -w
+        language: system
+        types: [go]
+      - id: golangci-lint-fix
+        name: fix Go lint
+        entry: bash -c 'cd app && golangci-lint run --fix --timeout=5m'
+        language: system
+        types: [go]
+        pass_filenames: false
+        require_serial: true

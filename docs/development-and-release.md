@@ -252,6 +252,28 @@ Use Actionlint v1.7.12 and golangci-lint v2.13.2, matching CI. Actionlint checks
 workflow syntax and expressions; it does not invoke ShellCheck or Pyflakes.
 Database/Compose tests need the same local prerequisites as the Go job.
 
+### Pre-commit fixes
+
+The repository includes [pre-commit](https://pre-commit.com/) hooks for the
+auto-fixable checks: trailing whitespace, final newlines, YAML syntax, Go
+formatting, and golangci-lint fixes. They use the same golangci-lint version
+and configuration as CI; package-wide linting runs from `app/`, not just on
+the staged Go files.
+
+Install pre-commit with your preferred package manager (for example,
+`uv tool install pre-commit` or `brew install pre-commit`), then install the
+hooks and the CI-matching Go linter once from the repository root:
+
+```sh
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+pre-commit install --install-hooks
+```
+
+Run `pre-commit run --all-files` after installing it, or rerun `git commit`
+after a hook changes files and stage those changes. The hooks intentionally do
+not replace CI's race tests, frontend production build, Actionlint validation,
+or native application builds.
+
 ## Regression-test organization
 
 Tests sit beside their packages. They use Go's standard test runner and existing runtime tools, rather than a separate end-to-end testing framework.
