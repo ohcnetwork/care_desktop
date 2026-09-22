@@ -157,17 +157,23 @@ jobs:
           path: release-assets/
           if-no-files-found: error
           retention-days: 14
-      - name: Refresh the demo draft release
+      # The demo release is reused so its tag, URL and published state survive;
+      # only the assets and notes are replaced.
+      - name: Refresh the demo release
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release delete demo --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
-          gh release create demo --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --draft --prerelease --title "CARE Desktop demo (data loading)" \
-            --notes "A demo build to test data loading.
+          notes="A demo build to test data loading.
 
           - Version: $VERSION
           - Source commit: $GITHUB_SHA
           - Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
-          - macOS only; signing: ${SIGN_MACOS/true/Developer ID + notarized}" \
-            release-assets/*
+          - macOS only; signing: ${SIGN_MACOS/true/Developer ID + notarized}"
+          title="CARE Desktop demo (data loading)"
+          if gh release view demo --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload demo --repo "$GITHUB_REPOSITORY" --clobber release-assets/*
+            gh release edit demo --repo "$GITHUB_REPOSITORY" --title "$title" --notes "$notes"
+          else
+            gh release create demo --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --draft --prerelease --title "$title" --notes "$notes" release-assets/*
+          fi
