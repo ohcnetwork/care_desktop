@@ -15,7 +15,7 @@ import (
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/mdns"
 )
 
-var domainFiles = []string{"Caddyfile", "backend.env", "frontend.env"}
+var domainFiles = []string{"Caddyfile", "backend.env", "frontend.env", "setup/index.html"}
 
 var domainEnvKeys = map[string][]string{
 	"backend.env":  {"CSRF_TRUSTED_ORIGINS", "BUCKET_EXTERNAL_ENDPOINT"},
@@ -23,6 +23,7 @@ var domainEnvKeys = map[string][]string{
 }
 
 var hostTokenRe = regexp.MustCompile(`[A-Za-z0-9_.-]+`)
+var setupHostRe = regexp.MustCompile(`id="clinic-address" href="https://([A-Za-z0-9-]+\.local)"`)
 var caddyHostRe = regexp.MustCompile(`(?m)^([A-Za-z0-9-]+\.local):443[ \t]*\{\r?\n[ \t]*tls internal\r?\n[ \t]*import bootstrap\r?\n[ \t]*import site\r?\n\}`)
 var domainAssignmentRe = regexp.MustCompile(`^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*(?:=[ \t]*|:[ \t]+)`)
 
@@ -57,6 +58,9 @@ func (e *Clinic) ApplyDomain() error {
 		}
 	}
 	for _, match := range caddyHostRe.FindAllStringSubmatch(string(files["Caddyfile"]), -1) {
+		managedHosts[strings.ToLower(match[1])] = true
+	}
+	for _, match := range setupHostRe.FindAllStringSubmatch(string(files["setup/index.html"]), -1) {
 		managedHosts[strings.ToLower(match[1])] = true
 	}
 	replace := func(text string) string {

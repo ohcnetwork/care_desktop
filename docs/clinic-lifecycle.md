@@ -547,7 +547,7 @@ represented by that example.
 flowchart LR
     Browser["Browser on clinic host or LAN"] --> HTTP["Caddy TCP 80"]
     Browser --> HTTPS["Caddy TCP 443: clinic host"]
-    HTTP --> Bootstrap["Public root certificate; retired setup returns 404"]
+    HTTP --> Bootstrap["Public root certificate and mobile setup guide"]
     HTTP --> Redirect["Other paths: redirect to HTTPS"]
     HTTPS --> Bootstrap
     HTTPS --> API["API routes: Coraza then backend:9000"]
@@ -562,7 +562,7 @@ flowchart LR
 | --- | --- |
 | HTTP `:80` | Serve the bootstrap routes without requiring prior CA trust; redirect other requests to HTTPS. The redirect is explicit, because automatic HTTPS redirects are disabled globally. |
 | Clinic host `:443` | Use Caddy's internal CA, then import bootstrap and normal site routing. |
-| `/setup*` | Return 404; no retired setup page or installer is served, including through the frontend fallback. |
+| `/setup`, `/setup/` | Serve the mobile-only iOS/Android certificate guide from the read-only setup directory. |
 | `/root.crt` | Serve only `/data/caddy/pki/authorities/local/root.crt`, the public local CA certificate, without query or referer restrictions. The native client sends `?ok=1` for older-server compatibility. |
 | `/api/*` | Run the Coraza WAF, then proxy to `backend:9000`. |
 | `/static/*`, `/ping/*`, `/health/*` | Proxy to the backend without the API-specific WAF block. |

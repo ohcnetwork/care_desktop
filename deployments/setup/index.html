@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect your phone or tablet to CARE</title>
+<style>
+  * { box-sizing:border-box; }
+  body { margin:0; background:#f6f8f7; color:#111827; font:16px/1.6 system-ui, sans-serif; }
+  main { max-width:680px; margin:auto; padding:28px 20px 48px; }
+  h1 { font-size:28px; line-height:1.25; margin:8px 0; }
+  h2 { font-size:20px; margin:0; }
+  p { margin:10px 0; }
+  a { color:#046c4e; overflow-wrap:anywhere; }
+  :focus-visible { outline:3px solid #057a55; outline-offset:4px; }
+  .brand { color:#046c4e; font-weight:700; }
+  .note { padding:16px; background:#def7ec; border-left:4px solid #057a55; border-radius:8px; }
+  section { padding:22px; margin:18px 0; background:white; border:1px solid #d1d5db; border-radius:14px; }
+  .button { display:inline-block; margin:8px 0; padding:12px 20px; border-radius:8px;
+    background:#057a55; color:white; font-weight:600; text-decoration:none; }
+  .button:hover { background:#046c4e; }
+  summary { cursor:pointer; font-weight:650; min-height:48px; padding:12px 0; }
+  details + details { border-top:1px solid #e5e7eb; }
+  ol { padding-left:24px; }
+  li { margin:12px 0; }
+  code { background:#edf2ef; padding:2px 5px; border-radius:4px; }
+  .hint { color:#4b5563; font-size:14px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">CARE · Phone and tablet setup</div>
+  <h1>Connect your phone or tablet</h1>
+  <p>Do this once on each device. For a Windows computer or Mac, use CARE Desktop and choose <strong>Connect to a clinic</strong>.</p>
+  <p class="note">Connect to the clinic Wi-Fi. Only install this certificate if your clinic administrator gave you this address.</p>
+  <p>On your phone or tablet, open:<br><a href="http://example.local/setup">http://example.local/setup</a></p>
+
+  <section>
+    <h2>1. Download the clinic certificate</h2>
+    <p>This lets your device recognise the clinic's CARE. Use <strong>Safari on iPhone or iPad</strong>, or <strong>Chrome on Android</strong>.</p>
+    <a class="button" href="/root.crt?ok=1" download="root.crt">Download certificate</a>
+    <p class="hint">On iPhone or iPad, tap <strong>Allow</strong> when asked to download a profile. Downloading alone does not finish setup.</p>
+  </section>
+
+  <section>
+    <h2>2. Allow it in Settings</h2>
+    <p class="hint">Choose your device below. Keep this page open so you can return to it.</p>
+    <details id="ios">
+      <summary>iPhone / iPad</summary>
+      <ol>
+        <li>Open <strong>Settings</strong> and tap <strong>Profile Downloaded</strong>. If it is missing, look under <strong>General → VPN &amp; Device Management</strong>.</li>
+        <li>Open <strong>CARE Desktop Local CA</strong>. Tap <strong>Install</strong>, enter your <strong>device passcode</strong> if asked, then confirm <strong>Install</strong> and tap <strong>Done</strong>.</li>
+        <li>Go to <strong>Settings → General → About → Certificate Trust Settings</strong>.</li>
+        <li>Under <strong>Enable Full Trust for Root Certificates</strong>, turn on <strong>CARE Desktop Local CA</strong>. Tap <strong>Continue</strong>.</li>
+      </ol>
+      <p class="hint">Both parts are needed: install the profile and turn on full trust. Then return to Safari.</p>
+    </details>
+    <details id="android">
+      <summary>Android phone / tablet</summary>
+      <ol>
+        <li>Open <strong>Settings</strong> and search for <strong>CA certificate</strong>. Or go to <strong>Security → Encryption &amp; credentials → Install a certificate → CA certificate</strong>.</li>
+        <li>Android shows a security warning. Only continue for your clinic's certificate. Tap <strong>Install anyway</strong> and enter your <strong>device PIN, pattern or password</strong> if asked.</li>
+        <li>Choose <strong>Downloads</strong>, then <code>root.crt</code>. If asked for a name, enter <strong>CARE clinic</strong> and confirm.</li>
+      </ol>
+      <p class="hint">On some phones, look under <strong>Security &amp; privacy → More security settings</strong>. Return to Chrome when finished.</p>
+    </details>
+  </section>
+
+  <section>
+    <h2>3. Open CARE</h2>
+    <p>After completing the Settings steps, open CARE. If the sign-in page opens without a security warning, setup is complete.</p>
+    <a class="button" id="clinic-address" href="https://example.local" target="_blank" rel="noopener">Open CARE (new tab)</a>
+    <p class="hint">Still seeing a warning? Close and reopen your browser. Do not bypass the warning to enter patient information.</p>
+  </section>
+
+  <details>
+    <summary>Having trouble?</summary>
+    <p><strong>Cannot find the file?</strong> Check your browser's Downloads list or the device's Downloads folder for <code>root.crt</code>. On iPhone or iPad, download it in Safari.</p>
+    <p><strong>Installation blocked?</strong> Use your device passcode, not your CARE password. For an organisation-managed device or an unknown passcode, ask your clinic administrator. Do not disable security protections.</p>
+    <p><strong>CARE does not open?</strong> Check the clinic Wi-Fi and that the main clinic computer is running. If the address or security warning still causes problems, ask your clinic administrator.</p>
+  </details>
+  <details>
+    <summary>Why is this needed?</summary>
+    <p>Your clinic runs CARE on its own computer. Installing its root certificate changes who your device trusts for secure connections. Only install it from your clinic's trusted setup page.</p>
+    <p>The browser cannot approve these settings for you. You must complete them once on each phone or tablet.</p>
+  </details>
+</main>
+<script>
+var ua = navigator.userAgent;
+if (/Android/i.test(ua)) document.getElementById("android").open = true;
+else if (/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1))
+  document.getElementById("ios").open = true;
+</script>
+</body>
+</html>

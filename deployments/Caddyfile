@@ -16,8 +16,11 @@
 }
 
 (bootstrap) {
-	handle /setup* {
-		respond 404
+	@mobileSetup path /setup /setup/
+	handle @mobileSetup {
+		root * /setup
+		rewrite * /index.html
+		file_server
 	}
 
 	handle /root.crt {

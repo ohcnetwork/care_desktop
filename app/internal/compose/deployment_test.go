@@ -71,7 +71,7 @@ func TestCaddyRoutesConfiguredBuckets(t *testing.T) {
 	}
 }
 
-func TestCaddyBootstrapOnlyServesPublicRoot(t *testing.T) {
+func TestCaddyBootstrapServesMobileSetupAndPublicRoot(t *testing.T) {
 	data, err := os.ReadFile("../../../deployments/Caddyfile")
 	if err != nil {
 		t.Fatal(err)
@@ -84,14 +84,15 @@ func TestCaddyBootstrapOnlyServesPublicRoot(t *testing.T) {
 	}
 	bootstrap := text[start:end]
 	for _, want := range []string{
-		"handle /setup* {\n\t\trespond 404\n\t}",
+		"@mobileSetup path /setup /setup/",
+		"handle @mobileSetup {\n\t\troot * /setup\n\t\trewrite * /index.html\n\t\tfile_server\n\t}",
 		"handle /root.crt {\n\t\theader Content-Type application/x-x509-ca-cert\n\t\troot * /data/caddy/pki/authorities/local\n\t\tfile_server\n\t}",
 	} {
 		if !strings.Contains(bootstrap, want) {
 			t.Fatalf("missing bootstrap contract: %s", want)
 		}
 	}
-	for _, forbidden := range []string{"Referer", "query", "redir", "root.crt*", "handle_path", "install-cert", "root * /setup"} {
+	for _, forbidden := range []string{"Referer", "query", "redir", "root.crt*", "install-cert"} {
 		if strings.Contains(bootstrap, forbidden) {
 			t.Fatalf("bootstrap contains obsolete or unsafe directive: %s", forbidden)
 		}
@@ -103,11 +104,20 @@ func TestCaddyBootstrapOnlyServesPublicRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(compose), "./setup:") {
-		t.Fatal("retired setup directory is still mounted")
+	if !strings.Contains(string(compose), "./setup:/setup:ro") {
+		t.Fatal("mobile setup directory is not mounted read-only")
 	}
-	if _, err := os.Stat("../../../deployments/setup"); !os.IsNotExist(err) {
-		t.Fatalf("retired setup assets remain in the deployment kit: %v", err)
+	page, err := os.ReadFile("../../../deployments/setup/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`id="ios"`, `id="android"`, "Certificate Trust Settings", "/root.crt?ok=1"} {
+		if !strings.Contains(string(page), want) {
+			t.Fatalf("mobile setup is missing %s", want)
+		}
+	}
+	if strings.Contains(string(page), "install-cert") {
+		t.Fatal("mobile setup includes a retired desktop installer")
 	}
 }
 

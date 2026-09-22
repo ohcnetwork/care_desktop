@@ -457,8 +457,12 @@ not need Caddy's private keys or a copy of the full `/data` volume.
 
 The bootstrap Caddy routes expose only the exact `/root.crt` resource from the
 private PKI directory. HTTP requests need neither a referer nor a query flag.
-`/setup*` explicitly returns 404 so the frontend fallback cannot impersonate a
-retired setup page. There is no setup-directory mount or generated installer.
+`/setup` and `/setup/` serve a mobile-only page from the read-only setup-directory mount.
+The server panel's **Connect phone or tablet** button opens its HTTP address,
+which staff can enter on their phone. iOS instructions cover profile installation
+and full trust in Safari; Android instructions cover CA installation in Settings.
+The matching device instructions expand automatically. Desktop clients use the
+native app; no generated script installers are served.
 Old files may remain unused in an installed kit; refreshing routes and mounts
 does not require deleting that directory.
 

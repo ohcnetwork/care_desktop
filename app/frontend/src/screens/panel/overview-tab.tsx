@@ -129,12 +129,19 @@ export function OverviewTab() {
             Open on any device on the clinic WiFi.
           </div>
           <div className="min-h-3.5 flex-1" />
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="white" onClick={() => void bridge.OpenURL(`https://${mdnsName}/`)}>
               Open
             </Button>
             <Button variant="glass" onClick={copyAddress}>
               Copy
+            </Button>
+            <Button
+              variant="glass"
+              disabled={busy || !running}
+              onClick={() => void bridge.OpenURL(`http://${mdnsName}/setup`)}
+            >
+              Connect phone or tablet
             </Button>
           </div>
         </div>

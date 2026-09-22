@@ -47,8 +47,9 @@ certificate download is HTTP, not authenticated HTTPS. Use a trusted clinic
 network and the address supplied by its administrator. Automatic certificate and
 TLS checks do not prove that an attacker did not impersonate the server during
 that first download. There is no manual fingerprint-comparison step.
-The old web setup page and downloadable certificate installers are retired;
-there is no supported phone/tablet installer in this flow. Separate clinic
+Phones and tablets use `http://<clinic>.local/setup` for iOS/Android certificate
+steps, opened from **Connect phone or tablet** in the server panel. Windows/Mac
+clients keep using the desktop app; downloadable scripts remain retired. Separate clinic
 servers with unique names remain valid; CARE does not enforce a signed,
 network-wide single-clinic rule.
 
