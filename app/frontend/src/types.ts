@@ -85,6 +85,8 @@ export type ChannelStatus = {
 
 export type CareUpdate = { backend: string; frontend: string };
 
+export type CareCheck = { running: boolean; found: boolean };
+
 export type AppUpdate = {
   current: string;
   version: string;

@@ -34,6 +34,9 @@ func builderFixture(t *testing.T) *Builder {
 	} {
 		writeBuildFile(t, dir, name, content)
 	}
+	for _, name := range []string{"care", "care_fe"} {
+		commitFixture(t, gitFixture(t, filepath.Join(dir, "remotes", name)), "base")
+	}
 	return NewBuilder(proc.Runner{Dir: dir}, dir, &release.Pins{
 		AppVersion:    "0.1.0-dev",
 		BeRepo:        filepath.Join(dir, "remotes", "care"),
@@ -68,7 +71,15 @@ func imageKeys(t *testing.T, b *Builder) [4]string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return [4]string{b.backendBuiltFrom(plugs), b.frontendBuiltFrom(env), backup, caddy}
+	be, err := b.backendBuiltFrom(plugs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fe, err := b.frontendBuiltFrom(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return [4]string{be, fe, backup, caddy}
 }
 
 func TestImageKeysTrackBuildInputs(t *testing.T) {
@@ -78,10 +89,10 @@ func TestImageKeysTrackBuildInputs(t *testing.T) {
 		mutate  func(*testing.T, *Builder)
 	}{
 		{"version", [4]bool{true, true}, func(t *testing.T, b *Builder) { b.set.AppVersion = "0.2.0-dev" }},
-		{"backend repo", [4]bool{true}, func(t *testing.T, b *Builder) { b.set.BeRepo += "-fork" }},
-		{"backend ref", [4]bool{true}, func(t *testing.T, b *Builder) { b.set.BeRef = "feature" }},
-		{"frontend repo", [4]bool{false, true}, func(t *testing.T, b *Builder) { b.set.FeRepo += "-fork" }},
-		{"frontend ref", [4]bool{false, true}, func(t *testing.T, b *Builder) { b.set.FeRef = "feature" }},
+		{"backend repo", [4]bool{true}, func(t *testing.T, b *Builder) { b.set.BeRepo = forkFixture(t, b.set.BeRepo) }},
+		{"backend ref", [4]bool{true}, func(t *testing.T, b *Builder) { b.set.BeRef = branchFixture(t, b.set.BeRepo) }},
+		{"frontend repo", [4]bool{false, true}, func(t *testing.T, b *Builder) { b.set.FeRepo = forkFixture(t, b.set.FeRepo) }},
+		{"frontend ref", [4]bool{false, true}, func(t *testing.T, b *Builder) { b.set.FeRef = branchFixture(t, b.set.FeRepo) }},
 		{"plugins", [4]bool{true}, func(t *testing.T, b *Builder) {
 			writeBuildFile(t, b.dir, "backend.env", "ADDITIONAL_PLUGS='[{\"name\":\"two\",\"package_name\":\"pkg_two\"}]'\n")
 		}},
@@ -117,6 +128,26 @@ func TestImageKeysTrackBuildInputs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func forkFixture(t *testing.T, repo string) string {
+	t.Helper()
+	fork := repo + "-fork"
+	commitFixture(t, gitFixture(t, fork), "forked")
+	return fork
+}
+
+func branchFixture(t *testing.T, repo string) string {
+	t.Helper()
+	run := proc.Runner{Dir: repo}
+	if err := run.Run("git", "checkout", "--quiet", "-b", "feature"); err != nil {
+		t.Fatal(err)
+	}
+	commitFixture(t, run, "on the feature branch")
+	if err := run.Run("git", "checkout", "--quiet", "develop"); err != nil {
+		t.Fatal(err)
+	}
+	return "feature"
 }
 
 func gitFixture(t *testing.T, repo string) proc.Runner {

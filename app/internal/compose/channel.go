@@ -5,9 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ohcnetwork/care_desktop/app/internal/release"
+	"github.com/ohcnetwork/care_desktop/app/internal/sys/atomicfile"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 )
 
@@ -45,7 +47,9 @@ func (l *Lock) Set(service string, c Channel) {
 	l.Backend = c
 }
 
-func ReadLock(dir string) Lock {
+var lockMu sync.Mutex
+
+func readLock(dir string) Lock {
 	var l Lock
 	data, err := os.ReadFile(filepath.Join(dir, LockFile))
 	if err != nil {
@@ -57,20 +61,43 @@ func ReadLock(dir string) Lock {
 	return l
 }
 
-func WriteLock(dir string, l Lock) error {
+func writeLock(dir string, l Lock) error {
 	data, err := json.MarshalIndent(l, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, LockFile), append(data, '\n'), 0o644)
+	return atomicfile.Write(filepath.Join(dir, LockFile), append(data, '\n'), 0o644)
+}
+
+func ReadLock(dir string) Lock {
+	lockMu.Lock()
+	defer lockMu.Unlock()
+	return readLock(dir)
+}
+
+func WriteLock(dir string, l Lock) error {
+	lockMu.Lock()
+	defer lockMu.Unlock()
+	return writeLock(dir, l)
+}
+
+func ModifyLock(dir string, fn func(*Lock) error) error {
+	lockMu.Lock()
+	defer lockMu.Unlock()
+	l := readLock(dir)
+	if err := fn(&l); err != nil {
+		return err
+	}
+	return writeLock(dir, l)
 }
 
 func (b *Builder) updateLock(service string, fn func(*Channel)) error {
-	l := ReadLock(b.dir)
-	c := l.Get(service)
-	fn(&c)
-	l.Set(service, c)
-	return WriteLock(b.dir, l)
+	return ModifyLock(b.dir, func(l *Lock) error {
+		c := l.Get(service)
+		fn(&c)
+		l.Set(service, c)
+		return nil
+	})
 }
 
 const lsRemoteTimeout = 25 * time.Second

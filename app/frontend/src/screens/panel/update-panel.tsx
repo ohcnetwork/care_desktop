@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { bridge } from "@/lib/bridge";
+import { bridge, onCareEvent } from "@/lib/bridge";
 import { errorText, firstLine } from "@/lib/format";
 import { useCare } from "@/state/care-store";
-import type { AppUpdate, ChannelStatus } from "@/types";
+import type { AppUpdate, CareCheck, ChannelStatus } from "@/types";
 
 const short = (sha: string) => (sha ? sha.slice(0, 8) : "");
 
@@ -21,6 +21,7 @@ function CareChannelCard() {
   const { log, busy, careUpdate, applyCareUpdate } = useCare();
   const [status, setStatus] = useState<ChannelStatus | null>(null);
   const [checking, setChecking] = useState(false);
+  const [upToDate, setUpToDate] = useState(false);
   const [error, setError] = useState("");
 
   const reload = useCallback(async () => {
@@ -36,15 +37,25 @@ function CareChannelCard() {
     void reload();
   }, [reload, careUpdate, busy]);
 
+  useEffect(
+    () =>
+      onCareEvent("care-check", (check: CareCheck) => {
+        setChecking(check.running);
+        setUpToDate(!check.running && !check.found);
+        if (!check.running) setError("");
+      }),
+    [],
+  );
+
   const check = async () => {
     setChecking(true);
+    setUpToDate(false);
     setError("");
     try {
       await bridge.CheckCareUpdate();
       log("Checking for CARE updates in the background...");
     } catch (e) {
       setError(firstLine(errorText(e)));
-    } finally {
       setChecking(false);
     }
   };
@@ -71,6 +82,20 @@ function CareChannelCard() {
         <Row label="Backend" value={short(status?.backend ?? "")} />
         <Row label="Frontend" value={short(status?.frontend ?? "")} />
       </dl>
+
+      {!pending && checking ? (
+        <div className="mt-3.5 text-[12.5px] text-muted-foreground">
+          Checking for updates. Anything found is downloaded and built in the background,
+          which can take a few minutes.
+        </div>
+      ) : null}
+
+      {!pending && !checking && upToDate ? (
+        <div className="mt-3.5 text-[12.5px] text-muted-foreground">
+          Up to date with the <span className="font-mono text-ink2">{status?.backend_branch}</span>{" "}
+          branch.
+        </div>
+      ) : null}
 
       {pending ? (
         <div className="mt-3.5 flex items-center gap-3 rounded-lg border border-line bg-brand-bg px-4 py-[13px] text-[12.5px] text-brand-ink">

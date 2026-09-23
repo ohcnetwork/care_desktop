@@ -32,6 +32,11 @@ type CareUpdate struct {
 	Frontend string `json:"frontend"`
 }
 
+type CareCheck struct {
+	Running bool `json:"running"`
+	Found   bool `json:"found"`
+}
+
 func (a *App) CareUpdateStatus() (clinic.ChannelStatus, error) {
 	if err := a.requireSetup(); err != nil {
 		return clinic.ChannelStatus{}, err
@@ -64,47 +69,58 @@ func (a *App) checkCareUpdate() {
 	if !a.updatesAllowed() {
 		return
 	}
-	update, err := a.engine().CheckForUpdate()
+	a.emit("care-check", CareCheck{Running: true})
+	update, err := a.engineForUpdate().CheckForUpdate()
 	if err != nil {
 		a.logln("update check: " + err.Error())
+		a.emit("care-check", CareCheck{})
 		return
 	}
+	a.emit("care-check", CareCheck{Found: update.Any()})
 	if !update.Any() || !a.updatesAllowed() {
 		return
 	}
 	a.emit("care-update", CareUpdate{Backend: update.Backend, Frontend: update.Frontend})
 }
 
-func (a *App) updatesAllowed() bool {
-	cfg := a.loadConfig()
-	return !a.closing && cfg.Role == roleServer && cfg.SetupDone && !cfg.Removing
+func (a *App) isClosing() bool {
+	a.jobMu.RLock()
+	defer a.jobMu.RUnlock()
+	return a.closing
 }
 
-const updateInterval = time.Hour
+func (a *App) updatesAllowed() bool {
+	cfg := a.loadConfig()
+	return !a.isClosing() && cfg.Role == roleServer && cfg.SetupDone && !cfg.Removing
+}
+
+func (a *App) updatesAbandoned() bool {
+	cfg := a.loadConfig()
+	return a.isClosing() || cfg.Role == roleClient || cfg.Removing
+}
+
+const (
+	updateInterval = time.Hour
+	updateWarmup   = 30 * time.Second
+)
 
 func (a *App) watchForCareUpdates() {
-	if !a.updatesAllowed() {
-		return
-	}
-	deadline := time.Now().Add(15 * time.Minute)
-	for !health.Ping().Active {
-		if time.Now().After(deadline) || a.closing {
-			return
-		}
-		time.Sleep(30 * time.Second)
-	}
 	for {
-		if !a.updatesAllowed() {
+		if a.updatesAbandoned() {
 			return
 		}
-		if checking.CompareAndSwap(false, true) {
-			a.checkCareUpdate()
-			checking.Store(false)
+		wait := updateWarmup
+		if a.updatesAllowed() && health.Ping().Active {
+			if checking.CompareAndSwap(false, true) {
+				a.checkCareUpdate()
+				checking.Store(false)
+			}
+			wait = updateInterval
 		}
 		select {
 		case <-a.ctx.Done():
 			return
-		case <-time.After(updateInterval):
+		case <-time.After(wait):
 		}
 	}
 }

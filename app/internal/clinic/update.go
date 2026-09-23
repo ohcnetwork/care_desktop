@@ -76,21 +76,25 @@ func (e *Clinic) ApplyUpdate() error {
 	return nil
 }
 
-func (e *Clinic) applyStagedUpdate() (bool, error) {
+func (e *Clinic) applyStagedUpdate() error {
 	b := e.Builder()
-	if !b.Waiting().Any() {
-		return false, nil
+	waiting := b.Waiting()
+	if !waiting.Any() {
+		return nil
 	}
 	if !e.Backups().BackupEncryptionOn() {
 		e.logln("A CARE update is ready, but this install cannot write encrypted backups, " +
 			"so it was not applied. Set a backup password to let updates install themselves.")
-		return false, nil
+		return nil
 	}
-	applied, err := b.ApplyPending()
-	if err != nil {
-		return false, err
+	if waiting.Backend != "" {
+		if err := e.backupBeforeUpdate(); err != nil {
+			e.logln("The CARE update was not applied: " + err.Error())
+			return nil
+		}
 	}
-	return applied.Backend != "", nil
+	_, err := b.ApplyPending()
+	return err
 }
 
 func (e *Clinic) backupBeforeUpdate() error {

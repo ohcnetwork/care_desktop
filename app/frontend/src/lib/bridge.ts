@@ -67,7 +67,8 @@ export type CareEvent =
   | "care-done"
   | "setup-done"
   | "uninstalled"
-  | "care-update";
+  | "care-update"
+  | "care-check";
 
 /** Subscribe to a Wails event, waiting out a runtime that isn't injected yet. */
 export function onCareEvent(

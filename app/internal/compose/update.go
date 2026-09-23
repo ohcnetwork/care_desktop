@@ -19,6 +19,9 @@ func Short(sha string) string {
 }
 
 func (b *Builder) PrepareUpdate() (Update, error) {
+	if b.stopped() {
+		return Update{}, nil
+	}
 	next := b.Pending()
 	lock := ReadLock(b.dir)
 	var u Update
@@ -32,14 +35,32 @@ func (b *Builder) PrepareUpdate() (Update, error) {
 		return u, nil
 	}
 	if u.Frontend != "" {
+		if next.stopped() {
+			return Update{}, nil
+		}
 		b.logln("A newer CARE frontend is available (" + Short(u.Frontend) + ") - building it in the background.")
 		if err := next.EnsureFrontendImage(); err != nil {
 			return Update{}, err
 		}
+		if next.stopped() {
+			return Update{}, nil
+		}
+		if err := next.recordBuilt(Frontend, b.set.FeRef, u.Frontend); err != nil {
+			return Update{}, err
+		}
 	}
 	if u.Backend != "" {
+		if next.stopped() {
+			return Update{}, nil
+		}
 		b.logln("A newer CARE backend is available (" + Short(u.Backend) + ") - building it in the background.")
 		if err := next.EnsureBackendImage(); err != nil {
+			return Update{}, err
+		}
+		if next.stopped() {
+			return Update{}, nil
+		}
+		if err := next.recordBuilt(Backend, b.set.BeRef, u.Backend); err != nil {
 			return Update{}, err
 		}
 	}
@@ -56,8 +77,14 @@ func (b *Builder) Waiting() Update {
 }
 
 func (b *Builder) ApplyPending() (Update, error) {
-	lock := ReadLock(b.dir)
 	var applied Update
+	err := ModifyLock(b.dir, func(lock *Lock) error {
+		return b.applyPending(lock, &applied)
+	})
+	return applied, err
+}
+
+func (b *Builder) applyPending(lock *Lock, applied *Update) error {
 	for _, s := range []struct {
 		service string
 		image   string
@@ -73,37 +100,35 @@ func (b *Builder) ApplyPending() (Update, error) {
 		staged := s.image + "-next"
 		_, ok, err := b.builtFrom(staged)
 		if err != nil {
-			return applied, err
+			return err
 		}
 		if !ok {
-			c.Next = ""
+			c.Next, c.Declined = "", ""
 			lock.Set(s.service, c)
 			continue
 		}
 		if err := b.run.Run("docker", "image", "tag", staged, s.image); err != nil {
-			return applied, err
+			return err
 		}
 		b.logln("CARE " + s.service + " updated to " + Short(c.Next) + ".")
 		*s.dst = c.Next
 		c.Current, c.Next, c.Declined = c.Next, "", ""
 		lock.Set(s.service, c)
 	}
-	if err := WriteLock(b.dir, lock); err != nil {
-		return applied, err
-	}
-	return applied, nil
+	return nil
 }
 
 func (b *Builder) DeclineUpdate() error {
-	lock := ReadLock(b.dir)
-	for _, service := range []string{Backend, Frontend} {
-		c := lock.Get(service)
-		if c.Next != "" {
-			c.Declined = c.Next
+	return ModifyLock(b.dir, func(lock *Lock) error {
+		for _, service := range []string{Backend, Frontend} {
+			c := lock.Get(service)
+			if c.Next != "" {
+				c.Declined = c.Next
+			}
+			lock.Set(service, c)
 		}
-		lock.Set(service, c)
-	}
-	return WriteLock(b.dir, lock)
+		return nil
+	})
 }
 
 func (b *Builder) PruneDangling() { b.pruneDangling() }

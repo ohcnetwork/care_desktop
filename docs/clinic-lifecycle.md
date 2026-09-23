@@ -112,9 +112,9 @@ remaining teardown files and the residue package.
 | [`compose/build.go`](../app/internal/compose/build.go) | Source checkout cache, image fingerprints, four image builds, local freshness checks, and post-rebuild dangling-image cleanup. |
 | [`compose/channel.go`](../app/internal/compose/channel.go) | Branch resolution through `git ls-remote` without credential prompts, and the `channel.lock` record. |
 | [`compose/update.go`](../app/internal/compose/update.go) | Staging a newer commit into the `-next` images, declining, and applying a staged build by retag. |
-| [`clinic/update.go`](../app/internal/clinic/update.go) | Channel status, the safety backup, live update application, and applying a staged update during startup. |
-| [`compose/channel_test.go`](../app/internal/compose/channel_test.go) | Lock round-tripping, tolerance of a corrupt lock, and the invariant that an image key follows the branch head rather than the branch name. |
-| [`compose/build_test.go`](../app/internal/compose/build_test.go) | Build-input invalidation, local Git fixtures, source-stamp failures, image inspection failures, consumed build inputs, and empty-context cleanup. |
+| [`clinic/update.go`](../app/internal/clinic/update.go) | Channel status, the safety backup taken before anything is retagged, live update application, and applying a staged update during startup. |
+| [`compose/channel_test.go`](../app/internal/compose/channel_test.go) | Lock round-tripping, tolerance of a corrupt lock, the refusal to trust a lock whose commit is not a commit, an unresolvable ref never becoming an image key, a dropped staged build being offered again, and the invariant that an image key follows the branch head rather than the branch name. |
+| [`compose/build_test.go`](../app/internal/compose/build_test.go) | Build-input invalidation, local Git fixtures with real branches, source-stamp failures, image inspection failures, consumed build inputs, and empty-context cleanup. |
 | [`compose/deployment_test.go`](../app/internal/compose/deployment_test.go) | Silo bootstrap arguments, configurable Caddy bucket routes, and Compose storage-environment wiring. |
 
 Backup-facing `clinic/backup.go`, `backupstore.go`, and
@@ -415,9 +415,17 @@ name would make every cached build look current forever.
 
 [`compose/channel.go`](../app/internal/compose/channel.go) resolves a branch
 with `git ls-remote`, with the credential helper disabled and a timeout, so an
-unattended clinic can never stop on a password prompt. The result is recorded
-in `InstallDir/channel.lock`, which is kept outside `.env` because `.env` is
-rewritten from the embedded copy on every launch.
+unattended clinic can never stop on a password prompt. Only `refs/heads/` is
+queried: a tag in `CARE_BE_REF`/`CARE_FE_REF` is not a branch of verified
+commits and fails loudly rather than resolving to something unintended. The
+result is recorded in `InstallDir/channel.lock`, which is kept outside `.env`
+because `.env` is rewritten from the embedded copy on every launch.
+
+A ref that resolves to nothing is an error, not a fallback. Passing the branch
+name on as if it were a commit would produce a stable `sourceKey`, and a stable
+key is indistinguishable from an up-to-date clinic, so the failure would be
+silent and permanent. Refusing to build is recoverable; building the wrong
+thing quietly is not.
 
 | Field | Meaning |
 | --- | --- |
@@ -441,20 +449,34 @@ Which commit a builder resolves depends on what it is for:
 [`clinic/update.go`](../app/internal/clinic/update.go) carry an update from
 "found" to "running":
 
+1. The app checks hourly, starting once the clinic is actually serving. A
+   check is cheap; the build one may start is not, which is why it runs in the
+   background and nothing waits on it. Cadence and the conditions that skip a
+   check are in
+   [configuration and settings](configuration-and-settings.md).
 1. `PrepareUpdate` resolves both branch heads, skips anything equal to
    `current` or `declined`, and builds what is left into the `-next` images
    while the clinic keeps serving from the images it started with. No network
-   means no heads, no update, and no error.
+   means no heads, no update, and no error. Each service records its `next`
+   commit as soon as its own image is built, so a check interrupted after the
+   frontend finished does not throw that build away. Between every stage the
+   builder re-checks whether the clinic has been abandoned, so an uninstall
+   started during a long build is not undone by the build finishing after it.
 2. The app emits `care-update`; the panel shows a banner offering to install
    now or later. Declining records `declined` and leaves the build staged.
-3. `ApplyPending` retags `-next` over the live tag. At startup this happens
+3. When the backend changed, a one-shot encrypted database dump named
+   `care-pre-update-*.dump.enc` is taken **before** anything is retagged, on
+   both the live and the startup path. Migrations from a new backend are not
+   reversible; that dump is. A backup that fails leaves the update staged and
+   the clinic on the images it already runs. At startup that is logged and the
+   clinic opens as usual: an install that cannot write encrypted backups is a
+   reason not to update, not a reason not to start.
+4. `ApplyPending` retags `-next` over the live tag. At startup this happens
    before any container is up, so it costs a retag; applied live it is the only
-   part of an update that is not a rebuild.
-4. When the backend changed, a one-shot encrypted database dump named
-   `care-pre-update-*.dump.enc` is taken before migrations run. Migrations from
-   a new backend are not reversible; that dump is. An install that cannot write
-   encrypted backups leaves the update staged rather than migrating without
-   one.
+   part of an update that is not a rebuild. If the staged image has gone —
+   pruned, or removed by hand — `next` and `declined` are cleared together, so
+   the commit is offered again by the next check instead of being remembered as
+   something already refused.
 
 There is no image-level rollback. The old image is reproducible from the branch
 by commit; the database is not, which is why the safety backup is the part that

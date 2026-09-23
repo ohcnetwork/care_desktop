@@ -15,9 +15,9 @@ func TestImageKeyFollowsTheBranchHead(t *testing.T) {
 	b.set.BeRepo = repo
 
 	first := commitFixture(t, run, "first")
-	before := builderAt(t, b).backendBuiltFrom("")
+	before := builtFrom(t, builderAt(t, b))
 	second := commitFixture(t, run, "second")
-	after := builderAt(t, b).backendBuiltFrom("")
+	after := builtFrom(t, builderAt(t, b))
 
 	if first == second {
 		t.Fatal("fixture did not move the branch")
@@ -99,6 +99,15 @@ func TestLockSurvivesRoundTripAndCorruption(t *testing.T) {
 	}
 }
 
+func builtFrom(t *testing.T, b *Builder) string {
+	t.Helper()
+	key, err := b.backendBuiltFrom("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
 func builderAt(t *testing.T, b *Builder) *Builder {
 	t.Helper()
 	return NewBuilder(b.run, b.dir, b.set, nil)
@@ -116,4 +125,42 @@ func indexOf(haystack, needle string) int {
 		}
 	}
 	return -1
+}
+
+func TestUnresolvableRefNeverBecomesAnImageKey(t *testing.T) {
+	b := builderFixture(t)
+	b.set.BeRef = "no-such-branch"
+	if _, err := builderAt(t, b).backendBuiltFrom(""); err == nil {
+		t.Fatal("an unresolvable branch produced an image key; it would be constant and the clinic would never update")
+	}
+}
+
+func TestPoisonedLockIsIgnoredRatherThanTrusted(t *testing.T) {
+	b := builderFixture(t)
+	repo := filepath.Join(t.TempDir(), "remote")
+	run := gitFixture(t, repo)
+	b.set.BeRepo = repo
+	head := commitFixture(t, run, "first")
+
+	if err := WriteLock(b.dir, Lock{Backend: Channel{Ref: "develop", Current: "develop"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := builderAt(t, b).BackendRef(); got != head {
+		t.Fatalf("branch name in the lock was trusted: got %q, want %q", got, head)
+	}
+}
+
+func TestDroppedStagedBuildIsOfferedAgain(t *testing.T) {
+	b := builderFixture(t)
+	sha := "1111111111111111111111111111111111111111"
+	if err := WriteLock(b.dir, Lock{Backend: Channel{Ref: "develop", Next: sha, Declined: sha}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.ApplyPending(); err != nil {
+		t.Fatal(err)
+	}
+	got := ReadLock(b.dir).Backend
+	if got.Next != "" || got.Declined != "" {
+		t.Fatalf("a staged build that vanished left %+v; the commit would be blacklisted forever", got)
+	}
 }

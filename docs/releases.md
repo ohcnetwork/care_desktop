@@ -29,7 +29,7 @@ protection.
 | --- | --- |
 | `CARE_DESKTOP_VERSION` | One `X.Y.Z` value. `-dev` builds are not accepted by the release workflow. |
 | `CARE_BE_REPO`, `CARE_FE_REPO` | The intended CARE source repositories. |
-| `CARE_BE_REF`, `CARE_FE_REF` | The branch of verified CARE commits that installed clinics follow, normally `develop`. A full 40-character commit SHA pins that service instead. |
+| `CARE_BE_REF`, `CARE_FE_REF` | The branch of verified CARE commits that installed clinics follow, normally `develop`. A full 40-character commit SHA pins that service instead. Tags are not supported. |
 | `POSTGRES_IMAGE`, `REDIS_IMAGE`, `MINIO_IMAGE`, `CADDY_IMAGE` | Deliberately chosen image versions; use immutable digests when available. |
 | `CORAZA_VERSION` | The WAF module version used to build the proxy. |
 | `BACKUP_IMAGE`, `CADDY_WAF_IMAGE`, `BACKEND_IMAGE`, `FRONTEND_IMAGE` | Local output image names. These are not upstream version selectors; normally leave them alone. |
@@ -108,7 +108,8 @@ Before publishing:
    internet after provisioning.
 2. Add release notes describing visible changes, dependency changes, known
    limitations, and any database migration or prerequisite requirements.
-3. For an existing clinic, require a verified backup before migration. Preserve
+3. For an existing clinic, require a verified backup before an update is
+   applied. Preserve
    its CA identity and persistent data; an application upgrade should not
    require all client devices to reinstall certificate trust.
 4. If distributing the current preview to testers, publish it **as a

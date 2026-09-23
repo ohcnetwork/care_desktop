@@ -177,7 +177,9 @@ bug fixes reach installed clinics without a desktop release. An installed
 clinic resolves that branch to a commit once, records it, and only moves
 forward when a background check has already built the newer commit. A full
 40-character commit ID is still accepted and opts that service out of
-following the branch. See [clinic lifecycle](clinic-lifecycle.md) for how a
+following the branch. A tag is not accepted, and a ref that resolves to
+nothing fails the build rather than being passed along as if it were a commit.
+See [clinic lifecycle](clinic-lifecycle.md) for how a
 resolved commit is chosen, staged, and applied.
 
 At runtime, `GetState().version` comes from these embedded pins, not a separate
@@ -202,6 +204,8 @@ building, reviewing, publishing, and recovering a release.
 A `-dev` build compares as older than the published release of the same `X.Y.Z`, so a development install can exercise the desktop updater against a real release rather than a fixture.
 
 Build tests use local Git fixtures rather than the real CARE repository URLs. Resolving a branch runs `git ls-remote`, and a unit test that reaches GitHub is slow, flaky, and on a machine with a credential helper installed will ask the developer for a password.
+
+For the same reason no test may elevate. Privileged work goes through [`sys/elevate`](../app/internal/sys/elevate/elevate.go), which runs `osascript` on macOS and `pkexec` elsewhere, so a test that calls it puts a real password dialog in front of whoever ran `go test` and fails on CI, where no one can answer it. Faking the command on `PATH` is not enough, because `elevate` picks the command by platform and the Windows path is the one those tests describe. `netfix` therefore exposes its elevation as a package variable that tests replace, and asserts on the script it was handed; the elevated wrapper around that script is covered separately in `elevate`'s own tests, where it is only a string.
 
 ### Reproducibility boundaries
 
