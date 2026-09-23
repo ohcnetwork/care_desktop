@@ -1047,6 +1047,8 @@ are already answered:
 | `application.adminAccess: true` | Rancher Desktop only forwards host ports below 1024 with administrative access. Without it Caddy cannot take 80/443, every container still reports healthy, and `health.Wait` times out with no obvious cause. |
 | `containerEngine.name: moby` | Supplies dockerd and the `docker` CLI the engine calls. The containerd/nerdctl engine would fail every Compose command. |
 | `kubernetes.enabled: false` | k3s would consume roughly 1.5GB of RAM the clinic never uses. |
+| `application.autoStart: true` | Rancher Desktop starts at login, so the clinic comes back after a reboot without anyone opening it. |
+| `application.startInBackground: true` | Rancher Desktop starts without its window; the operator only ever sees CARE Desktop. |
 | `application.pathManagementStrategy: rcfiles` | Lets Rancher Desktop put `~/.rd/bin` on the shell PATH, matching what `AugmentedPath` already prepends. Ignored on Windows. |
 
 | Platform | Profile location |
@@ -1059,10 +1061,35 @@ Defaults are applied on first run only. An operator's later preference changes
 are kept, and an administrator's managed profile in `/Library/Managed
 Preferences` or `HKLM` still takes precedence over this user profile. Because of
 that, an installation that had already run would ignore the profile, so
-`applyRancherProfileNow` additionally attempts `rdctl set` for the same three
-values. That attempt is best-effort: `rdctl` may be absent, or the values may be
-locked by an administrator. A profile write failure is logged as a warning and
-does not stop the installation.
+`applyRancherProfileNow` additionally attempts `rdctl set` for the same values
+(`rancherSettings`). It runs after installing and again each time a server starts
+CARE Desktop, so existing installations pick up later additions. That attempt is
+best-effort: `rdctl` may be absent, or the values may be locked by an
+administrator. A profile write failure is logged as a warning and does not stop
+the installation. `rdctlPath` uses the copy inside the Rancher Desktop bundle,
+because a freshly installed `~/.rd/bin` is not yet on the PATH CARE inherits.
+
+`OpenDocker` starts Rancher Desktop with `rdctl start --no-modal-dialogs` and the
+same settings, which opens no window, skips the first-run wizard, and applies the
+settings to an instance that is already running. It falls back to launching the
+app if `rdctl` fails.
+
+**Rancher Desktop administrator setup (macOS)**
+
+With `adminAccess`, Rancher Desktop needs root-owned pieces before it can forward
+ports 80 and 443. When any is missing it shows its own explanation dialog and a
+password prompt on every start, and under `--no-modal-dialogs` it silently turns
+admin access off for that run instead, leaving Caddy unreachable. CARE therefore
+creates them itself (`rancherRootSetup`), inside the same single password prompt
+that copies the app, and `ensureRancherRoot` repairs any that go missing before
+each `OpenDocker`:
+
+| Item | Why |
+| --- | --- |
+| `/opt/rancher-desktop` | A root-owned copy of the bundle's `lima/socket_vmnet` tree. Rancher compares it file by file. |
+| `/private/etc/sudoers.d/zzzzz-rancher-desktop-lima` | Lets Rancher run `socket_vmnet` without a password. `rancherSudoers` reproduces Rancher Desktop 1.24's `sudoersFile` layout, with one bridged entry per interface from `system_profiler SPNetworkDataType`, and it is checked with `visudo -cf` before install. Rancher compares the text exactly, so if a later Rancher release changes the layout, Rancher asks for the password itself again and `TestRancherSudoersMatchesRancherLayout` is the place to update. A new network adapter also changes the text; CARE rewrites it on the next start. |
+| `/var/run/docker.sock` → `~/.rd/docker.sock` | macOS empties `/var/run` at every boot. Without the link Rancher asks for the password after each reboot. |
+| `/Library/LaunchDaemons/org.ohcnetwork.care-desktop.docker-socket.plist` | Recreates that link at boot, before Rancher starts at login. It is left in place on uninstall, since it serves Rancher Desktop rather than the clinic. |
 
 **Linux Docker**
 

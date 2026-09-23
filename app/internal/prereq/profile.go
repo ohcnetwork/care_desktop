@@ -3,6 +3,7 @@ package prereq
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 
@@ -19,6 +20,8 @@ const rancherProfilePlist = `<?xml version="1.0" encoding="UTF-8"?>
 	<key>application</key>
 	<dict>
 		<key>adminAccess</key><true/>
+		<key>autoStart</key><true/>
+		<key>startInBackground</key><true/>
 		<key>pathManagementStrategy</key><string>rcfiles</string>
 	</dict>
 	<key>containerEngine</key>
@@ -50,6 +53,8 @@ func writeRancherProfile() error {
 		args := [][]string{
 			{key, "/v", "version", "/t", "REG_DWORD", "/d", fmt.Sprint(rancherProfileVersion)},
 			{key + `\application`, "/v", "adminAccess", "/t", "REG_DWORD", "/d", "1"},
+			{key + `\application`, "/v", "autoStart", "/t", "REG_DWORD", "/d", "1"},
+			{key + `\application`, "/v", "startInBackground", "/t", "REG_DWORD", "/d", "1"},
 			{key + `\containerEngine`, "/v", "name", "/t", "REG_SZ", "/d", "moby"},
 			{key + `\kubernetes`, "/v", "enabled", "/t", "REG_DWORD", "/d", "0"},
 		}
@@ -65,13 +70,39 @@ func writeRancherProfile() error {
 	return nil
 }
 
+var rancherSettings = []string{
+	"--application.admin-access=true",
+	"--application.auto-start=true",
+	"--application.start-in-background=true",
+	"--container-engine.name=moby",
+	"--kubernetes.enabled=false",
+}
+
 func applyRancherProfileNow() {
-	if !hasCommand("rdctl") {
+	rdctl := rdctlPath()
+	if rdctl == "" {
 		return
 	}
-	_ = proc.Command("rdctl", "set",
-		"--application.admin-access=true",
-		"--container-engine.name=moby",
-		"--kubernetes.enabled=false",
-	).Run()
+	_ = proc.Command(rdctl, append([]string{"set"}, rancherSettings...)...).Run()
+}
+
+func rdctlPath() string {
+	var bundled string
+	switch runtime.GOOS {
+	case "darwin":
+		bundled = filepath.Join(rancherAppMac, "Contents", "Resources", "resources", "darwin", "bin", "rdctl")
+	case "windows":
+		if exe := windowsRancherDesktopExe(); exe != "" {
+			bundled = filepath.Join(filepath.Dir(exe), "resources", "resources", "win32", "bin", "rdctl.exe")
+		}
+	}
+	if bundled != "" {
+		if _, err := os.Stat(bundled); err == nil {
+			return bundled
+		}
+	}
+	if p, err := exec.LookPath("rdctl"); err == nil {
+		return p
+	}
+	return ""
 }
