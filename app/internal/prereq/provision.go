@@ -202,13 +202,21 @@ func (pr *Provisioner) installDockerDarwin() error {
 	if err := writeRancherProfile(); err != nil {
 		pr.logln("Warning: could not preconfigure Rancher Desktop: " + err.Error())
 	}
-	pr.logln("Installing Rancher Desktop. macOS will ask for your password...")
-	sh := strings.Join([]string{
+	steps := []string{
 		"hdiutil attach -nobrowse -mountpoint " + elevate.ShQuote(mount) + " " + elevate.ShQuote(dmg),
 		"rm -rf " + elevate.ShQuote(rancherAppMac),
 		"cp -R " + elevate.ShQuote(mount+"/Rancher Desktop.app") + " " + elevate.ShQuote(rancherAppMac),
 		"hdiutil detach " + elevate.ShQuote(mount),
-	}, " && ")
+	}
+	root, err := rancherRootSetup(true)
+	defer root.cleanup()
+	if err != nil {
+		pr.logln("Warning: Rancher Desktop may ask for your password again when it starts: " + err.Error())
+	} else {
+		steps = append(steps, root.cmds...)
+	}
+	pr.logln("Installing Rancher Desktop. macOS will ask for your password once...")
+	sh := strings.Join(steps, " && ")
 	if err := elevate.Run(sh, true); err != nil {
 		_ = proc.Command("hdiutil", "detach", mount).Run()
 		return fmt.Errorf("could not install Rancher Desktop: %w", err)
@@ -364,6 +372,33 @@ func (pr *Provisioner) InstallGit() (string, error) {
 func (pr *Provisioner) OpenDocker() error {
 	pr.logln("Starting Docker...")
 	switch runtime.GOOS {
+	case "darwin", "windows":
+		if err := pr.startRancher(); err != nil {
+			return err
+		}
+	case "linux":
+		if err := elevate.Run("systemctl start docker", true); err != nil {
+			return fmt.Errorf("could not start the Docker service: %w", err)
+		}
+	}
+	return pr.waitForDocker(dockerReadyTimeout)
+}
+
+func (pr *Provisioner) startRancher() error {
+	if runtime.GOOS == "darwin" {
+		if err := pr.ensureRancherRoot(); err != nil {
+			return err
+		}
+	}
+	if rdctl := rdctlPath(); rdctl != "" {
+		args := append([]string{"start", "--no-modal-dialogs"}, rancherSettings...)
+		err := pr.run.Run(rdctl, args...)
+		if err == nil {
+			return nil
+		}
+		pr.logln("rdctl could not start Rancher Desktop in the background; opening it instead: " + err.Error())
+	}
+	switch runtime.GOOS {
 	case "darwin":
 		if err := pr.run.Run("open", "-a", rancherAppMac); err != nil {
 			return fmt.Errorf("could not start Rancher Desktop: %w", err)
@@ -377,12 +412,15 @@ func (pr *Provisioner) OpenDocker() error {
 			"Start-Process "+elevate.PSQuote(exe)); err != nil {
 			return fmt.Errorf("could not start Rancher Desktop: %w", err)
 		}
-	case "linux":
-		if err := elevate.Run("systemctl start docker", true); err != nil {
-			return fmt.Errorf("could not start the Docker service: %w", err)
-		}
 	}
-	return pr.waitForDocker(dockerReadyTimeout)
+	return nil
+}
+
+func EnsureRancherSettings() {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
+		return
+	}
+	applyRancherProfileNow()
 }
 
 func (pr *Provisioner) waitForDocker(limit time.Duration) error {
