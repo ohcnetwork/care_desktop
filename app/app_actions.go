@@ -193,14 +193,8 @@ func (a *App) notifyInstalled(mdnsName string) {
 		mdnsName = "care.local"
 	}
 	url := "https://" + mdnsName + "/"
-	sel, _ := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
-		Type:          wruntime.InfoDialog,
-		Title:         "CARE Desktop installed",
-		Message:       "Staff can open the clinic at " + url,
-		Buttons:       []string{"Open CARE", "Close"},
-		DefaultButton: "Open CARE",
-	})
-	if sel == "Open CARE" {
+	if a.confirmDialog("CARE Desktop installed",
+		"Staff can open the clinic at "+url+"\n\nOpen it now?") {
 		wruntime.BrowserOpenURL(a.ctx, url)
 	}
 }

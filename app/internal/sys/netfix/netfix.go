@@ -151,9 +151,8 @@ func Fix(log func(string)) error {
 		parts = append(parts, ensureRule(rule.label, rule.proto, rule.port))
 	}
 	inner := strings.Join(parts, "; ")
-	ps := elevatedPS(inner)
 	logln(log, "This network is protected. Updating it so other devices can reach the clinic (approve the prompt)...")
-	if err := proc.Command("powershell", "-NoProfile", "-Command", ps).Run(); err != nil {
+	if err := elevate.Steps([]elevate.Step{{PS: inner}}); err != nil {
 		return fmt.Errorf("couldn't update the network settings (prompt may have been declined): %w", err)
 	}
 	if status := Check(proc.Runner{}); !status.OK {
@@ -183,6 +182,20 @@ func protocolNumber(proto string) string {
 	return "17"
 }
 
+func undoStep() elevate.Step {
+	inner := `$ErrorActionPreference = 'Stop'; Get-NetFirewallRule -PolicyStore PersistentStore | ` +
+		`Where-Object { $_.DisplayName -like '` + fwPrefix + `*' } | Remove-NetFirewallRule`
+	return elevate.Step{What: "remove CARE's firewall rules", PS: inner}
+}
+
+func UndoStepWindows(run proc.Runner) (step elevate.Step, need bool, err error) {
+	present, err := inspectRules(run)
+	if err != nil || !present {
+		return elevate.Step{}, false, err
+	}
+	return undoStep(), true, nil
+}
+
 func Undo(log func(string)) error {
 	if runtime.GOOS != "windows" {
 		return nil
@@ -192,9 +205,7 @@ func Undo(log func(string)) error {
 }
 
 func undoRules(run proc.Runner) error {
-	inner := `$ErrorActionPreference = 'Stop'; Get-NetFirewallRule -PolicyStore PersistentStore | ` +
-		`Where-Object { $_.DisplayName -like '` + fwPrefix + `*' } | Remove-NetFirewallRule`
-	if err := run.Run("powershell", "-NoProfile", "-Command", elevatedPS(inner)); err != nil {
+	if err := elevate.Steps([]elevate.Step{undoStep()}); err != nil {
 		return fmt.Errorf("couldn't remove the clinic's firewall rules (approval may have been declined): %w", err)
 	}
 	present, err := inspectRules(run)
@@ -205,11 +216,6 @@ func undoRules(run proc.Runner) error {
 		return fmt.Errorf("CARE firewall rules are still present")
 	}
 	return nil
-}
-
-func elevatedPS(inner string) string {
-	return "$ErrorActionPreference = 'Stop'; $p = Start-Process powershell -Verb RunAs -Wait -PassThru " +
-		"-ArgumentList '-NoProfile','-Command'," + elevate.PSQuote(inner) + "; exit $p.ExitCode"
 }
 
 func logln(log func(string), s string) {

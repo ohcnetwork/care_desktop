@@ -46,7 +46,7 @@ func TestWindowsStepsReportChildAndCommandFailures(t *testing.T) {
 		t.Fatalf("step failures are not propagated: %s", inner)
 	}
 	outer := elevatedPS(inner)
-	for _, required := range []string{"-Wait -PassThru", "exit $p.ExitCode", PSQuote(inner)} {
+	for _, required := range []string{"-Wait -PassThru", "-WindowStyle Hidden", "exit $p.ExitCode", PSQuote(inner)} {
 		if !strings.Contains(outer, required) {
 			t.Errorf("elevated script is missing %q: %s", required, outer)
 		}
