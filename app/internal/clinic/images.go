@@ -17,6 +17,7 @@ func (e *Clinic) pruneBuildCache() error {
 func (e *Clinic) uninstallImages() []string {
 	return []string{
 		e.Pins.BackendImage, e.Pins.FrontendImage, e.Pins.CaddyWafImage, e.Pins.BackupImage,
+		e.Pins.BackendImage + "-next", e.Pins.FrontendImage + "-next",
 		e.Pins.PostgresImage, e.Pins.RedisImage, e.Pins.MinioImage,
 		e.Pins.CaddyImage, e.Pins.CaddyImage + "-builder",
 	}

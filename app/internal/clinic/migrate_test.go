@@ -39,16 +39,17 @@ func migrationFixture(t *testing.T) (*Clinic, func() string, string) {
 	t.Setenv("CARE_MIGRATION_TRACE", trace)
 	t.Setenv("CARE_MIGRATION_CREDENTIALS", credentials)
 	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
+	const fixtureRef = "0123456789abcdef0123456789abcdef01234567"
 	hash := func(data string) string {
 		sum := sha256.Sum256([]byte(data))
 		return hex.EncodeToString(sum[:])[:12]
 	}
 	pins := &release.Pins{
-		AppVersion: "fixture", BeRef: "fixture-ref", BeRepo: "fixture-repo", FeRef: "fixture-ref", FeRepo: "fixture-repo",
+		AppVersion: "fixture", BeRef: fixtureRef, BeRepo: "fixture-repo", FeRef: fixtureRef, FeRepo: "fixture-repo",
 		BackendImage: "fixture-backend", FrontendImage: "fixture-frontend", BackupImage: "fixture-backup",
 		CaddyWafImage: "fixture-caddy", CaddyImage: "fixture-caddy-base", PostgresImage: "fixture-postgres", CorazaVersion: "fixture",
 	}
-	sourceKey := "fixture+fixture-ref+repo@" + hash("fixture-repo")
+	sourceKey := "fixture+" + fixtureRef + "+repo@" + hash("fixture-repo")
 	t.Setenv("CARE_BACKEND_FINGERPRINT", sourceKey)
 	t.Setenv("CARE_FRONTEND_FINGERPRINT", sourceKey+"+env@"+hash(""))
 	t.Setenv("CARE_BACKUP_FINGERPRINT", pins.PostgresImage+"+dockerfile@"+hash("synthetic-backup"))

@@ -15,37 +15,27 @@ func deploymentPins(t *testing.T) []byte {
 	return data
 }
 
-func TestDeploymentSourcesAreImmutable(t *testing.T) {
-	pins, err := Load(deploymentPins(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !IsCommitRef(pins.BeRef) || !IsCommitRef(pins.FeRef) {
-		t.Fatal("deployment source refs are not immutable commits")
-	}
-}
-
-func TestLoadRequiresImmutableReleaseSources(t *testing.T) {
+func TestDeploymentSourcesAcceptBranchesAndCommits(t *testing.T) {
 	data := string(deploymentPins(t))
 	pins, err := Load([]byte(data))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"CARE_BE_REF", "CARE_FE_REF"} {
-		t.Run(key, func(t *testing.T) {
-			ref := pins.BeRef
-			if key == "CARE_FE_REF" {
-				ref = pins.FeRef
-			}
-			moving := strings.Replace(data, key+"="+ref, key+"=develop", 1)
-			if _, err := Load([]byte(moving)); err == nil || !strings.Contains(err.Error(), key) {
-				t.Fatalf("moving release source was accepted: %v", err)
-			}
-			development := strings.Replace(moving, "CARE_DESKTOP_VERSION="+pins.AppVersion, "CARE_DESKTOP_VERSION="+pins.AppVersion+"-dev", 1)
-			if _, err := Load([]byte(development)); err != nil {
-				t.Fatalf("explicit development source was rejected: %v", err)
-			}
-		})
+	if pins.BeRef == "" || pins.FeRef == "" {
+		t.Fatal("deployment sources name no ref to follow")
+	}
+	pinned := strings.Replace(data, "CARE_BE_REF="+pins.BeRef,
+		"CARE_BE_REF=a749b92794ac175db8839d3d75ca36402a196282", 1)
+	if _, err := Load([]byte(pinned)); err != nil {
+		t.Fatalf("pinned source was rejected: %v", err)
+	}
+}
+
+func TestLoadValidatesVersions(t *testing.T) {
+	data := string(deploymentPins(t))
+	pins, err := Load([]byte(data))
+	if err != nil {
+		t.Fatal(err)
 	}
 	for _, version := range []string{"0.0", "v0.1.0", "0.1.0-release", "01.1.0"} {
 		t.Run(version, func(t *testing.T) {

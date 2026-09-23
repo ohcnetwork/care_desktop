@@ -24,6 +24,7 @@ type Clinic struct {
 
 	Log     func(string)
 	Confirm func(title, message string) bool
+	Abandon func() bool
 }
 
 func (e *Clinic) logln(s string) {
@@ -145,5 +146,7 @@ func (e *Clinic) backupDir() string {
 func (e *Clinic) Label() string { return e.mdnsName() }
 
 func (e *Clinic) Builder() *compose.Builder {
-	return compose.NewBuilder(e.Runner(), e.InstallDir, e.Pins, e.Log)
+	b := compose.NewBuilder(e.Runner(), e.InstallDir, e.Pins, e.Log)
+	b.Stop = e.Abandon
+	return b
 }

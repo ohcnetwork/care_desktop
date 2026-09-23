@@ -169,7 +169,18 @@ These checks do not stage the kit or build a release.
 | Built-image names | `BACKUP_IMAGE`, `CADDY_WAF_IMAGE`, `BACKEND_IMAGE`, `FRONTEND_IMAGE`. |
 | CARE sources | `CARE_BE_REPO`, `CARE_FE_REPO`, `CARE_BE_REF`, `CARE_FE_REF`. |
 
-The version format is `X.Y.Z` or `X.Y.Z-dev`. A non-development version requires both CARE refs to be full 40-character hexadecimal commit IDs. A `-dev` version permits moving refs for intentional development.
+The version format is `X.Y.Z` or `X.Y.Z-dev`.
+
+`CARE_BE_REF` and `CARE_FE_REF` name the **branch** a release follows, not a
+commit. Releases currently track `develop`: a branch of verified commits, so
+bug fixes reach installed clinics without a desktop release. An installed
+clinic resolves that branch to a commit once, records it, and only moves
+forward when a background check has already built the newer commit. A full
+40-character commit ID is still accepted and opts that service out of
+following the branch. A tag is not accepted, and a ref that resolves to
+nothing fails the build rather than being passed along as if it were a commit.
+See [clinic lifecycle](clinic-lifecycle.md) for how a
+resolved commit is chosen, staged, and applied.
 
 At runtime, `GetState().version` comes from these embedded pins, not a separate
 linker-injected version variable.
@@ -181,16 +192,26 @@ Manual releases derive their identity from the selected commit:
 | `CARE_DESKTOP_VERSION` | Numeric `X.Y.Z`, without `-dev`. |
 | `app/wails.json` -> `info.productVersion` | Derived as `X.Y.Z` before building. |
 | Automatically created tag | `vX.Y.Z`, pointing to the workflow's source commit. |
-| CARE backend and frontend refs | Full commit hashes. |
+| CARE backend and frontend refs | A branch name to follow, or a full commit hash to pin. |
 
 The workflow rejects missing/duplicate manifest identity values and an existing
 release version before building installers. Maintainers do not need to edit
 Wails metadata or create tags. See the [release runbook](releases.md) for preparing,
 building, reviewing, publishing, and recovering a release.
 
+### Testing the updater
+
+A `-dev` build compares as older than the published release of the same `X.Y.Z`, so a development install can exercise the desktop updater against a real release rather than a fixture.
+
+Build tests use local Git fixtures rather than the real CARE repository URLs. Resolving a branch runs `git ls-remote`, and a unit test that reaches GitHub is slow, flaky, and on a machine with a credential helper installed will ask the developer for a password.
+
+For the same reason no test may elevate. Privileged work goes through [`sys/elevate`](../app/internal/sys/elevate/elevate.go), which runs `osascript` on macOS and `pkexec` elsewhere, so a test that calls it puts a real password dialog in front of whoever ran `go test` and fails on CI, where no one can answer it. Faking the command on `PATH` is not enough, because `elevate` picks the command by platform and the Windows path is the one those tests describe. `netfix` therefore exposes its elevation as a package variable that tests replace, and asserts on the script it was handed; the elevated wrapper around that script is covered separately in `elevate`'s own tests, where it is only a string.
+
 ### Reproducibility boundaries
 
-Full source commits prevent a branch update from silently changing the requested CARE code. Image fingerprints also include build inputs, as explained in [clinic lifecycle](clinic-lifecycle.md).
+A release no longer fixes which CARE commit a clinic runs; the tracked branch does, and installed clinics move forward with it. What a given clinic is running is recorded in its `channel.lock` and stamped into each image's `built-from` label, so an install can always be asked rather than assumed. Image fingerprints also include build inputs, as explained in [clinic lifecycle](clinic-lifecycle.md).
+
+This is a deliberate trade: branch tracking is what lets a verified fix reach clinics that nobody will manually update, and it is only safe because the branch admits verified commits only. Pinning a commit in `deployments/.env` remains available for a release that must not move.
 
 An image tag is not an immutable registry digest, however, and build-time package downloads can have their own availability and reproducibility constraints. "Pinned source" should not be expanded into a claim that every external dependency is content-addressed forever.
 
@@ -286,7 +307,7 @@ Tests sit beside their packages. They use Go's standard test runner and existing
 | Compose | Build freshness, image inputs, deployment routing, and storage bootstrap contracts. |
 | Native helpers | Process handling, atomic replacement, elevation quoting, hosts/trust parsing, mDNS, and Windows networking. |
 | Prerequisites/residue | Bounded provisioning paths and truthful resource inspection with isolated fixtures. |
-| Release | Manifest validation, immutable source refs, installer-version agreement, and the workflow's identity validator. |
+| Release | Manifest validation, source ref syntax, installer-version agreement, and the workflow's identity validator. |
 
 Some integration tests require external executables or have platform/user restrictions; a skipped case is not a successful production restore. Read the package test and the subsystem guide before running those fixtures.
 

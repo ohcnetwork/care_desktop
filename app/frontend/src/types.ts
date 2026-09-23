@@ -73,3 +73,25 @@ export type CarePlugin = {
 
 /** Which of the two .env files an editor is pointed at. */
 export type Section = "backend" | "frontend";
+
+export type ChannelStatus = {
+  backend_branch: string;
+  frontend_branch: string;
+  backend: string;
+  frontend: string;
+  pending_backend: string;
+  pending_frontend: string;
+};
+
+export type CareUpdate = { backend: string; frontend: string };
+
+export type CareCheck = { running: boolean; found: boolean };
+
+export type AppUpdate = {
+  current: string;
+  version: string;
+  available: boolean;
+  notes_url: string;
+  asset: string;
+  size: number;
+};

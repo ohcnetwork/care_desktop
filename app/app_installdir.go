@@ -83,6 +83,12 @@ func (a *App) engine() *clinic.Clinic {
 	}
 }
 
+func (a *App) engineForUpdate() *clinic.Clinic {
+	e := a.engine()
+	e.Abandon = func() bool { return !a.updatesAllowed() }
+	return e
+}
+
 func (a *App) confirmDialog(title, message string) bool {
 	sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
 		Type:          wruntime.QuestionDialog,

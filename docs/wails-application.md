@@ -213,6 +213,15 @@ executable separately. See [client trust and removal](native-integrations.md#nat
 | `CleanupFailedInstall()` | `void` | Sync. Only for an incomplete setup; safely removes failed-install resources while retaining required recovery material. |
 | `ClinicAction(action, adminPassword)` | `void` | Job. Allow-listed action dispatch; details below. |
 | `RunUninstall(removeImages, removeBackups, adminPassword)` | `void` | Job. Requires local admin authorization; persists removal state before destructive work. |
+| `CareUpdateStatus()` | `ChannelStatus` | Query. The tracked branch, running commits, and any staged commit, read from `channel.lock`. |
+| `CheckCareUpdate()` | `void` | Returns at once and checks in the background: resolves the branch heads and builds a newer commit into the `-next` images. A network failure is logged, not surfaced. A check already in flight is joined rather than refused, so pressing "Check now" during the automatic check is not an error. |
+| `DismissCareUpdate()` | `void` | Sync. Records the staged commits as declined so the banner stops. The staged build still applies at the next start. |
+| `CheckAppUpdate()` | `AppUpdate` | Query. Newest published GitHub release compared with the running version. Drafts and prereleases are excluded. |
+| `InstallAppUpdate()` | `void` | Job. Downloads this platform's installer, verifies it against the release `SHA256SUMS`, launches it, and quits. |
+
+`InstallAppUpdate` cannot call `wruntime.Quit` directly. `beforeClose` takes the job lock before it checks the closing flag, so quitting from inside a running job is refused as "an operation is still running". `quitAfterJob` waits for the job lock to be released and quits then.
+
+The download is capped and checksum-verified before it is launched: an installer arrives from the network and replaces the application, so an unbounded or unverified body is not something a clinic should be asked to run. Windows runs the downloaded installer, which needs this app closed. macOS opens the disk image and leaves the copy to the operator; in-place bundle replacement is not implemented.
 | `ScanResidue()` | `ResidueReport` | Query. Inspects owned files, Docker resources, saved password presence, and native traces. Inspection errors propagate. |
 | `PurgeResidue()` | `void` | Sync. Refuses a normal installed clinic; requires a native destructive confirmation when residue exists. Preserves backups. |
 
@@ -228,6 +237,7 @@ The password policy in [`password.go`](../app/password.go) is 8 through 20 Unico
 | `rebuild-backend` | `RebuildBackend()` | Stable clinic and administrator password required. |
 | `rebuild-frontend` | `RebuildFrontend()` | Stable clinic and administrator password required. |
 | `backup-now` | `BackupNow()` | Stable clinic required. |
+| `update` | `ApplyUpdate()` | Stable clinic required. No administrator password: the update was built from the configured branch, and a second prompt would only encourage postponing it. |
 
 Every action except `stop` then passes `ensureDockerReady()`. A stopped container
 engine would otherwise surface inside the engine as an unexplained subprocess
@@ -320,6 +330,8 @@ action only fires on a non-default answer must be a `QuestionDialog`: an
 | `care-done` | Number `0` or `1` | An asynchronous App job succeeded or failed. Not a detailed subprocess exit code. |
 | `setup-done` | `true` | Setup callback and persistence of `SetupDone` succeeded. |
 | `uninstalled` | `true` | Normal uninstall completed its cleanup and local state removal. |
+| `care-update` | `{backend, frontend}` | A newer CARE commit has finished building and is staged. Raises the panel banner. |
+| `care-check` | `{running, found}` | An update check started or finished. `running` covers the whole check, including the build a found commit starts, which is why the panel says a check can take minutes. A finished check with `found` false is what lets the Updates panel say "up to date" rather than stay blank. |
 
 There is no job identifier or structured progress event. The single-job model keeps completion unambiguous, and the desktop derives setup progress from log messages using [`run-steps.ts`](../app/frontend/src/lib/run-steps.ts). Changes to important setup messages can therefore affect displayed progress.
 
