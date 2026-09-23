@@ -103,6 +103,21 @@ func (r Runner) Capture(name string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
+func (r Runner) CaptureIn(timeout time.Duration, extraEnv []string, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := CommandContext(ctx, name, args...)
+	cmd.Dir, cmd.Env = r.Dir, r.Env
+	if len(extraEnv) > 0 {
+		cmd.Env = append(cmd.Environ(), extraEnv...)
+	}
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return "", fmt.Errorf("%s timed out after %s", name, timeout)
+	}
+	return strings.TrimSpace(string(out)), err
+}
+
 // Lines returns Capture's non-empty output lines, trimmed.
 func (r Runner) Lines(name string, args ...string) ([]string, error) {
 	out, err := r.Capture(name, args...)

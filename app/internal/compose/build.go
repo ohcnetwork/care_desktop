@@ -19,10 +19,76 @@ type Builder struct {
 	dir string // install dir: the build context for the backup and Caddy images
 	set *release.Pins
 	run proc.Runner
+
+	pending bool
+	refs    map[string]string
 }
 
 func NewBuilder(run proc.Runner, dir string, set *release.Pins, log func(string)) *Builder {
-	return &Builder{Log: log, dir: dir, set: set, run: run}
+	return &Builder{Log: log, dir: dir, set: set, run: run, refs: map[string]string{}}
+}
+
+func (b *Builder) Pending() *Builder {
+	next := NewBuilder(b.run, b.dir, b.set, b.Log)
+	next.pending = true
+	return next
+}
+
+func (b *Builder) suffixed(name string) string {
+	if b.pending {
+		return name + "-next"
+	}
+	return name
+}
+
+func (b *Builder) ref(service, repo, configured string) string {
+	key := service + "\x00" + repo + "\x00" + configured
+	if got, ok := b.refs[key]; ok {
+		return got
+	}
+	got := b.pickRef(service, repo, configured)
+	b.refs[key] = got
+	return got
+}
+
+func (b *Builder) pickRef(service, repo, configured string) string {
+	if release.IsCommitRef(configured) {
+		return configured
+	}
+	lock := ReadLock(b.dir).Get(service)
+	onBranch := lock.Ref == configured && lock.Current != ""
+	if !b.pending && onBranch {
+		return lock.Current
+	}
+	if sha := head(b.run, repo, configured); sha != "" {
+		return sha
+	}
+	if onBranch {
+		b.logln("Couldn't reach the CARE " + service + " repository - keeping the version already installed.")
+		return lock.Current
+	}
+	return configured
+}
+
+func (b *Builder) BackendRef() string {
+	return b.ref(Backend, b.set.BeRepo, b.set.BeRef)
+}
+
+func (b *Builder) FrontendRef() string {
+	return b.ref(Frontend, b.set.FeRepo, b.set.FeRef)
+}
+
+func (b *Builder) recordBuilt(service, configured, ref string) error {
+	return b.updateLock(service, func(c *Channel) {
+		if b.pending {
+			c.Next = ref
+			return
+		}
+		c.Ref, c.Current = configured, ref
+		if c.Next == ref {
+			c.Next, c.Declined = "", ""
+		}
+	})
 }
 
 func (b *Builder) logln(s string) {
@@ -94,20 +160,25 @@ func (b *Builder) BuildBackend() error {
 	if err != nil {
 		return err
 	}
-	src, err := b.source(b.set.BeRepo, b.set.BeRef, "backend")
+	ref := b.BackendRef()
+	src, err := b.source(b.set.BeRepo, ref, b.suffixed(Backend))
 	if err != nil {
 		return err
 	}
-	b.logln("Building the backend image (" + b.set.BackendImage + ")... (several minutes)")
+	tag := b.suffixed(b.set.BackendImage)
+	b.logln("Building the backend image (" + tag + ")... (several minutes)")
 	df := filepath.Join(src, "docker", "prod.Dockerfile")
-	args := []string{"build", "-f", df, "-t", b.set.BackendImage,
+	args := []string{"build", "-f", df, "-t", tag,
 		"--label", builtFromLabel + "=" + b.backendBuiltFrom(plugs)}
 	if plugs != "" {
 		b.logln("Building with plugins (ADDITIONAL_PLUGS set)")
 		args = append(args, "--build-arg", "ADDITIONAL_PLUGS="+plugs)
 	}
 	args = append(args, src)
-	return b.run.Run("docker", args...)
+	if err := b.run.Run("docker", args...); err != nil {
+		return err
+	}
+	return b.recordBuilt(Backend, b.set.BeRef, ref)
 }
 
 func (b *Builder) EnsureBackendImage() error {
@@ -115,11 +186,11 @@ func (b *Builder) EnsureBackendImage() error {
 	if err != nil {
 		return err
 	}
-	return b.ensure(b.set.BackendImage, b.backendBuiltFrom(plugs), "backend", b.BuildBackend)
+	return b.ensure(b.suffixed(b.set.BackendImage), b.backendBuiltFrom(plugs), Backend, b.BuildBackend)
 }
 
 func (b *Builder) backendBuiltFrom(plugs string) string {
-	out := b.sourceKey(b.set.BeRepo, b.set.BeRef)
+	out := b.sourceKey(b.set.BeRepo, b.BackendRef())
 	if plugs != "" {
 		out += "+plugs@" + shortHash([]byte(plugs))
 	}
@@ -208,20 +279,25 @@ func (b *Builder) BuildFrontend() error {
 	if err != nil {
 		return err
 	}
-	src, err := b.source(b.set.FeRepo, b.set.FeRef, "frontend")
+	ref := b.FrontendRef()
+	src, err := b.source(b.set.FeRepo, ref, b.suffixed(Frontend))
 	if err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(src, ".env.local"), env, 0o644); err != nil {
 		return err
 	}
-	b.logln("Building the frontend image (" + b.set.FrontendImage + ")... (a few minutes)")
-	return b.run.Run("docker", "build", "-t", b.set.FrontendImage,
-		"--label", builtFromLabel+"="+b.frontendBuiltFrom(env), src)
+	tag := b.suffixed(b.set.FrontendImage)
+	b.logln("Building the frontend image (" + tag + ")... (a few minutes)")
+	if err := b.run.Run("docker", "build", "-t", tag,
+		"--label", builtFromLabel+"="+b.frontendBuiltFrom(env), src); err != nil {
+		return err
+	}
+	return b.recordBuilt(Frontend, b.set.FeRef, ref)
 }
 
 func (b *Builder) frontendBuiltFrom(env []byte) string {
-	return b.sourceKey(b.set.FeRepo, b.set.FeRef) + "+env@" + shortHash(env)
+	return b.sourceKey(b.set.FeRepo, b.FrontendRef()) + "+env@" + shortHash(env)
 }
 
 func (b *Builder) EnsureFrontendImage() error {
@@ -229,7 +305,7 @@ func (b *Builder) EnsureFrontendImage() error {
 	if err != nil {
 		return err
 	}
-	return b.ensure(b.set.FrontendImage, b.frontendBuiltFrom(env), "frontend", b.BuildFrontend)
+	return b.ensure(b.suffixed(b.set.FrontendImage), b.frontendBuiltFrom(env), Frontend, b.BuildFrontend)
 }
 
 func shortHash(b []byte) string {

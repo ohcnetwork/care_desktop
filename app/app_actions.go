@@ -176,6 +176,10 @@ func (a *App) notifyActionFailed(label, detail string) {
 		title = "Backup didn't finish"
 	case "rebuild-backend", "rebuild-frontend":
 		title = "Rebuild didn't finish"
+	case "update":
+		title = "The CARE update didn't finish"
+	case "app-update":
+		title = "The CARE Desktop update didn't finish"
 	}
 	_, _ = wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
 		Type:    wruntime.ErrorDialog,
@@ -201,7 +205,7 @@ func (a *App) notifyInstalled(mdnsName string) {
 
 func (a *App) ClinicAction(action, adminPassword string) error {
 	switch action {
-	case "start", "stop", "restart", "rebuild-backend", "rebuild-frontend", "backup-now":
+	case "start", "stop", "restart", "rebuild-backend", "rebuild-frontend", "backup-now", "update":
 	default:
 		return errors.New("action not allowed: " + action)
 	}
@@ -264,6 +268,8 @@ func actionFunc(e *clinic.Clinic, action string) func() error {
 		return e.RebuildFrontend
 	case "backup-now":
 		return e.BackupNow
+	case "update":
+		return e.ApplyUpdate
 	}
 	return nil
 }

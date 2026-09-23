@@ -16,7 +16,7 @@ import { toast } from "@/components/ui/sonner";
 import { bridge, logToHost, onCareEvent } from "@/lib/bridge";
 import { errorText, firstLine } from "@/lib/format";
 import { RUN_STEPS, type RunStep } from "@/lib/run-steps";
-import type { Backup } from "@/types";
+import type { Backup, CareUpdate } from "@/types";
 
 export type Flow = "role" | "client" | "setup" | "installing" | "failed" | "panel";
 export type SetupStep = "checks" | "backup" | "admin" | "install";
@@ -55,6 +55,7 @@ const ACTION_LABELS: Record<string, string> = {
   "rebuild-frontend": "Rebuilding",
   "rebuild-backend": "Rebuilding",
   "backup-now": "Backing up",
+  update: "Updating CARE",
 };
 
 export const RESTORE_PENDING_NOTICE =
@@ -99,6 +100,9 @@ type CareStore = {
   systemDetail: string;
   /** The clinic is down and nobody asked for that - the panel says so. */
   trouble: boolean;
+  careUpdate: CareUpdate | null;
+  applyCareUpdate: () => Promise<void>;
+  dismissCareUpdate: () => Promise<void>;
   restorePending: boolean;
   version: string;
   backups: Backup[];
@@ -141,6 +145,7 @@ export function CareProvider({ children }: { children: ReactNode }) {
   const [backupsError, setBackupsError] = useState("");
   const [autostart, setAutostartState] = useState(false);
   const [trouble, setTrouble] = useState(false);
+  const [careUpdate, setCareUpdate] = useState<CareUpdate | null>(null);
   const [bootError, setBootError] = useState<Error | null>(null);
 
   // Refs shadow the state the event handlers and the poll timer read, so they
@@ -314,6 +319,20 @@ export function CareProvider({ children }: { children: ReactNode }) {
     },
     [log, setBusy],
   );
+
+  const applyCareUpdate = useCallback(async () => {
+    setCareUpdate(null);
+    await runAction("update");
+  }, [runAction]);
+
+  const dismissCareUpdate = useCallback(async () => {
+    setCareUpdate(null);
+    try {
+      await bridge.DismissCareUpdate();
+    } catch (e) {
+      log(`update: ${errorText(e)}`);
+    }
+  }, [log]);
 
   const syncAutostart = useCallback(async () => {
     try {
@@ -541,6 +560,9 @@ export function CareProvider({ children }: { children: ReactNode }) {
         });
         setStepDone("install", true);
       }),
+      onCareEvent("care-update", (update: CareUpdate) => {
+        setCareUpdate(update);
+      }),
       onCareEvent("uninstalled", () => {
         toast("Uninstalled");
         setBusy(false);
@@ -606,6 +628,9 @@ export function CareProvider({ children }: { children: ReactNode }) {
       system,
       systemDetail,
       trouble,
+      careUpdate,
+      applyCareUpdate,
+      dismissCareUpdate,
       restorePending,
       version,
       backups,
@@ -623,7 +648,8 @@ export function CareProvider({ children }: { children: ReactNode }) {
     [
       ready, flow, mdnsName, clientURL, selectRole, clearRole, openStep, stepsDone, setStepDone,
       run, startInstall, retryInstall, restartSetup, openPanel,
-      tab, busy, busyLabel, system, systemDetail, trouble, restorePending, version, backups, backupsError, autostart, refresh, reloadBackups,
+      tab, busy, busyLabel, system, systemDetail, trouble, careUpdate, applyCareUpdate, dismissCareUpdate,
+      restorePending, version, backups, backupsError, autostart, refresh, reloadBackups,
       runAction, setAutostart, restore, restoreFile, uninstall, log,
     ],
   );

@@ -14,6 +14,10 @@ func (e *Clinic) Start() error {
 	if err := health.EnsurePortFree(e.Runner(), e.host()); err != nil {
 		return err
 	}
+	updatedBackend, err := e.applyStagedUpdate()
+	if err != nil {
+		return err
+	}
 	if err := e.Builder().EnsureBackendImage(); err != nil {
 		return err
 	}
@@ -35,6 +39,11 @@ func (e *Clinic) Start() error {
 	e.logln("Starting CARE...")
 	if err := e.dc("up", "-d", "--wait", "--wait-timeout", "300", "db", "redis", "backend"); err != nil {
 		return fmt.Errorf("backend startup failed; workers and the scheduler remain stopped: %w", err)
+	}
+	if updatedBackend {
+		if err := e.backupBeforeUpdate(); err != nil {
+			return err
+		}
 	}
 	e.logln("Applying database migrations...")
 	if err := e.migrate(); err != nil {

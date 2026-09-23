@@ -29,13 +29,14 @@ protection.
 | --- | --- |
 | `CARE_DESKTOP_VERSION` | One `X.Y.Z` value. `-dev` builds are not accepted by the release workflow. |
 | `CARE_BE_REPO`, `CARE_FE_REPO` | The intended CARE source repositories. |
-| `CARE_BE_REF`, `CARE_FE_REF` | Full 40-character commit SHAs, not branch names or moving tags. |
+| `CARE_BE_REF`, `CARE_FE_REF` | The branch of verified CARE commits that installed clinics follow, normally `develop`. A full 40-character commit SHA pins that service instead. |
 | `POSTGRES_IMAGE`, `REDIS_IMAGE`, `MINIO_IMAGE`, `CADDY_IMAGE` | Deliberately chosen image versions; use immutable digests when available. |
 | `CORAZA_VERSION` | The WAF module version used to build the proxy. |
 | `BACKUP_IMAGE`, `CADDY_WAF_IMAGE`, `BACKEND_IMAGE`, `FRONTEND_IMAGE` | Local output image names. These are not upstream version selectors; normally leave them alone. |
 
-If a change starts from an FE/BE branch, resolve it to a commit while preparing
-the PR. The workflow does not resolve moving branches at install time.
+Changing these branches changes what every installed clinic follows from its
+next update check onward, not only what this release ships. Only point them at
+a branch whose commits are verified.
 
 Do not add passwords, signing credentials, or clinic-specific data to this file:
 the exact file is embedded in the app and attached to the release.
@@ -138,11 +139,24 @@ identity.
 
 ## Scope and current limitations
 
-The process does not deploy to clinics, automatically update running clinics,
-bundle Docker/prerequisite installers, or prebuild the upstream CARE container
-images. Initial clinic setup still needs the dependencies and source downloads
-described in the installation guides. Image tags and downstream dependency
-downloads are not guaranteed immutable merely because FE/BE commits are pinned.
+The process does not deploy to clinics, bundle Docker/prerequisite installers,
+or prebuild the upstream CARE container images. Initial clinic setup still
+needs the dependencies and source downloads described in the installation
+guides. Image tags and downstream dependency downloads are not guaranteed
+immutable.
+
+A published release does reach installed clinics on its own, by two separate
+routes, both described in
+[clinic lifecycle](clinic-lifecycle.md) and
+[configuration and settings](configuration-and-settings.md):
+
+- **CARE backend and frontend** follow the branch named in the manifest. An
+  installed clinic checks it in the background, builds the newer commit, and
+  applies it when the operator accepts or at the next start. This needs no
+  desktop release at all, which is the point: a verified fix merged to the
+  branch reaches clinics that nobody will manually update.
+- **CARE Desktop** is offered from this release page under Advanced ->
+  Updates, and is always operator-initiated.
 
 ## Windows signing (SignPath)
 

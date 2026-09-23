@@ -29,6 +29,7 @@ func (a *App) startup(ctx context.Context) {
 		a.log.Writef("docker: %s", prereq.DockerCheck(a.engine().Runner()).Message)
 		prereq.EnsureRancherSettings()
 	}()
+	go a.watchForCareUpdates()
 }
 
 const screenMargin = 80

@@ -110,6 +110,10 @@ remaining teardown files and the residue package.
 | [`stop.go`](../app/internal/clinic/stop.go) | Data-preserving stop and restart implemented as Stop followed by Start. |
 | [`rebuild.go`](../app/internal/clinic/rebuild.go) | Explicit backend and frontend rebuild-and-restart paths. |
 | [`compose/build.go`](../app/internal/compose/build.go) | Source checkout cache, image fingerprints, four image builds, local freshness checks, and post-rebuild dangling-image cleanup. |
+| [`compose/channel.go`](../app/internal/compose/channel.go) | Branch resolution through `git ls-remote` without credential prompts, and the `channel.lock` record. |
+| [`compose/update.go`](../app/internal/compose/update.go) | Staging a newer commit into the `-next` images, declining, and applying a staged build by retag. |
+| [`clinic/update.go`](../app/internal/clinic/update.go) | Channel status, the safety backup, live update application, and applying a staged update during startup. |
+| [`compose/channel_test.go`](../app/internal/compose/channel_test.go) | Lock round-tripping, tolerance of a corrupt lock, and the invariant that an image key follows the branch head rather than the branch name. |
 | [`compose/build_test.go`](../app/internal/compose/build_test.go) | Build-input invalidation, local Git fixtures, source-stamp failures, image inspection failures, consumed build inputs, and empty-context cleanup. |
 | [`compose/deployment_test.go`](../app/internal/compose/deployment_test.go) | Silo bootstrap arguments, configurable Caddy bucket routes, and Compose storage-environment wiring. |
 
@@ -397,10 +401,64 @@ The builder keeps source in `InstallDir/src/backend` and
 6. Write the stamp only after successful checkout and verification. A failed
    attempt triggers best-effort removal of the incomplete directory.
 
-A cached development branch is not fetched again merely because the branch
-moved upstream. Even explicit `BuildBackend` or `BuildFrontend` can reuse the
-matching source stamp. Release ref validation and immutable release
-requirements belong to [development and release](development-and-release.md).
+A cached checkout is not fetched again merely because the branch moved
+upstream. Even explicit `BuildBackend` or `BuildFrontend` can reuse the
+matching source stamp. Release ref syntax belongs to
+[development and release](development-and-release.md).
+
+### Branch resolution and the channel lock
+
+`CARE_BE_REF`/`CARE_FE_REF` name a branch. The branch name never reaches
+`sourceKey`: it is resolved to a commit first, because the source stamp and the
+image `built-from` label are both derived from that key, and a constant branch
+name would make every cached build look current forever.
+
+[`compose/channel.go`](../app/internal/compose/channel.go) resolves a branch
+with `git ls-remote`, with the credential helper disabled and a timeout, so an
+unattended clinic can never stop on a password prompt. The result is recorded
+in `InstallDir/channel.lock`, which is kept outside `.env` because `.env` is
+rewritten from the embedded copy on every launch.
+
+| Field | Meaning |
+| --- | --- |
+| `ref` | The branch `.env` named when `current` was chosen. A release that switches branches invalidates `current`. |
+| `current` | The commit this clinic runs. Also the offline fallback. |
+| `next` | A commit already built into the `-next` image, waiting to be applied. |
+| `declined` | A commit the operator answered "Later" to; it stops the prompt, not the update. |
+
+Which commit a builder resolves depends on what it is for:
+
+- Starting, setup and manual rebuilds use `current`. Startup never chases the
+  branch, so an upstream push cannot turn opening the app into a long build.
+- The background check ([`Builder.Pending()`](../app/internal/compose/build.go))
+  resolves the branch head, and writes to its own `src/<service>-next` checkout
+  and `-next` image tag so it cannot collide with a running clinic.
+- A `ref` that is already a commit is used verbatim, by both.
+
+### Staged updates
+
+[`compose/update.go`](../app/internal/compose/update.go) and
+[`clinic/update.go`](../app/internal/clinic/update.go) carry an update from
+"found" to "running":
+
+1. `PrepareUpdate` resolves both branch heads, skips anything equal to
+   `current` or `declined`, and builds what is left into the `-next` images
+   while the clinic keeps serving from the images it started with. No network
+   means no heads, no update, and no error.
+2. The app emits `care-update`; the panel shows a banner offering to install
+   now or later. Declining records `declined` and leaves the build staged.
+3. `ApplyPending` retags `-next` over the live tag. At startup this happens
+   before any container is up, so it costs a retag; applied live it is the only
+   part of an update that is not a rebuild.
+4. When the backend changed, a one-shot encrypted database dump named
+   `care-pre-update-*.dump.enc` is taken before migrations run. Migrations from
+   a new backend are not reversible; that dump is. An install that cannot write
+   encrypted backups leaves the update staged rather than migrating without
+   one.
+
+There is no image-level rollback. The old image is reproducible from the branch
+by commit; the database is not, which is why the safety backup is the part that
+is not optional.
 
 There is no `--no-cache` or `--pull` added to these builds. "Rebuild" means run
 the build path; Docker may reuse layers, and the source checkout may also be

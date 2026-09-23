@@ -1,4 +1,4 @@
-import { ArrowUpRight, TriangleAlert } from "lucide-react";
+import { ArrowDownToLine, ArrowUpRight, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Screen, ScreenBody } from "@/components/screen";
@@ -17,7 +17,8 @@ const TAB_META: Record<PanelTab, { title: string; subtitle: string }> = {
 };
 
 export function PanelScreen() {
-  const { tab, mdnsName, reloadBackups, trouble } = useCare();
+  const { tab, mdnsName, reloadBackups, trouble, careUpdate, applyCareUpdate, dismissCareUpdate, busy } =
+    useCare();
   const [diagnosing, setDiagnosing] = useState(false);
   const meta = TAB_META[tab];
 
@@ -41,6 +42,29 @@ export function PanelScreen() {
           </div>
           <Button variant="primary" onClick={() => setDiagnosing(true)}>
             See what&apos;s wrong
+          </Button>
+        </div>
+      ) : null}
+
+      {/* The update is already downloaded and built - this asks for a moment of
+          downtime, not for a wait. "Later" defers it to the next start, where
+          it costs nothing, so neither answer is the wrong one. */}
+      {careUpdate && !trouble ? (
+        <div className="flex items-center gap-3 border-b border-line bg-brand-bg px-[34px] py-3">
+          <ArrowDownToLine className="size-4 flex-none text-brand-ink" strokeWidth={2.2} />
+          <div className="min-w-0 flex-1 text-[13px] leading-[1.45] text-brand-ink">
+            A CARE update is ready to install.{" "}
+            <span className="text-muted-foreground">
+              {careUpdate.backend
+                ? "Takes about a minute; staff are signed out briefly."
+                : "Takes a few seconds."}
+            </span>
+          </div>
+          <Button disabled={busy} onClick={() => void dismissCareUpdate()}>
+            Later
+          </Button>
+          <Button variant="primary" disabled={busy} onClick={() => void applyCareUpdate()}>
+            Install now
           </Button>
         </div>
       ) : null}

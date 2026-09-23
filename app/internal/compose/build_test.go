@@ -36,8 +36,8 @@ func builderFixture(t *testing.T) *Builder {
 	}
 	return NewBuilder(proc.Runner{Dir: dir}, dir, &release.Pins{
 		AppVersion:    "0.1.0-dev",
-		BeRepo:        "https://github.com/ohcnetwork/care.git",
-		FeRepo:        "https://github.com/ohcnetwork/care_fe.git",
+		BeRepo:        filepath.Join(dir, "remotes", "care"),
+		FeRepo:        filepath.Join(dir, "remotes", "care_fe"),
 		BeRef:         "develop",
 		FeRef:         "develop",
 		BackendImage:  "care:clinic",

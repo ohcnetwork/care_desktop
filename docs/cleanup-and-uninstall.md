@@ -93,7 +93,7 @@ files, including their tests, have their own complete table in
 | [`clinic/purge.go`](../app/internal/clinic/purge.go) | Broader residue-oriented engine purge; exports `Project()` and `Images()` for consistent scanning. |
 | [`clinic/teardown.go`](../app/internal/clinic/teardown.go) | Inventory by Compose project label, verified removal of containers/volumes/networks, source-checkout detection, and directory-existence helper. |
 | [`clinic/teardown_test.go`](../app/internal/clinic/teardown_test.go) | No deletion after incomplete inspection, rejection of unowned install directories, and final-stage unused-key handling for failed setup versus normal uninstall. |
-| [`clinic/images.go`](../app/internal/clinic/images.go) | Current pinned-image inventory, non-forced tag removal, and explicitly shared Docker build-cache pruning. |
+| [`clinic/images.go`](../app/internal/clinic/images.go) | Current image inventory including any staged `-next` build, non-forced tag removal, and explicitly shared Docker build-cache pruning. |
 | [`clinic/leftovers.go`](../app/internal/clinic/leftovers.go) | End-of-engine logging that distinguishes removed resources from deliberately kept backups/images/cache. |
 | [`residue/residue.go`](../app/internal/residue/residue.go) | `Options`, `Trace`, `Report`, production `Scan`, private injectable `scan`, native `systemTraces`, earlier-install discovery, and image-presence classification. |
 | [`residue/residue_test.go`](../app/internal/residue/residue_test.go) | Fail-closed Docker/system inspection, nonblocking image caches and firewall rules, and the correct Docker working-directory template context. |
