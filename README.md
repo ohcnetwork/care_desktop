@@ -78,8 +78,7 @@ Free code signing provided by [SignPath.io](https://signpath.io), certificate by
 
 Windows releases are built by [GitHub Actions](.github/workflows/release.yml)
 from a commit of this repository and signed by SignPath only after it has
-verified that the file came from that build. macOS releases are signed and
-notarized with the Open Healthcare Network's Apple Developer ID.
+verified that the file came from that build.
 
 | Role | Members |
 |---|---|
