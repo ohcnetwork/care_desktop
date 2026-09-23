@@ -1071,9 +1071,14 @@ The profile carries a `version` field, pinned to `rancherProfileVersion = 18`,
 the schema version the format is documented against. Rancher Desktop migrates an
 older profile version forward, so this does not need to track every release.
 
-Before installing, `writeRancherProfile` writes a *defaults* deployment profile
-so the operator never meets the first-run wizard and the clinic's requirements
-are already answered:
+`writeRancherProfile` writes a *defaults* deployment profile so the operator
+never meets the first-run wizard and the clinic's requirements are already
+answered. Rancher Desktop treats a run as a first run only when it finds no
+profile at all, so a profile that sets anything suppresses the wizard; with one
+in place it also never offers, downloads, or starts Kubernetes. The profile is
+therefore written before installing, before every `startRancher`, and once when
+a server starts CARE Desktop, so it is in place even when the operator installed
+Rancher Desktop themselves rather than through CARE:
 
 | Setting | Why CARE needs it |
 | --- | --- |
@@ -1087,25 +1092,46 @@ are already answered:
 | Platform | Profile location |
 | --- | --- |
 | macOS | `~/Library/Preferences/io.rancherdesktop.profile.defaults.plist` |
-| Windows | `HKCU\Software\Policies\Rancher Desktop\Defaults` through `reg add` |
+| Windows | `HKCU\Software\Rancher Desktop\Profile\Defaults` through `reg add` |
 | Linux | Not written; Linux uses its native Docker Engine. |
+
+Rancher Desktop looks for a registry profile under `SOFTWARE\Policies\Rancher
+Desktop` and then `SOFTWARE\Rancher Desktop\Profile`, reading `HKLM` before
+`HKCU` within each, and takes the first that holds anything. CARE writes the
+last of those four. Windows reserves `HKCU\Software\Policies` for
+administrators, so writing there fails with "Access is denied" for an ordinary
+operator, no profile lands, and Rancher Desktop opens its welcome dialog and
+downloads Kubernetes. `rancherProfileWritten` reads the `version` value back
+first, so a start that already has the profile does not shell out to `reg` six
+more times.
 
 Defaults are applied on first run only. An operator's later preference changes
 are kept, and an administrator's managed profile in `/Library/Managed
 Preferences` or `HKLM` still takes precedence over this user profile. Because of
 that, an installation that had already run would ignore the profile, so
 `applyRancherProfileNow` additionally attempts `rdctl set` for the same values
-(`rancherSettings`). It runs after installing and again each time a server starts
-CARE Desktop, so existing installations pick up later additions. That attempt is
+(`rancherSettings`). It runs on every profile write - after installing, before
+each start, and once each time a server starts CARE Desktop - so existing
+installations pick up later additions. That attempt is
 best-effort: `rdctl` may be absent, or the values may be locked by an
 administrator. A profile write failure is logged as a warning and does not stop
 the installation. `rdctlPath` uses the copy inside the Rancher Desktop bundle,
 because a freshly installed `~/.rd/bin` is not yet on the PATH CARE inherits.
 
-`OpenDocker` starts Rancher Desktop with `rdctl start --no-modal-dialogs` and the
-same settings, which opens no window, skips the first-run wizard, and applies the
-settings to an instance that is already running. It falls back to launching the
-app if `rdctl` fails.
+`OpenDocker` starts Rancher Desktop with `rdctl start` and `rancherLaunchArgs`
+(`--no-modal-dialogs` plus `rancherSettings`), which opens no window, skips the
+first-run wizard, and applies the settings to an instance that is already
+running.
+
+A Rancher Desktop that has never run its Linux environment before regularly
+fails its first start with `Timed out after waiting for /run/wsl-init.pid` and
+succeeds when it is started again, so a failed `rdctl start` is followed by
+`rdctl shutdown`, a `rancherRestartPause` wait, and one more attempt. Only if
+that also fails does it launch the application directly, passing the same
+`rancherLaunchArgs` on the command line. Rancher Desktop parses those arguments
+itself whatever launched it, so the direct launch skips the wizard and keeps
+Kubernetes off just as `rdctl` does - and unlike the profile, command-line
+arguments also apply to an installation that already answered the wizard.
 
 **Rancher Desktop administrator setup (macOS)**
 

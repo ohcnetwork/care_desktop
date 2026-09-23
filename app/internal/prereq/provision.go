@@ -384,23 +384,39 @@ func (pr *Provisioner) OpenDocker() error {
 	return pr.waitForDocker(dockerReadyTimeout)
 }
 
+// rancherRestartPause gives Rancher Desktop's virtual machine time to go away
+// before the second attempt below.
+const rancherRestartPause = 5 * time.Second
+
 func (pr *Provisioner) startRancher() error {
+	if err := writeRancherProfile(); err != nil {
+		pr.logln("Warning: could not preconfigure Rancher Desktop: " + err.Error())
+	}
 	if runtime.GOOS == "darwin" {
 		if err := pr.ensureRancherRoot(); err != nil {
 			return err
 		}
 	}
 	if rdctl := rdctlPath(); rdctl != "" {
-		args := append([]string{"start", "--no-modal-dialogs"}, rancherSettings...)
+		args := append([]string{"start"}, rancherLaunchArgs()...)
 		err := pr.run.Run(rdctl, args...)
 		if err == nil {
 			return nil
 		}
+		// A first boot often loses the race to set up its Linux environment and
+		// comes up on a second try, which is what a shutdown and start amounts to.
+		pr.logln("Rancher Desktop didn't finish starting; shutting it down and trying once more...")
+		_ = pr.run.Run(rdctl, "shutdown")
+		time.Sleep(rancherRestartPause)
+		if err = pr.run.Run(rdctl, args...); err == nil {
+			return nil
+		}
 		pr.logln("rdctl could not start Rancher Desktop in the background; opening it instead: " + err.Error())
 	}
+	launch := rancherLaunchArgs()
 	switch runtime.GOOS {
 	case "darwin":
-		if err := pr.run.Run("open", "-a", rancherAppMac); err != nil {
+		if err := pr.run.Run("open", append([]string{"-a", rancherAppMac, "--args"}, launch...)...); err != nil {
 			return fmt.Errorf("could not start Rancher Desktop: %w", err)
 		}
 	case "windows":
@@ -408,19 +424,26 @@ func (pr *Provisioner) startRancher() error {
 		if exe == "" {
 			return fmt.Errorf("Rancher Desktop is not installed")
 		}
+		quoted := make([]string, 0, len(launch))
+		for _, a := range launch {
+			quoted = append(quoted, elevate.PSQuote(a))
+		}
 		if err := pr.run.Run("powershell", "-NoProfile", "-Command",
-			"Start-Process "+elevate.PSQuote(exe)); err != nil {
+			"Start-Process "+elevate.PSQuote(exe)+" -ArgumentList "+strings.Join(quoted, ",")); err != nil {
 			return fmt.Errorf("could not start Rancher Desktop: %w", err)
 		}
 	}
 	return nil
 }
 
+// EnsureRancherSettings puts the deployment profile in place before Rancher
+// Desktop's first run, so it skips the welcome dialog and never downloads
+// Kubernetes - whether CARE installed it or the operator did.
 func EnsureRancherSettings() {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
 		return
 	}
-	applyRancherProfileNow()
+	_ = writeRancherProfile()
 }
 
 func (pr *Provisioner) waitForDocker(limit time.Duration) error {
