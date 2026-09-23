@@ -1047,17 +1047,45 @@ removed on return. It then launches Rancher Desktop with
 
 **Windows Docker**
 
-It first tries `winget install -e --id SUSE.RancherDesktop` with package/source
-agreement acceptance. If that command fails, it logs the fallback, resolves the
-latest version the same way macOS does, and downloads
+WSL 2 comes first, because the Rancher Desktop MSI refuses to install without
+it. `ensureWSL` treats a non-zero `wsl --status` as absent — `wsl.exe` ships
+with Windows, so its presence on PATH proves nothing — and installs it with an
+elevated `wsl --install --no-distribution`. No distribution is requested
+because the clinic needs the WSL 2 platform, not a Linux userland of its own;
+Rancher Desktop registers its own distributions.
+
+That install usually only takes effect after a restart, so a `wsl --status`
+that still fails afterwards is reported as success with a restart instruction
+rather than an error, and provisioning stops there instead of continuing into
+an install that cannot yet work. The restart itself is already covered by
+[reboot](#reboot-detect-a-pending-windows-restart-not-its-exact-cause).
+
+Skipping this step is what made a clean machine unrecoverable: winget resolves
+`Microsoft.WSL` as a dependency, but that package is an MSIX and cannot elevate
+itself from a non-elevated winget, so the winget route failed with
+`0x80073d28`, and the MSI fallback then downloaded roughly a gigabyte before
+failing its WSL 2 launch condition with the generic exit code 1603. Both routes
+now run elevated, and the prerequisite is settled before anything is fetched.
+
+With WSL 2 in place it tries `winget install -e --id SUSE.RancherDesktop` with
+package/source agreement acceptance, elevated. If that fails it logs the
+fallback, resolves the latest version the same way macOS does, and downloads
 `.../releases/download/v<version>/Rancher.Desktop.Setup.<version>.msi`. There is
 no architecture-selection branch for that Windows download.
 
-The direct installer runs elevated as `msiexec /i <msi> /qn /norestart`; this
-helper waits and propagates the installer exit code. After either installation
-route, it launches Rancher Desktop and waits. `afterWindowsDockerInstall` does
-not itself edit group membership or inspect restart registry keys. It reports a
-start failure with advice that Windows may need a WSL 2 restart.
+The direct installer runs elevated as
+`msiexec /i <msi> /qn /norestart /l*v <log>`. A quiet install prints nothing, so
+without that log a refusal reaches the operator as a bare exit code;
+`msiFailureDetail` reads the log back and reports the installer's own
+explanation instead. It takes the first `Product: <name> -- <message>` line
+that is not a generic status such as `Installation failed.`, since the blocking
+condition is logged before the failure it causes, and strips NUL bytes so a
+UTF-16 log reads the same as an ANSI one. The log is removed afterwards.
+
+After either installation route, it launches Rancher Desktop and waits.
+`afterWindowsDockerInstall` does not itself edit group membership or inspect
+restart registry keys. It reports a start failure with advice that Windows may
+need a WSL 2 restart.
 
 Rancher Desktop executable lookup checks `%LOCALAPPDATA%\Programs`,
 `ProgramFiles`, `ProgramW6432`, and `C:\Program Files`, each with

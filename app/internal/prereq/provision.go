@@ -88,13 +88,12 @@ func (pr *Provisioner) dockerInstallPlan() ToolPlan {
 		p.Detail = "Downloads Rancher Desktop, the open source Docker engine, and installs it. " +
 			"You'll be asked for this Mac's password. Keep server connected to internet."
 	case "windows":
+		p.Detail = "Installs Rancher Desktop, the open source Docker engine"
 		if hasCommand("winget") {
-			p.Detail = "Installs Rancher Desktop, the open source Docker engine, using Windows' " +
-				"own installer (winget). Windows may need to turn on WSL 2 and restart before Docker can run."
-		} else {
-			p.Detail = "Installs Rancher Desktop, the open source Docker engine. " +
-				"Windows may need to turn on WSL 2 and restart before Docker can run."
+			p.Detail += ", using Windows' own installer (winget)"
 		}
+		p.Detail += ". Windows will ask for permission. If WSL 2 is off, CARE turns it on first, " +
+			"which needs a restart before Docker can run."
 	case "linux":
 		pm := linuxPackageManager()
 		if pm == "" {
@@ -155,7 +154,11 @@ func (pr *Provisioner) InstallDocker() (string, error) {
 	case "darwin":
 		err = pr.installDockerDarwin()
 	case "windows":
-		err = pr.installDockerWindows()
+		var stopped string
+		stopped, err = pr.installDockerWindows()
+		if err == nil && stopped != "" {
+			return stopped, nil
+		}
 	case "linux":
 		err = pr.installDockerLinux()
 	default:
@@ -225,34 +228,128 @@ func (pr *Provisioner) installDockerDarwin() error {
 	return pr.OpenDocker()
 }
 
-func (pr *Provisioner) installDockerWindows() error {
+func (pr *Provisioner) installDockerWindows() (string, error) {
 	if err := writeRancherProfile(); err != nil {
 		pr.logln("Warning: could not preconfigure Rancher Desktop: " + err.Error())
 	}
+	restart, err := pr.ensureWSL()
+	if err != nil || restart != "" {
+		return restart, err
+	}
 	if hasCommand("winget") {
 		pr.logln("Installing Rancher Desktop with winget...")
-		err := pr.run.Run("winget", "install", "-e", "--id", "SUSE.RancherDesktop",
+		err := pr.runElevated("winget", "install", "-e", "--id", "SUSE.RancherDesktop",
 			"--accept-package-agreements", "--accept-source-agreements")
 		if err == nil {
-			return pr.afterWindowsDockerInstall()
+			return "", pr.afterWindowsDockerInstall()
 		}
 		pr.logln("winget couldn't install it; falling back to the installer from github.com.")
 	}
 	version, err := latestRancherVersion()
 	if err != nil {
-		return err
+		return "", err
 	}
 	name := "Rancher.Desktop.Setup." + version + ".msi"
 	msi, err := pr.download(rancherDownload+version+"/"+name, name)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = os.Remove(msi) }()
 	pr.logln("Running the Rancher Desktop installer. Windows will ask for permission...")
-	if err := pr.runElevated("msiexec", "/i", msi, "/qn", "/norestart"); err != nil {
+	if err := pr.runMSI(msi); err != nil {
+		return "", err
+	}
+	return "", pr.afterWindowsDockerInstall()
+}
+
+func (pr *Provisioner) runMSI(msi string) error {
+	log, err := os.CreateTemp("", "care-rd-install-*.log")
+	if err != nil {
 		return fmt.Errorf("could not install Rancher Desktop: %w", err)
 	}
-	return pr.afterWindowsDockerInstall()
+	path := log.Name()
+	_ = log.Close()
+	defer func() { _ = os.Remove(path) }()
+
+	if err := pr.runElevated("msiexec", "/i", msi, "/qn", "/norestart", "/l*v", path); err != nil {
+		if detail := msiFailureDetail(path); detail != "" {
+			return fmt.Errorf("could not install Rancher Desktop: %s (%w)", detail, err)
+		}
+		return fmt.Errorf("could not install Rancher Desktop: %w", err)
+	}
+	return nil
+}
+
+const msiLogLimit = 8 << 20
+
+var msiStatusLines = []string{
+	"Installation failed.",
+	"Installation completed successfully.",
+	"Installation operation failed.",
+	"Installation success or error status",
+}
+
+func msiFailureDetail(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	if len(data) > msiLogLimit {
+		data = data[:msiLogLimit]
+	}
+	text := strings.ReplaceAll(string(data), "\x00", "")
+	for _, line := range strings.Split(text, "\n") {
+		_, rest, ok := strings.Cut(strings.TrimSpace(line), "Product: ")
+		if !ok {
+			continue
+		}
+		_, message, ok := strings.Cut(rest, " -- ")
+		if !ok {
+			continue
+		}
+		message = strings.TrimSpace(message)
+		if message == "" || isMSIStatusLine(message) {
+			continue
+		}
+		return message
+	}
+	return ""
+}
+
+func isMSIStatusLine(message string) bool {
+	for _, status := range msiStatusLines {
+		if strings.HasPrefix(message, status) {
+			return true
+		}
+	}
+	return false
+}
+
+const wslInstallPage = "https://aka.ms/wslinstall"
+
+func wslReady() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	return proc.Command("wsl", "--status").Run() == nil
+}
+
+func (pr *Provisioner) ensureWSL() (string, error) {
+	if wslReady() {
+		return "", nil
+	}
+	pr.logln("Turning on Windows Subsystem for Linux, which Rancher Desktop needs...")
+	if err := pr.runElevated("wsl", "--install", "--no-distribution"); err != nil {
+		return "", fmt.Errorf("could not turn on Windows Subsystem for Linux, which Rancher Desktop "+
+			"needs before it will install; turn it on from %s and try again: %w", wslInstallPage, err)
+	}
+	if wslReady() {
+		pr.logln("Windows Subsystem for Linux is on.")
+		return "", nil
+	}
+	pr.logln("Windows Subsystem for Linux is installed but needs a restart.")
+	return "Windows Subsystem for Linux has been turned on.\n\nWindows has to restart before " +
+		"Docker can be installed. Restart this computer, then choose Check again.", nil
 }
 
 func (pr *Provisioner) afterWindowsDockerInstall() error {

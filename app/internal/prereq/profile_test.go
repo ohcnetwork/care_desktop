@@ -1,6 +1,7 @@
 package prereq
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -25,7 +26,31 @@ func TestRancherLaunchArgsSuppressDialogsAndKubernetes(t *testing.T) {
 	if !strings.Contains(strings.Join(args, " "), "--kubernetes.enabled=false") {
 		t.Fatalf("launch arguments must keep Kubernetes off: %v", args)
 	}
-	if len(rancherLaunchArgs()) != len(rancherSettings)+1 {
-		t.Fatal("rancherLaunchArgs grew the shared rancherSettings slice")
+	if len(rancherLaunchArgs()) != len(rancherSettings())+1 {
+		t.Fatal("rancherLaunchArgs must pass every setting plus --no-modal-dialogs")
+	}
+}
+
+// rdctl rejects --application.admin-access on Windows, and Rancher Desktop
+// refuses to start when it is handed one. It is a Unix privileged-helper
+// setting, so it must never reach the Windows command line or profile.
+func TestAdminAccessIsUnixOnly(t *testing.T) {
+	joined := strings.Join(rancherLaunchArgs(), " ")
+	if runtime.GOOS == "windows" {
+		if strings.Contains(joined, "admin-access") {
+			t.Fatalf("Windows cannot accept admin-access: %s", joined)
+		}
+		return
+	}
+	if !strings.Contains(joined, "--application.admin-access=true") {
+		t.Fatalf("admin access is still needed away from Windows: %s", joined)
+	}
+}
+
+func TestRancherSettingsAreNotSharedBetweenCalls(t *testing.T) {
+	first := rancherSettings()
+	first[0] = "--mutated"
+	if rancherSettings()[0] == "--mutated" {
+		t.Fatal("callers can corrupt the settings used by every later launch")
 	}
 }
