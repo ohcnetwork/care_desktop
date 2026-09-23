@@ -336,9 +336,33 @@ Current batching preserves failures:
   using the child's `ExitCode`.
 
 This is not rollback. If hosts modification succeeds and trust installation
-fails, the hosts change remains. Moreover, some specialized removal and generated
-installer wrappers elsewhere still use their own PowerShell launch form. Do not
-extend the `Steps` exit-code guarantee to every `Start-Process` in the repository.
+fails, the hosts change remains. Moreover, generated installer wrappers elsewhere
+still use their own PowerShell launch form. Do not extend the `Steps` exit-code
+guarantee to every `Start-Process` in the repository.
+
+### One approval per operation, not per item
+
+Each elevation is a separate consent prompt, and an operator who approves the
+first and misses the second leaves the second item installed. Because the
+post-operation scan then still reports residue, a removal that asked three times
+and was approved once is indistinguishable from one that failed outright.
+
+Teardown therefore plans before it elevates. `trust.RemoveStepWindows`,
+`hosts.RemoveStepWindows`, and `netfix.UndoStepWindows` each inspect current
+state and return an `elevate.Step` plus a `need` flag **without** elevating.
+`revertSystemChangesWindows` collects the steps that are needed, elevates once,
+and only then re-inspects each item to decide what is still present. This
+mirrors `setUpThisComputer`'s one-prompt install path in the opposite direction.
+
+The standalone `trust.Untrust`, `hosts.Remove`, and `netfix.Undo` entry points
+keep elevating on their own for callers that remove a single item, and remain
+the only path on macOS and Linux.
+
+The elevated Windows child is launched with `-WindowStyle Hidden`, passed both
+to `Start-Process` and to the child `powershell` itself. That suppresses the
+console window the child would otherwise flash; it does not hide, suppress, or
+pre-answer the UAC consent prompt, which is drawn on the secure desktop and is
+outside application control.
 
 ### Finishing setup on the server computer
 
@@ -626,8 +650,11 @@ cryptographic proof; avoid reusing it for unrelated certificates.
   Keychain-command failures are inspection errors, not assumed empty stores.
 - **Windows:** inspect the machine `Root` store using `certutil`, look for the
   Common Name or current fingerprint, then request elevated deletion by the
-  available fingerprint and by Common Name. The specialized removal wrapper
-  is not the `elevate.Steps` wrapper; final store inspection is important.
+  available fingerprint and by Common Name. Deletion by Common Name is what
+  makes removal work when the captured PEM is gone and the fingerprint is
+  therefore empty. Removal now goes through `elevate.Steps`, alone from
+  `Untrust` or batched with the other teardown steps via
+  `RemoveStepWindows`; final store inspection is still important.
 - **Linux:** inspect both known anchor paths, including symlink presence, and
   scan the configured generated bundles for the root Common Name. Remove the
   known anchors and run whichever of `update-ca-certificates` and
@@ -914,6 +941,12 @@ including disabled or otherwise invalid rules. Any positive count is residue.
 Command failure, malformed/negative count, or failed inspection is an error;
 none becomes a false clean result. `InspectRules` returns `(bool, error)`, and
 `RulesPresent` conservatively returns true on inspection errors.
+
+`Undo` elevates unconditionally and verifies afterwards; its callers decide
+whether rules are present first. `UndoStepWindows` is the planning variant for
+batched teardown: it inspects first and returns the step only when rules exist,
+so a full teardown can request one approval for every change. See
+[one approval per operation](#one-approval-per-operation-not-per-item).
 
 ## Docker and Git prerequisites
 

@@ -264,23 +264,35 @@ func appendUnique(list []string, h string) []string {
 	return append(list, h)
 }
 
-func removeTrustedRootsWindows(fp string) (bool, error) {
+func RemoveStepWindows(rootPEM string) (step elevate.Step, need bool, err error) {
+	return removeStepWindows(SHA1Hex(rootPEM))
+}
+
+func removeStepWindows(fp string) (elevate.Step, bool, error) {
 	present, err := windowsRootPresent(fp)
 	if err != nil {
-		return false, err
+		return elevate.Step{}, false, err
 	}
 	if !present {
-		return false, nil
+		return elevate.Step{}, false, nil
 	}
 	cmds := []string{}
 	if fp != "" {
 		cmds = append(cmds, "certutil -delstore Root "+elevate.PSQuote(fp))
 	}
 	cmds = append(cmds, "certutil -delstore Root "+elevate.PSQuote(CommonName))
-	inner := strings.Join(cmds, "; ")
-	ps := "Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-Command'," +
-		elevate.PSQuote(inner)
-	if err := proc.Command("powershell", "-NoProfile", "-Command", ps).Run(); err != nil {
+	return elevate.Step{
+		What: "remove CARE's security certificate from this computer",
+		PS:   strings.Join(cmds, "; "),
+	}, true, nil
+}
+
+func removeTrustedRootsWindows(fp string) (bool, error) {
+	step, present, err := removeStepWindows(fp)
+	if err != nil || !present {
+		return false, err
+	}
+	if err := elevate.Steps([]elevate.Step{step}); err != nil {
 		return false, err
 	}
 	return true, nil

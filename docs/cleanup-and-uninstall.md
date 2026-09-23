@@ -370,6 +370,15 @@ or undo failures are also collected. A canceled privilege request is not
 automatically reported as successful cleanup. These native APIs and their
 verification limits are documented in [native integrations](native-integrations.md).
 
+That three-call sequence is the macOS and Linux path. On Windows each of those
+helpers would raise its own administrator prompt, and approving one while
+missing another silently leaves the unapproved item behind — after which the
+post-purge scan reports the computer as still dirty. `revertSystemChangesWindows`
+instead asks each helper for its step without elevating, elevates the needed
+steps once, and re-inspects certificate trust, the hosts entry, and firewall
+rules individually to build the same failure details. One declined prompt
+therefore fails all of them together rather than a silent subset.
+
 The Caddy-root read is best-effort and can return an empty string. Native
 cleanup still needs to recognize old CARE roots, which is why a stable CA
 Common Name matters when the original volume or certificate is already gone.
@@ -560,8 +569,12 @@ The public [`PurgeResidue`](../app/app_residue.go) flow:
 3. If the report is already `Clean`, return without purging. Images and firewall
    rules alone are nonblocking: **this UI path does not remove cached images or
    undo network repair when no blocking residue exists**.
-4. Require a live desktop context and explicit destructive confirmation.
-   Canceling is a normal no-op.
+4. Require a live desktop context and explicit destructive confirmation through
+   `askToProceed`. Canceling is a normal no-op, so this step must distinguish a
+   real refusal from an answer it merely failed to recognize: matching the
+   operator's approval against this path's own `Remove everything` label alone
+   turns every Windows confirmation into that silent no-op. See
+   [native dialog answers](wails-application.md#native-dialog-answers-are-not-the-button-labels).
 5. Discover the earlier install directory. Check that the retained backup
    location is safe relative to the log folder that will be deleted.
 6. Preserve the recovery key and persist `Removing`.

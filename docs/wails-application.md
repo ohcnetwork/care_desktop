@@ -17,7 +17,17 @@ The desktop UI is not served from the CARE frontend container. It must remain us
 
 `main()` opens the diagnostic log, installs its fatal-error callback, constructs `App`, records version/pin information, and calls `wails.Run`. Only the `App` instance is bound. Exported receiver methods become desktop-callable methods; helper functions and unexported methods do not.
 
-The window title is `CARE Desktop`, with an initial size of 1180 by 900 and a minimum of 720 by 560. On macOS, `HideWindowOnClose` is enabled. The single-instance identifier is `ohc.care-desktop`; a second launch shows and unminimizes the existing window.
+The window title is `CARE Desktop`, with an initial size of 1100 by 700 and a minimum of 720 by 560. On macOS, `HideWindowOnClose` is enabled. The single-instance identifier is `ohc.care-desktop`; a second launch shows and unminimizes the existing window.
+
+### The initial size has to fit the smallest supported screen
+
+Wails centres the window on the work area, positioning it at the work area's midpoint minus half the window height. A window taller than the work area therefore gets a **negative** top coordinate, and the title bar — with the close and maximise buttons — is pushed above the top of the screen where it cannot be reached. Growing the default size is not a neutral change: it fails this way on any screen shorter than the value chosen, and a clinic computer is as likely to be a small laptop as a desktop.
+
+The initial 700 clears the work area of a 1366×768 laptop, the smallest common panel. `fitWindowToScreen` in [app_lifecycle.go](../app/app_lifecycle.go) then covers anything smaller, shrinking to the current screen less `screenMargin` and re-centring, with the configured minimum as the floor.
+
+Two constraints shape that helper. `Screen.Size` is the whole monitor in logical pixels, which is the unit `WindowSetSize` takes, but it does **not** exclude the taskbar; `screenMargin` is the allowance for that and for window chrome, not decoration. And `OnStartup` runs on its own goroutine while the window is being shown, so the helper cannot be the only thing keeping the window on screen — resizing there races the first paint. It narrows a window that already fits; it does not rescue a default that does not.
+
+It also guards its context before calling the runtime. `wruntime` resolves the frontend from a `frontend` value carried by the lifecycle context, and when that value is absent it reports the problem with `log.Fatalf` — which exits the process rather than returning an error. Any test or future caller that reaches a runtime call with a plain `context.Background()` therefore terminates the binary mid-run instead of failing a case. Checking for the value first is what keeps that path inert outside a real window.
 
 Startup failures are written to the log and stderr. `fatal()` attempts a native error dialog on macOS or Windows, then exits with status 1.
 
@@ -63,15 +73,22 @@ The backend starts name advertising, but the desktop state store makes the norma
 
 ### Closing the application
 
-`beforeClose()` first attempts the exclusive operation lock. If work is active, closing is prevented. Otherwise it asks about a running clinic:
+`beforeClose()` first attempts the exclusive operation lock. If work is active, closing is prevented. Otherwise it asks about a running clinic.
 
-| Choice or condition | Result |
-| --- | --- |
-| `Keep running` button | Prevent closing; the desktop remains open. |
-| `Stop CARE and quit` | Attempt a bounded Compose stop, then allow closing if it succeeds. |
-| No clinic detected, dialog error, or prompt timeout | Allow closing without claiming that containers were stopped. |
+There are three outcomes but only two buttons, because a platform message box cannot be relied on to offer more: Windows renders a question as a fixed two-button box regardless of what is requested (see [native dialog answers](#native-dialog-answers-are-not-the-button-labels)). `askBeforeQuit` therefore asks up to two plain yes/no questions instead of labelling one dialog with three choices:
 
-The prompt timeout is 10 seconds; the explicit stop timeout is 90 seconds. The `closing` flag is set under the operation lock before an allowed exit. New protected jobs and reads reject it.
+| Answer or condition | `quitChoice` | Result |
+| --- | --- | --- |
+| "Quit CARE Desktop?" answered no | `quitStayOpen` | Prevent closing; the desktop remains open. |
+| Quit yes, "Shut the clinic down as well?" yes | `quitStopClinic` | Attempt a bounded Compose stop, then allow closing if it succeeds. |
+| Quit yes, shut down no | `quitLeaveClinicRunning` | Allow closing; containers keep serving. |
+| No clinic detected, dialog error, or prompt timeout | `quitLeaveClinicRunning` | Allow closing without claiming that containers were stopped. |
+
+Both questions default to the safe answer, so a stray Return neither quits a serving clinic nor shuts one down. `quitLeaveClinicRunning` is deliberately the zero value: an answer that never arrives should let the window close, matching the timeout, rather than wedging it open.
+
+The prompt timeout is 30 seconds and covers both questions together; the explicit stop timeout is 90 seconds. The `closing` flag is set under the operation lock before an allowed exit. New protected jobs and reads reject it.
+
+Shutting the clinic down is also available without quitting, from the panel's Stop control. The second question is a convenience on the way out, not the only route.
 
 These semantics are separate from macOS window hiding: hiding a window is not necessarily process shutdown.
 
@@ -114,7 +131,7 @@ sequenceDiagram
 
 The final event is emitted by a deferred finalizer, before the outer deferred unlock. It is a completion notification, not a reservation for an immediately chained mutation. Callers must still handle a rejected subsequent request.
 
-For setup, `markSetup=true` means the runner persists `SetupDone=true` only after the setup callback succeeds. It then emits `setup-done` and shows the installed-clinic dialog. If persisting the successful state fails, the job is still reported as failed.
+For setup, `markSetup=true` means the runner persists `SetupDone=true` only after the setup callback succeeds. It then emits `setup-done` and shows the installed-clinic dialog, which asks whether to open the clinic now and opens it in the browser on yes. If persisting the successful state fails, the job is still reported as failed.
 
 A job can be waiting for a native confirmation or result dialog while holding the lock. An idle-looking terminal does not prove that the job has finished; both the work and its synchronous dialog handling must return before the lock is released.
 
@@ -258,6 +275,42 @@ File selection is not restore authorization. Full validation and data replacemen
 | `WasAutostartLaunched()` | `boolean` | Whether process arguments contain `--autostart`. |
 | `AutostartEnabled()` | `boolean` | Reads the platform's login-startup state. |
 | `SetAutostart(on)` | `void` | Sync. Changes the platform login-startup entry. |
+
+### Native dialog answers are not the button labels
+
+`MessageDialogOptions.Buttons` is a request, not a contract. Windows ignores it
+entirely and renders a fixed native message box per dialog type, so the answer
+is drawn from a closed set rather than from the labels that were asked for:
+
+| Dialog type | Windows box | Answers it can return |
+| --- | --- | --- |
+| `QuestionDialog` | `MB_YESNO` | `Yes`, `No` |
+| `InfoDialog`, `ErrorDialog` | `MB_OK` | `Ok` |
+| `WarningDialog` | `MB_OKCANCEL` | `Ok`, `Cancel` |
+
+macOS and Linux do render the requested labels and return the one that was
+clicked. Code that compares the answer against its own label therefore works
+on those platforms and silently fails on Windows: the comparison never matches,
+and whatever the dialog guarded is skipped with no error and no log line. Treat
+a custom label and the platform answer as two spellings of the same choice.
+
+`DefaultButton` is subject to the same rule. The Windows path only moves the
+default off the first button when that field is literally `No`; any other
+spelling, including `Cancel`, leaves the first button selected. A destructive
+action must use `No` if it is not to arrive pre-armed.
+
+`affirmative()` and `askToProceed()` in [app_ui.go](../app/app_ui.go) hold this
+for confirmations, and `confirmDialog()` routes through `affirmative()` so its
+labels can change without silently inverting its meaning. Every prompt that
+reads an answer goes through one of them: `PurgeResidue` (see
+[cleanup and uninstall](cleanup-and-uninstall.md)), `askBeforeQuit`, and
+`notifyInstalled`.
+
+Two consequences are worth keeping in mind when adding a prompt. A choice
+between more than two outcomes cannot be a single message box, because the
+Windows box has two buttons; ask a second question instead. And an offer whose
+action only fires on a non-default answer must be a `QuestionDialog`: an
+`InfoDialog` collapses to a lone `Ok` on Windows, which is not a choice at all.
 
 ## Events and result shapes
 

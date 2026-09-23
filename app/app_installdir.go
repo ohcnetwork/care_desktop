@@ -92,5 +92,5 @@ func (a *App) confirmDialog(title, message string) bool {
 		DefaultButton: "Yes",
 		CancelButton:  "No",
 	})
-	return err == nil && sel == "Yes"
+	return err == nil && affirmative(sel, "Yes")
 }
