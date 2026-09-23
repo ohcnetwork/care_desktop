@@ -69,16 +69,14 @@ func (a *App) PurgeResidue() error {
 		for _, t := range before.Traces {
 			items += "\n  - " + t.Label + ": " + t.Detail
 		}
-		sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
-			Type: wruntime.QuestionDialog, Title: "Remove the earlier CARE Desktop?",
-			Message: "This computer still has these from an earlier CARE Desktop:\n" + items +
-				"\n\nClinic data, images, settings, installed files and old logs will be deleted. This cannot be undone." + kept,
-			Buttons: []string{"Remove everything", "Cancel"}, DefaultButton: "Cancel", CancelButton: "Cancel",
-		})
+		proceed, err := a.askToProceed("Remove the earlier CARE Desktop?",
+			"This computer still has these from an earlier CARE Desktop:\n"+items+
+				"\n\nClinic data, images, settings, installed files and old logs will be deleted. This cannot be undone."+kept,
+			"Remove everything")
 		if err != nil {
 			return err
 		}
-		if sel != "Remove everything" {
+		if !proceed {
 			return nil
 		}
 		e := a.engine()

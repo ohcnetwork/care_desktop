@@ -91,20 +91,31 @@ func addUnprivileged(host string) error {
 	return proc.Command("sh", "-c", addSh(host)).Run()
 }
 
+func RemoveStepWindows(host string) (step elevate.Step, need bool) {
+	data, err := os.ReadFile(path())
+	if os.IsNotExist(err) || err == nil && !strings.Contains(string(data), marker) {
+		return elevate.Step{}, false
+	}
+	inner := `$p="$env:WINDIR\System32\drivers\etc\hosts"; (Get-Content -LiteralPath $p) | ` +
+		`Where-Object { $_ -notmatch '` + marker + `' } | Set-Content -LiteralPath $p`
+	return elevate.Step{What: "remove " + host + " from this computer's hosts file", PS: inner}, true
+}
+
 func Remove(log func(string), confirm func(string, string) bool, host string) string {
+	if runtime.GOOS == "windows" {
+		step, need := RemoveStepWindows(host)
+		if !need {
+			return ""
+		}
+		logln(log, "Removing the "+host+" hosts entry...")
+		_ = elevate.Steps([]elevate.Step{step})
+		return Leftover(host)
+	}
 	data, err := os.ReadFile(path())
 	if os.IsNotExist(err) || err == nil && !strings.Contains(string(data), marker) {
 		return ""
 	}
 	logln(log, "Removing the "+host+" hosts entry...")
-	if runtime.GOOS == "windows" {
-		inner := `$p="$env:WINDIR\System32\drivers\etc\hosts"; (Get-Content -LiteralPath $p) | ` +
-			`Where-Object { $_ -notmatch '` + marker + `' } | Set-Content -LiteralPath $p`
-		ps := "Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-Command'," +
-			elevate.PSQuote(inner)
-		_ = proc.Command("powershell", "-NoProfile", "-Command", ps).Run()
-		return Leftover(host)
-	}
 	return removeUnix(confirm, host, path(), elevate.Run)
 }
 

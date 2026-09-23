@@ -49,8 +49,8 @@ func Steps(steps []Step) error {
 }
 
 func elevatedPS(inner string) string {
-	return "$ErrorActionPreference = 'Stop'; $p = Start-Process powershell -Verb RunAs -Wait -PassThru " +
-		"-ArgumentList '-NoProfile','-Command'," + PSQuote(inner) + "; exit $p.ExitCode"
+	return "$ErrorActionPreference = 'Stop'; $p = Start-Process powershell -Verb RunAs -WindowStyle Hidden -Wait -PassThru " +
+		"-ArgumentList '-NoProfile','-WindowStyle','Hidden','-Command'," + PSQuote(inner) + "; exit $p.ExitCode"
 }
 
 func stepScript(steps []Step, windows bool) string {

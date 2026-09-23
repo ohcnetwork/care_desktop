@@ -17,6 +17,7 @@ import (
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.fitWindowToScreen()
 	a.refreshInstallDir()
 	a.advStop = make(chan struct{})
 	a.startAdvertise()
@@ -27,6 +28,46 @@ func (a *App) startup(ctx context.Context) {
 	go func() {
 		a.log.Writef("docker: %s", prereq.DockerCheck(a.engine().Runner()).Message)
 	}()
+}
+
+const screenMargin = 80
+
+func (a *App) fitWindowToScreen() {
+	if a.ctx == nil || a.ctx.Value("frontend") == nil {
+		return
+	}
+	screens, err := wruntime.ScreenGetAll(a.ctx)
+	if err != nil {
+		return
+	}
+	screen, ok := currentScreen(screens)
+	if !ok {
+		return
+	}
+	width := max(min(windowWidth, screen.Size.Width-screenMargin), windowMinWidth)
+	height := max(min(windowHeight, screen.Size.Height-screenMargin), windowMinHeight)
+	if width == windowWidth && height == windowHeight {
+		return
+	}
+	wruntime.WindowSetSize(a.ctx, width, height)
+	wruntime.WindowCenter(a.ctx)
+}
+
+func currentScreen(screens []wruntime.Screen) (wruntime.Screen, bool) {
+	var fallback wruntime.Screen
+	found := false
+	for _, s := range screens {
+		if s.Size.Width <= 0 || s.Size.Height <= 0 {
+			continue
+		}
+		if s.IsCurrent {
+			return s, true
+		}
+		if !found || s.IsPrimary {
+			fallback, found = s, true
+		}
+	}
+	return fallback, found
 }
 
 func (a *App) refreshInstallDir() {
@@ -74,12 +115,17 @@ func (a *App) shutdown(context.Context) {
 const (
 	singleInstanceID = "ohc.care-desktop"
 
-	quitPromptTimeout = 10 * time.Second
+	quitPromptTimeout = 30 * time.Second
 
 	stopDeadline = 90 * time.Second
+)
 
-	keepRunning = "Keep running"
-	stopAndQuit = "Stop CARE and quit"
+type quitChoice int
+
+const (
+	quitLeaveClinicRunning quitChoice = iota
+	quitStayOpen
+	quitStopClinic
 )
 
 func (a *App) onSecondInstance(options.SecondInstanceData) {
@@ -103,15 +149,15 @@ func (a *App) beforeClose(context.Context) (prevent bool) {
 		a.closing = true
 		return false
 	}
-	answer := make(chan string, 1)
+	answer := make(chan quitChoice, 1)
 	go func() { answer <- a.askBeforeQuit() }()
 
 	select {
 	case sel := <-answer:
 		switch sel {
-		case keepRunning:
+		case quitStayOpen:
 			return true
-		case stopAndQuit:
+		case quitStopClinic:
 			if err := a.stopForQuit(); err != nil {
 				a.logln("error: " + err.Error())
 				a.notifyActionFailed("stop", err.Error())
@@ -126,25 +172,27 @@ func (a *App) beforeClose(context.Context) (prevent bool) {
 	}
 }
 
-func (a *App) askBeforeQuit() string {
+func (a *App) askBeforeQuit() quitChoice {
 	if !a.clinicRunning() {
-		return ""
+		return quitLeaveClinicRunning
 	}
 	name := a.loadConfig().MDNSName
-	sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
-		Type:  wruntime.QuestionDialog,
-		Title: "Quit CARE Desktop?",
-		Message: "CARE will keep running in the background, but " + name +
-			" will stop working for other devices on the clinic's WiFi until this app is open again.\n\n" +
-			"You can also shut the clinic down completely.",
-		Buttons:       []string{keepRunning, stopAndQuit},
-		DefaultButton: keepRunning,
-		CancelButton:  keepRunning,
-	})
+	quit, err := a.askToProceed("Quit CARE Desktop?",
+		"The clinic keeps running, but "+name+" will stop working for other devices "+
+			"on the clinic's WiFi until this app is open again.\n\nQuit anyway?", "Yes")
 	if err != nil {
-		return ""
+		return quitLeaveClinicRunning
 	}
-	return sel
+	if !quit {
+		return quitStayOpen
+	}
+	stop, err := a.askToProceed("Shut the clinic down as well?",
+		"Shutting down stops the clinic on this computer completely, so nobody can "+
+			"use it until it is started again.\n\nChoose No to leave it running.", "Yes")
+	if err != nil || !stop {
+		return quitLeaveClinicRunning
+	}
+	return quitStopClinic
 }
 
 func (a *App) clinicRunning() bool {

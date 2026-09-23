@@ -469,7 +469,7 @@ func currentUsername() string {
 
 func (pr *Provisioner) runElevated(exe string, args ...string) error {
 	if runtime.GOOS == "windows" {
-		ps := "$p = Start-Process " + elevate.PSQuote(exe) + " -Wait -PassThru -Verb RunAs"
+		ps := "$p = Start-Process " + elevate.PSQuote(exe) + " -Wait -PassThru -Verb RunAs -WindowStyle Hidden"
 		if len(args) > 0 {
 			quoted := make([]string, 0, len(args))
 			for _, a := range args {

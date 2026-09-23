@@ -17,6 +17,13 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 )
 
+const (
+	windowWidth     = 1100
+	windowHeight    = 700
+	windowMinWidth  = 720
+	windowMinHeight = 560
+)
+
 var appLog *applog.Logger
 
 //go:embed all:frontend/dist
@@ -42,10 +49,10 @@ func main() {
 
 	err = wails.Run(&options.App{
 		Title:            "CARE Desktop",
-		Width:            1180,
-		Height:           900,
-		MinWidth:         720,
-		MinHeight:        560,
+		Width:            windowWidth,
+		Height:           windowHeight,
+		MinWidth:         windowMinWidth,
+		MinHeight:        windowMinHeight,
 		BackgroundColour: &options.RGBA{R: 249, G: 250, B: 251, A: 255},
 		AssetServer: &assetserver.Options{
 			Assets: assets,

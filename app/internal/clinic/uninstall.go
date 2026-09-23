@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
+	"github.com/ohcnetwork/care_desktop/app/internal/sys/elevate"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/hosts"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/netfix"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/trust"
@@ -100,6 +102,9 @@ func (e *Clinic) removeInstallFiles(removeUnusedKey bool) error {
 }
 
 func (e *Clinic) revertSystemChanges(rootPEM string) []string {
+	if runtime.GOOS == "windows" {
+		return e.revertSystemChangesWindows(rootPEM)
+	}
 	var failed []string
 	if s := trust.Untrust(e.Log, e.Confirm, rootPEM); s != "" {
 		failed = append(failed, s)
@@ -113,6 +118,70 @@ func (e *Clinic) revertSystemChanges(rootPEM string) []string {
 	} else if present {
 		if err := netfix.Undo(e.Log); err != nil {
 			failed = append(failed, err.Error())
+		}
+	}
+	return failed
+}
+
+func (e *Clinic) revertSystemChangesWindows(rootPEM string) []string {
+	var failed []string
+	var steps []elevate.Step
+
+	certStep, certNeed, err := trust.RemoveStepWindows(rootPEM)
+	if err != nil {
+		failed = append(failed, err.Error())
+	} else if certNeed {
+		steps = append(steps, certStep)
+	}
+
+	host := e.host()
+	hostsStep, hostsNeed := hosts.RemoveStepWindows(host)
+	if hostsNeed {
+		steps = append(steps, hostsStep)
+	}
+
+	fwStep, fwNeed, err := netfix.UndoStepWindows(e.Runner())
+	if err != nil {
+		failed = append(failed, err.Error())
+	} else if fwNeed {
+		steps = append(steps, fwStep)
+	}
+
+	if len(steps) == 0 {
+		return failed
+	}
+
+	e.logln("Removing this computer's certificate trust, hosts entry, and firewall rules (approve the prompt)...")
+	elevateErr := elevate.Steps(steps)
+	detail := ""
+	if elevateErr != nil {
+		detail = " (" + elevateErr.Error() + ")"
+	}
+
+	if certNeed {
+		if present, err := trust.Inspect(); err != nil {
+			failed = append(failed, err.Error())
+		} else if present {
+			failed = append(failed, "The certificate \""+trust.CommonName+"\" is still trusted by this computer"+detail+
+				". Remove it in certmgr.msc, or run as administrator: certutil -delstore Root \""+trust.CommonName+"\"")
+		} else {
+			e.logln("Removed CARE's certificate from this machine's trust store.")
+		}
+	}
+	if hostsNeed {
+		if s := hosts.Leftover(host); s != "" {
+			failed = append(failed, s+detail)
+		} else {
+			e.logln("Removed the " + host + " hosts entry.")
+		}
+	}
+	if fwNeed {
+		if present, err := netfix.InspectRules(e.Runner()); err != nil {
+			failed = append(failed, err.Error())
+		} else if present {
+			failed = append(failed, "CARE's firewall rules are still present"+detail)
+		} else {
+			e.logln("Removed CARE's firewall rules.")
 		}
 	}
 	return failed

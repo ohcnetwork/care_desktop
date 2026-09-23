@@ -17,6 +17,23 @@ import (
 
 func (a *App) OpenURL(url string) { wruntime.BrowserOpenURL(a.ctx, url) }
 
+func affirmative(sel, yes string) bool { return sel == yes || sel == "Yes" }
+
+func (a *App) askToProceed(title, message, yes string) (bool, error) {
+	sel, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
+		Type:          wruntime.QuestionDialog,
+		Title:         title,
+		Message:       message,
+		Buttons:       []string{yes, "No"},
+		DefaultButton: "No",
+		CancelButton:  "No",
+	})
+	if err != nil {
+		return false, err
+	}
+	return affirmative(sel, yes), nil
+}
+
 func (a *App) ChooseFolder(title string) string {
 	opts := wruntime.OpenDialogOptions{Title: title}
 	if home, err := os.UserHomeDir(); err == nil {
