@@ -34,8 +34,15 @@ func DockerCheck(run proc.Runner) Status {
 		}
 		return Status{OK: true, Message: "Docker " + version}
 	case isNotFound(err) || !rancherDesktopInstalled():
+		if runtime.GOOS == "windows" && !wslReady() {
+			return Status{OK: false, Message: "Rancher Desktop is not installed, and WSL 2 has to be on before it can be."}
+		}
 		return Status{OK: false, Message: missing}
 	default:
+		if rancherDesktopRunning() {
+			return Status{OK: false, Message: dockerName() + " is running, but Docker is not answering yet. " +
+				"It may still be starting; if this does not clear, quit " + dockerName() + " and start it again."}
+		}
 		return Status{OK: false, Message: stopped}
 	}
 }

@@ -81,3 +81,33 @@ func stepScript(steps []Step, windows bool) string {
 	}
 	return strings.Join(parts, " && ")
 }
+
+func Teardown(steps []Step) error {
+	if len(steps) == 0 {
+		return nil
+	}
+	if runtime.GOOS == "windows" {
+		return proc.Command("powershell", "-NoProfile", "-Command",
+			elevatedPS(teardownScript(steps, true))).Run()
+	}
+	return Run(teardownScript(steps, false), true)
+}
+
+func teardownScript(steps []Step, windows bool) string {
+	pick := func(s Step) string { return s.Sh }
+	if windows {
+		pick = func(s Step) string { return s.PS }
+	}
+	parts := make([]string, 0, len(steps))
+	for _, s := range steps {
+		if windows {
+			parts = append(parts, "& { try { "+pick(s)+" } catch { } }")
+		} else {
+			parts = append(parts, "( "+pick(s)+" ) || true")
+		}
+	}
+	if windows {
+		return "$ErrorActionPreference = 'Continue'; " + strings.Join(parts, "; ")
+	}
+	return strings.Join(parts, "; ")
+}

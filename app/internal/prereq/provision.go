@@ -39,7 +39,7 @@ const (
 	dockerEnginePage = "https://docs.docker.com/engine/install/"
 	gitPageURL       = "https://git-scm.com/downloads"
 
-	dockerReadyTimeout = 3 * time.Minute
+	dockerReadyTimeout = 8 * time.Minute
 )
 
 func dockerHelpURL() string {
@@ -88,13 +88,12 @@ func (pr *Provisioner) dockerInstallPlan() ToolPlan {
 		p.Detail = "Downloads Rancher Desktop, the open source Docker engine, and installs it. " +
 			"You'll be asked for this Mac's password. Keep server connected to internet."
 	case "windows":
-		if hasCommand("winget") {
-			p.Detail = "Installs Rancher Desktop, the open source Docker engine, using Windows' " +
-				"own installer (winget). Windows may need to turn on WSL 2 and restart before Docker can run."
-		} else {
-			p.Detail = "Installs Rancher Desktop, the open source Docker engine. " +
-				"Windows may need to turn on WSL 2 and restart before Docker can run."
+		if !wslReady() {
+			p.Action, p.Label = ActionNone, ""
+			return p
 		}
+		p.Detail = "Downloads Rancher Desktop, the open source Docker engine, and installs it. " +
+			"Windows will ask for permission. Keep this computer connected to the internet."
 	case "linux":
 		pm := linuxPackageManager()
 		if pm == "" {
@@ -155,7 +154,11 @@ func (pr *Provisioner) InstallDocker() (string, error) {
 	case "darwin":
 		err = pr.installDockerDarwin()
 	case "windows":
-		err = pr.installDockerWindows()
+		var stopped string
+		stopped, err = pr.installDockerWindows()
+		if err == nil && stopped != "" {
+			return stopped, nil
+		}
 	case "linux":
 		err = pr.installDockerLinux()
 	default:
@@ -225,19 +228,31 @@ func (pr *Provisioner) installDockerDarwin() error {
 	return pr.OpenDocker()
 }
 
-func (pr *Provisioner) installDockerWindows() error {
+func (pr *Provisioner) installDockerWindows() (string, error) {
 	if err := writeRancherProfile(); err != nil {
 		pr.logln("Warning: could not preconfigure Rancher Desktop: " + err.Error())
 	}
-	if hasCommand("winget") {
-		pr.logln("Installing Rancher Desktop with winget...")
-		err := pr.run.Run("winget", "install", "-e", "--id", "SUSE.RancherDesktop",
-			"--accept-package-agreements", "--accept-source-agreements")
-		if err == nil {
-			return pr.afterWindowsDockerInstall()
-		}
-		pr.logln("winget couldn't install it; falling back to the installer from github.com.")
+	if !wslReady() {
+		pr.logln("WSL 2 is off, so Rancher Desktop cannot be installed yet.")
+		return "", fmt.Errorf("WSL 2 is not on yet, and Rancher Desktop will not install without it; " +
+			"turn it on in the WSL 2 step, restart if Windows asks, then install Docker")
 	}
+	err := pr.installRancherFromGitHub()
+	if err == nil {
+		return "", pr.afterWindowsDockerInstall()
+	}
+	if !hasCommand("winget") {
+		return "", err
+	}
+	pr.logln("Falling back to Windows' own installer (winget), which reports no progress: " + err.Error())
+	if wingetErr := pr.runElevated("winget", "install", "-e", "--id", "SUSE.RancherDesktop",
+		"--accept-package-agreements", "--accept-source-agreements"); wingetErr != nil {
+		return "", err
+	}
+	return "", pr.afterWindowsDockerInstall()
+}
+
+func (pr *Provisioner) installRancherFromGitHub() error {
 	version, err := latestRancherVersion()
 	if err != nil {
 		return err
@@ -249,10 +264,70 @@ func (pr *Provisioner) installDockerWindows() error {
 	}
 	defer func() { _ = os.Remove(msi) }()
 	pr.logln("Running the Rancher Desktop installer. Windows will ask for permission...")
-	if err := pr.runElevated("msiexec", "/i", msi, "/qn", "/norestart"); err != nil {
+	return pr.runMSI(msi)
+}
+
+func (pr *Provisioner) runMSI(msi string) error {
+	log, err := os.CreateTemp("", "care-rd-install-*.log")
+	if err != nil {
 		return fmt.Errorf("could not install Rancher Desktop: %w", err)
 	}
-	return pr.afterWindowsDockerInstall()
+	path := log.Name()
+	_ = log.Close()
+	defer func() { _ = os.Remove(path) }()
+
+	if err := pr.runElevated("msiexec", "/i", msi, "/qn", "/norestart", "/l*v", path); err != nil {
+		if detail := msiFailureDetail(path); detail != "" {
+			return fmt.Errorf("could not install Rancher Desktop: %s (%w)", detail, err)
+		}
+		return fmt.Errorf("could not install Rancher Desktop: %w", err)
+	}
+	return nil
+}
+
+const msiLogLimit = 8 << 20
+
+var msiStatusLines = []string{
+	"Installation failed.",
+	"Installation completed successfully.",
+	"Installation operation failed.",
+	"Installation success or error status",
+}
+
+func msiFailureDetail(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	if len(data) > msiLogLimit {
+		data = data[:msiLogLimit]
+	}
+	text := strings.ReplaceAll(string(data), "\x00", "")
+	for _, line := range strings.Split(text, "\n") {
+		_, rest, ok := strings.Cut(strings.TrimSpace(line), "Product: ")
+		if !ok {
+			continue
+		}
+		_, message, ok := strings.Cut(rest, " -- ")
+		if !ok {
+			continue
+		}
+		message = strings.TrimSpace(message)
+		if message == "" || isMSIStatusLine(message) {
+			continue
+		}
+		return message
+	}
+	return ""
+}
+
+func isMSIStatusLine(message string) bool {
+	for _, status := range msiStatusLines {
+		if strings.HasPrefix(message, status) {
+			return true
+		}
+	}
+	return false
 }
 
 func (pr *Provisioner) afterWindowsDockerInstall() error {
@@ -384,23 +459,39 @@ func (pr *Provisioner) OpenDocker() error {
 	return pr.waitForDocker(dockerReadyTimeout)
 }
 
+// rancherRestartPause gives Rancher Desktop's virtual machine time to go away
+// before the second attempt below.
+const rancherRestartPause = 5 * time.Second
+
 func (pr *Provisioner) startRancher() error {
+	if err := writeRancherProfile(); err != nil {
+		pr.logln("Warning: could not preconfigure Rancher Desktop: " + err.Error())
+	}
 	if runtime.GOOS == "darwin" {
 		if err := pr.ensureRancherRoot(); err != nil {
 			return err
 		}
 	}
 	if rdctl := rdctlPath(); rdctl != "" {
-		args := append([]string{"start", "--no-modal-dialogs"}, rancherSettings...)
+		args := append([]string{"start"}, rancherLaunchArgs()...)
 		err := pr.run.Run(rdctl, args...)
 		if err == nil {
 			return nil
 		}
+		// A first boot often loses the race to set up its Linux environment and
+		// comes up on a second try, which is what a shutdown and start amounts to.
+		pr.logln("Rancher Desktop didn't finish starting; shutting it down and trying once more...")
+		_ = pr.run.Run(rdctl, "shutdown")
+		time.Sleep(rancherRestartPause)
+		if err = pr.run.Run(rdctl, args...); err == nil {
+			return nil
+		}
 		pr.logln("rdctl could not start Rancher Desktop in the background; opening it instead: " + err.Error())
 	}
+	launch := rancherLaunchArgs()
 	switch runtime.GOOS {
 	case "darwin":
-		if err := pr.run.Run("open", "-a", rancherAppMac); err != nil {
+		if err := pr.run.Run("open", append([]string{"-a", rancherAppMac, "--args"}, launch...)...); err != nil {
 			return fmt.Errorf("could not start Rancher Desktop: %w", err)
 		}
 	case "windows":
@@ -408,19 +499,26 @@ func (pr *Provisioner) startRancher() error {
 		if exe == "" {
 			return fmt.Errorf("Rancher Desktop is not installed")
 		}
+		quoted := make([]string, 0, len(launch))
+		for _, a := range launch {
+			quoted = append(quoted, elevate.PSQuote(a))
+		}
 		if err := pr.run.Run("powershell", "-NoProfile", "-Command",
-			"Start-Process "+elevate.PSQuote(exe)); err != nil {
+			"Start-Process "+elevate.PSQuote(exe)+" -ArgumentList "+strings.Join(quoted, ",")); err != nil {
 			return fmt.Errorf("could not start Rancher Desktop: %w", err)
 		}
 	}
 	return nil
 }
 
+// EnsureRancherSettings puts the deployment profile in place before Rancher
+// Desktop's first run, so it skips the welcome dialog and never downloads
+// Kubernetes - whether CARE installed it or the operator did.
 func EnsureRancherSettings() {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
 		return
 	}
-	applyRancherProfileNow()
+	_ = writeRancherProfile()
 }
 
 func (pr *Provisioner) waitForDocker(limit time.Duration) error {
@@ -431,8 +529,9 @@ func (pr *Provisioner) waitForDocker(limit time.Duration) error {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("Docker didn't become ready in time - open it yourself, " +
-				"wait until it says it is running, then run the check again")
+			return fmt.Errorf("Docker is taking longer than usual to start; it may still be " +
+				"starting. Watch Rancher Desktop until it stops saying \"Starting\", then run " +
+				"the check again")
 		}
 		time.Sleep(3 * time.Second)
 	}
@@ -458,6 +557,17 @@ func rancherDesktopInstalled() bool {
 	default:
 		return hasCommand("docker")
 	}
+}
+
+func rancherDesktopRunning() bool {
+	switch runtime.GOOS {
+	case "darwin":
+		return proc.Command("pgrep", "-f", rancherAppMac).Run() == nil
+	case "windows":
+		out, err := proc.Command("tasklist", "/FI", "IMAGENAME eq Rancher Desktop.exe", "/NH").Output()
+		return err == nil && strings.Contains(string(out), "Rancher Desktop.exe")
+	}
+	return false
 }
 
 func windowsRancherDesktopExe() string {
