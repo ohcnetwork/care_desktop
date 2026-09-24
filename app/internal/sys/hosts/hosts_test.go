@@ -33,17 +33,20 @@ func TestHasEntryRequiresLocalAddress(t *testing.T) {
 	}
 }
 
-func TestRemoveScriptPreservesUnownedLinesAndHandlesEmptyResult(t *testing.T) {
+func TestReplaceStepPreservesUnownedLinesAndHandlesEmptyResult(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses a POSIX shell fixture")
 	}
 	for _, tc := range []struct {
 		name string
 		data string
+		keep func(string) (string, bool)
 		want string
 	}{
-		{"mixed", "127.0.0.1 localhost\n" + line("care.local") + "\n", "127.0.0.1 localhost\n"},
-		{"owned only", line("care.local") + "\n", ""},
+		{"mixed", "127.0.0.1 localhost\n" + line("care.local") + "\n", withoutMarker, "127.0.0.1 localhost\n"},
+		{"owned only", line("care.local") + "\n", withoutMarker, ""},
+		{"unowned clinic name", "127.0.0.1 localhost\n10.0.0.5 care.local\n",
+			func(d string) (string, bool) { return withoutHost(d, "care.local") }, "127.0.0.1 localhost\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -51,24 +54,41 @@ func TestRemoveScriptPreservesUnownedLinesAndHandlesEmptyResult(t *testing.T) {
 			if err := os.WriteFile(p, []byte(tc.data), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			cmd := proc.Command("sh", "-c", removeSh(p))
-			cmd.Env = append(os.Environ(), "TMPDIR="+dir)
-			if out, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("remove: %v: %s", err, out)
+			step, cleanup, need, err := replaceStep(p, tc.keep, "test")
+			if err != nil || !need {
+				t.Fatalf("replaceStep: need = %v, err = %v", need, err)
 			}
+			if out, err := proc.Command("sh", "-c", step.Sh).CombinedOutput(); err != nil {
+				t.Fatalf("replace: %v: %s", err, out)
+			}
+			cleanup()
 			data, err := os.ReadFile(p)
 			if err != nil || string(data) != tc.want {
 				t.Fatalf("remaining hosts = %q, %v; want %q", data, err, tc.want)
 			}
-			entries, err := os.ReadDir(dir)
-			if err != nil || len(entries) != 1 {
-				t.Fatalf("scratch file was not removed: %v, %v", entries, err)
+			backup, err := os.ReadFile(p + ".care-backup")
+			if err != nil || string(backup) != tc.data {
+				t.Fatalf("backup = %q, %v; want %q", backup, err, tc.data)
 			}
 		})
 	}
 }
 
-func TestRemoveScriptPreservesWriteFailure(t *testing.T) {
+func TestReplaceStepSkipsCleanOrMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	if _, _, need, err := replaceStep(filepath.Join(dir, "missing"), withoutMarker, "test"); need || err != nil {
+		t.Fatalf("missing file: need = %v, err = %v", need, err)
+	}
+	p := filepath.Join(dir, "hosts")
+	if err := os.WriteFile(p, []byte("127.0.0.1 localhost\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, need, err := replaceStep(p, withoutMarker, "test"); need || err != nil {
+		t.Fatalf("clean file: need = %v, err = %v", need, err)
+	}
+}
+
+func TestReplaceScriptPreservesWriteFailure(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses a POSIX shell fixture")
 	}
@@ -77,20 +97,19 @@ func TestRemoveScriptPreservesWriteFailure(t *testing.T) {
 	if err := os.WriteFile(p, []byte("127.0.0.1 localhost\n"+line("care.local")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	step, cleanup, _, err := replaceStep(p, withoutMarker, "test")
+	defer cleanup()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "cat"), []byte("#!/bin/sh\nexit 47\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	cmd := proc.Command("sh", "-c", removeSh(p))
-	cmd.Env = append(os.Environ(), "TMPDIR="+dir)
-	out, err := cmd.CombinedOutput()
+	out, err := proc.Command("sh", "-c", step.Sh).CombinedOutput()
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) || exit.ExitCode() != 47 {
 		t.Fatalf("write failure was lost: %v, %s", err, out)
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil || len(entries) != 2 {
-		t.Fatalf("scratch file was not removed: %v, %v", entries, err)
 	}
 }
 
@@ -157,5 +176,25 @@ func TestInspectDistinguishesAbsentFromUnreadable(t *testing.T) {
 	present, err = inspect(dir)
 	if err == nil || present {
 		t.Fatalf("directory read became a definite answer: present = %v, err = %v", present, err)
+	}
+}
+
+func TestWithoutHost(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+		changed        bool
+	}{
+		{"drops a CARE line", "127.0.0.1 localhost\n127.0.0.1 care.local # care-desktop\n", "127.0.0.1 localhost\n", true},
+		{"drops a line from any tool", "10.0.0.5\tCARE.local\n::1 localhost\n", "::1 localhost\n", true},
+		{"keeps other names on a shared line", "127.0.0.1 care.local other.local # dev\n", "127.0.0.1 other.local # dev\n", true},
+		{"keeps windows line endings", "127.0.0.1 localhost\r\n127.0.0.1 care.local\r\n", "127.0.0.1 localhost\r\n", true},
+		{"ignores comments and similar names", "# 127.0.0.1 care.local\n127.0.0.1 mycare.local care.localhost\n", "# 127.0.0.1 care.local\n127.0.0.1 mycare.local care.localhost\n", false},
+		{"ignores the IP column", "care.local localhost\n", "care.local localhost\n", false},
+	}
+	for _, c := range cases {
+		got, changed := withoutHost(c.in, "care.local")
+		if got != c.want || changed != c.changed {
+			t.Errorf("%s: got %q (%v), want %q (%v)", c.name, got, changed, c.want, c.changed)
+		}
 	}
 }

@@ -221,7 +221,7 @@ JavaScript promise. Role selection lives in
 | `DisconnectClient()` | Sync. Client only. Removes only the exact certificate installed by this client, then clears connection/certificate fields and role. Errors retain retry state. |
 
 The frontend refreshes `GetState` after connection or cleanup. A saved URL can
-represent an incomplete installation, so **Uninstall client setup** remains
+represent an incomplete installation, so **Disconnect** remains
 available after a failed attempt. The confirmation explains that no server
 data is removed. Pre-existing roots are preserved and may still allow browser
 access. Successful uninstall returns to role selection. OS uninstall removes the

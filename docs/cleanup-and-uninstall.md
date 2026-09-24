@@ -7,7 +7,7 @@ Stopping a clinic and uninstalling it are fundamentally different operations.
 volumes. Stop does not.** Keeping the backup directory is not the same as
 keeping the running clinic's data volumes.
 
-**Client cleanup is different:** use **Uninstall client setup** to disconnect a
+**Client cleanup is different:** use **Disconnect** to disconnect a
 staff computer. It removes only the saved connection and exact certificate
 installed by that client; it does not invoke server uninstall, touch hosts
 files, delete clinic data, or remove unrelated trusted roots. Failures retain
@@ -20,8 +20,9 @@ using OS uninstall to remove the desktop executable. See
 [client removal](native-integrations.md#removing-client-access).
 
 For a former server now used as a browser client, see
-[client recovery](client-recovery.md): it distinguishes a hosts-only repair from
-the destructive standalone cleanup scripts used when the app is unavailable.
+[client recovery](client-recovery.md): client setup removes the stale hosts entry
+automatically. That guide also covers the destructive standalone cleanup scripts
+used when the app is unavailable.
 
 This guide explains the current Wails backend and engine cleanup paths. It is
 not a collection of destructive terminal recipes. Resource and command names
@@ -68,9 +69,37 @@ settings may be forgotten.
 | Intent | App entry point and engine call | Removed or changed | Intentionally retained |
 | --- | --- | --- | --- |
 | Pause the clinic | `ClinicAction("stop", ...)` delegates to `Clinic.Stop()`. | Compose stops services. | Containers, all volumes, images/cache, installed files, backups, keys, saved settings, and native configuration. |
-| Remove an installed clinic | `RunUninstall(...)` delegates to `Clinic.Uninstall(options)`. | Live project containers, volumes, and networks; native changes; installed files. Optional known images/cache and owned backup files. App also handles autostart and saved state. | Backups when not selected for removal; images/cache when not selected; normal diagnostic logs. |
+| Remove an installed clinic | `RunUninstall(...)` delegates to `Clinic.Uninstall(options)`. | Live project containers, volumes, and networks; native changes; installed files. Optional known images/cache and owned backup files. Optional Rancher Desktop removal (see below). App also handles autostart and saved state. | Backups when not selected for removal; images/cache when not selected; Rancher Desktop when not selected; normal diagnostic logs. |
 | Recover from failed first setup | `CleanupFailedInstall()` delegates to a specific `Clinic.Uninstall` option set. | Partial project resources, native changes, installed files, saved secret/config. A matching exported key is removed only if it is unused and the final file-deletion phase is reached. | Downloaded images/cache and backup data. Required recovery keys remain. |
 | Clean old installation residue | The UI's "Remove everything" path is `PurgeResidue()`, delegating to `Clinic.Purge()`. | Owned project resources even without a kit, known images/cache, native changes, installed kit. App additionally removes old logs and saved state. | Backups and their recovery key. The desktop executable, Docker/Git installations, and unrelated user files are not an OS-package uninstall target. |
+
+### Optional Rancher Desktop removal
+
+The uninstall panel shows **Also remove Rancher Desktop and its settings** only
+when `RancherDesktopInstalled()` finds it on macOS or Windows. When ticked,
+`RunUninstall` calls `Provisioner.RemoveRancherDesktop()`
+([`prereq/rancher_remove.go`](../app/internal/prereq/rancher_remove.go)) as the
+last step, after CARE's own cleanup has succeeded and saved state is reset, because
+Docker is needed until then. A failure here is logged as a warning with manual
+steps and does not fail the uninstall.
+
+- **Both platforms:** `rdctl shutdown` and `rdctl factory-reset` clear the VM,
+  Rancher's settings and its Docker context.
+- **macOS:** removes the profile written by `profile.go`
+  (`io.rancherdesktop.profile.defaults`), Rancher's Library folders, `~/.rd`, and
+  the `MANAGED BY RANCHER DESKTOP` blocks in shell rc files. Then one administrator
+  prompt removes the app, `/opt/rancher-desktop`, the sudoers files, the
+  docker-socket LaunchDaemon, and the `/var/run/docker.sock` link, but only if
+  that link points at `~/.rd`.
+- **Windows:** `winget uninstall SUSE.RancherDesktop`, falling back to
+  `msiexec /x` with the product code from the Uninstall registry keys. Then it
+  unregisters the `rancher-desktop` WSL distros, deletes the
+  `HKCU\Software\Policies\Rancher Desktop` profile, and removes Rancher's
+  AppData folders.
+
+This is deliberately **not** part of `Clinic.Purge()` / `PurgeResidue()`. Residue
+cleanup targets CARE's own leftovers, and a Rancher Desktop that is already
+installed may be serving other projects.
 
 `PurgeEverything` is a useful informal description of the last UI choice, but
 it is **not the current Go method name**. The current boundary is

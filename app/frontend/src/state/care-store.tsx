@@ -114,7 +114,7 @@ type CareStore = {
   setAutostart: (on: boolean) => Promise<void>;
   restore: (backup: Backup, passphrase: string, adminPassword: string) => Promise<void>;
   restoreFile: (path: string, passphrase: string, adminPassword: string) => Promise<void>;
-  uninstall: (removeImages: boolean, removeBackups: boolean, adminPassword: string) => Promise<void>;
+  uninstall: (removeImages: boolean, removeBackups: boolean, removeRancher: boolean, adminPassword: string) => Promise<void>;
   log: (line: string) => void;
 };
 
@@ -397,14 +397,14 @@ export function CareProvider({ children }: { children: ReactNode }) {
   );
 
   const uninstall = useCallback(
-    async (removeImages: boolean, removeBackups: boolean, adminPassword: string) => {
+    async (removeImages: boolean, removeBackups: boolean, removeRancher: boolean, adminPassword: string) => {
       if (busyRef.current) return;
       setBusy(true, "Uninstalling");
       log(
-        `\n$ care uninstall${removeImages ? " --images" : ""}${removeBackups ? " --backups" : ""} --yes`,
+        `\n$ care uninstall${removeImages ? " --images" : ""}${removeBackups ? " --backups" : ""}${removeRancher ? " --rancher" : ""} --yes`,
       );
       try {
-        await bridge.RunUninstall(removeImages, removeBackups, adminPassword);
+        await bridge.RunUninstall(removeImages, removeBackups, removeRancher, adminPassword);
       } catch (e) {
         log(`error: ${errorText(e)}`);
         setBusy(false);

@@ -91,19 +91,18 @@ func addUnprivileged(host string) error {
 	return proc.Command("sh", "-c", addSh(host)).Run()
 }
 
-func RemoveStepWindows(host string) (step elevate.Step, need bool) {
-	data, err := os.ReadFile(path())
-	if os.IsNotExist(err) || err == nil && !strings.Contains(string(data), marker) {
-		return elevate.Step{}, false
+func RemoveStepWindows(host string) (step elevate.Step, cleanup func(), need bool) {
+	step, cleanup, need, err := replaceStep(path(), withoutMarker, "remove "+host+" from this computer's hosts file")
+	if err != nil {
+		return elevate.Step{}, cleanup, false
 	}
-	inner := `$p="$env:WINDIR\System32\drivers\etc\hosts"; (Get-Content -LiteralPath $p) | ` +
-		`Where-Object { $_ -notmatch '` + marker + `' } | Set-Content -LiteralPath $p`
-	return elevate.Step{What: "remove " + host + " from this computer's hosts file", PS: inner}, true
+	return step, cleanup, need
 }
 
 func Remove(log func(string), confirm func(string, string) bool, host string) string {
 	if runtime.GOOS == "windows" {
-		step, need := RemoveStepWindows(host)
+		step, cleanup, need := RemoveStepWindows(host)
+		defer cleanup()
 		if !need {
 			return ""
 		}
@@ -119,21 +118,22 @@ func Remove(log func(string), confirm func(string, string) bool, host string) st
 	return removeUnix(confirm, host, path(), elevate.Run)
 }
 
-func removeSh(p string) string {
-	return `t=$(mktemp) || exit $?; trap 'rm -f "$t"' EXIT; grep -F -v ` +
-		elevate.ShQuote(marker) + ` ` + elevate.ShQuote(p) +
-		` > "$t"; status=$?; [ "$status" -le 1 ] || exit "$status"; cat "$t" > ` + elevate.ShQuote(p)
-}
-
 func removeUnix(confirm func(string, string) bool, host, p string, run func(string, bool) error) string {
-	sh := removeSh(p)
-	_ = run(sh, false)
+	step, cleanup, need, err := replaceStep(p, withoutMarker, "remove "+host+" from this computer's hosts file")
+	defer cleanup()
+	if err != nil {
+		return leftover(host, p)
+	}
+	if !need {
+		return ""
+	}
+	_ = run(step.Sh, false)
 	if leftover(host, p) == "" {
 		return ""
 	}
 	if confirm == nil || confirm("Remove the "+host+" hosts entry?",
 		"Remove the line CARE added to this computer's hosts file?\n\nThis needs administrator approval.") {
-		_ = run(sh, true)
+		_ = run(step.Sh, true)
 	}
 	return leftover(host, p)
 }
@@ -181,4 +181,123 @@ func inspect(p string) (bool, error) {
 		return false, fmt.Errorf("could not inspect %s: %w", p, err)
 	}
 	return strings.Contains(string(data), marker), nil
+}
+
+func RemoveHost(log func(string), host string) error {
+	p := path()
+	keep := func(data string) (string, bool) { return withoutHost(data, host) }
+	step, cleanup, need, err := replaceStep(p, keep, "remove "+host+" from this computer's hosts file")
+	defer cleanup()
+	if err != nil {
+		return fmt.Errorf("could not check this computer's hosts file for %s: %w", host, err)
+	}
+	if !need {
+		return nil
+	}
+	logln(log, "Removing "+host+" from this computer's hosts file so the clinic is found on the network...")
+	if err := elevate.Steps([]elevate.Step{step}); err != nil {
+		return fmt.Errorf("could not remove %s from this computer's hosts file: %w", host, err)
+	}
+	after, err := os.ReadFile(p)
+	if err != nil {
+		return fmt.Errorf("could not check this computer's hosts file for %s: %w", host, err)
+	}
+	if _, still := keep(string(after)); still {
+		return fmt.Errorf("could not remove %s from this computer's hosts file: it is still listed in %s", host, p)
+	}
+	logln(log, "Removed "+host+" from the hosts file. A copy of the old file was saved as "+p+".care-backup.")
+	return nil
+}
+
+func replaceStep(p string, keep func(string) (string, bool), what string) (step elevate.Step, cleanup func(), need bool, err error) {
+	cleanup = func() {}
+	data, err := os.ReadFile(p)
+	if os.IsNotExist(err) {
+		return elevate.Step{}, cleanup, false, nil
+	}
+	if err != nil {
+		return elevate.Step{}, cleanup, false, err
+	}
+	cleaned, changed := keep(string(data))
+	if !changed {
+		return elevate.Step{}, cleanup, false, nil
+	}
+	f, err := os.CreateTemp("", "care-hosts-*")
+	if err != nil {
+		return elevate.Step{}, cleanup, false, err
+	}
+	cleanup = func() { _ = os.Remove(f.Name()) }
+	if _, err := f.WriteString(cleaned); err != nil {
+		_ = f.Close()
+		return elevate.Step{}, cleanup, false, err
+	}
+	if err := f.Close(); err != nil {
+		return elevate.Step{}, cleanup, false, err
+	}
+	if err := os.Chmod(f.Name(), 0o644); err != nil {
+		return elevate.Step{}, cleanup, false, err
+	}
+	return elevate.Step{What: what, Sh: replaceSh(f.Name(), p), PS: replacePS(f.Name(), p)}, cleanup, true, nil
+}
+
+func withoutMarker(data string) (string, bool) {
+	lines := strings.SplitAfter(data, "\n")
+	out := make([]string, 0, len(lines))
+	for _, ln := range lines {
+		if !strings.Contains(ln, marker) {
+			out = append(out, ln)
+		}
+	}
+	return strings.Join(out, ""), len(out) != len(lines)
+}
+
+func replaceSh(src, dst string) string {
+	d := elevate.ShQuote(dst)
+	return "cp " + d + " " + elevate.ShQuote(dst+".care-backup") + " && cat " + elevate.ShQuote(src) + " > " + d +
+		" && { dscacheutil -flushcache 2>/dev/null; killall -HUP mDNSResponder 2>/dev/null; resolvectl flush-caches 2>/dev/null; true; }"
+}
+
+func replacePS(src, dst string) string {
+	return "Copy-Item -LiteralPath " + elevate.PSQuote(dst) + " -Destination " + elevate.PSQuote(dst+".care-backup") + " -Force; " +
+		"Copy-Item -LiteralPath " + elevate.PSQuote(src) + " -Destination " + elevate.PSQuote(dst) + " -Force; " +
+		"ipconfig /flushdns | Out-Null"
+}
+
+func withoutHost(data, host string) (string, bool) {
+	lines := strings.Split(data, "\n")
+	out := make([]string, 0, len(lines))
+	changed := false
+	for _, raw := range lines {
+		body := strings.TrimSuffix(raw, "\r")
+		eol := raw[len(body):]
+		entry, comment := body, ""
+		if i := strings.IndexByte(body, '#'); i >= 0 {
+			entry, comment = body[:i], body[i:]
+		}
+		fields := strings.Fields(entry)
+		if len(fields) < 2 {
+			out = append(out, raw)
+			continue
+		}
+		kept := []string{fields[0]}
+		for _, name := range fields[1:] {
+			if !strings.EqualFold(name, host) {
+				kept = append(kept, name)
+			}
+		}
+		if len(kept) == len(fields) {
+			out = append(out, raw)
+			continue
+		}
+		changed = true
+		if len(kept) == 1 {
+			continue
+		}
+		rebuilt := strings.Join(kept, " ")
+		if comment != "" {
+			rebuilt += " " + comment
+		}
+		out = append(out, rebuilt+eol)
+	}
+	return strings.Join(out, "\n"), changed
 }

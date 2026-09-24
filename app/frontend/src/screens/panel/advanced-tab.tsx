@@ -172,6 +172,12 @@ function UninstallPanel({ adminPassword }: { adminPassword: string }) {
   const { busy, uninstall } = useCare();
   const [removeBackups, setRemoveBackups] = useState(false);
   const [removeImages, setRemoveImages] = useState(false);
+  const [removeRancher, setRemoveRancher] = useState(false);
+  const [showRancher, setShowRancher] = useState(false);
+
+  useEffect(() => {
+    void bridge.RancherDesktopInstalled().then(setShowRancher, () => setShowRancher(false));
+  }, []);
   const [confirming, setConfirming] = useState(false);
 
   return (
@@ -194,6 +200,19 @@ function UninstallPanel({ adminPassword }: { adminPassword: string }) {
           </span>
         </span>
       </label>
+      {showRancher ? (
+        <label className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink2">
+          <Checkbox checked={removeRancher} onCheckedChange={(v) => setRemoveRancher(v === true)} />
+          <span>
+            Also remove Rancher Desktop and its settings.
+            <span className="text-muted-foreground">
+              {" "}
+              Rancher Desktop runs Docker for CARE. Leave this unticked if other apps on this
+              computer use Docker.
+            </span>
+          </span>
+        </label>
+      ) : null}
 
       {confirming ? (
         <div className="flex items-center gap-3 rounded-lg border border-danger-bg bg-danger-tint px-4 py-[13px] text-[12.5px] text-danger-ink">
@@ -205,7 +224,7 @@ function UninstallPanel({ adminPassword }: { adminPassword: string }) {
             variant="destructive"
             onClick={() => {
               setConfirming(false);
-              void uninstall(removeImages, removeBackups, adminPassword);
+              void uninstall(removeImages, removeBackups, removeRancher, adminPassword);
             }}
           >
             Yes, delete

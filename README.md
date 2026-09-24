@@ -28,7 +28,7 @@ See [client recovery and earlier-install cleanup](docs/client-recovery.md).
 - **Back** — on the server setup and client screens, returns to the Server/Client
   choice after a misclick. It is only offered while nothing has been installed
   or connected; after that, uninstall is the way back.
-- **Uninstall client setup** — disconnect a client and remove only the certificate
+- **Disconnect** — disconnect a client and remove only the certificate
   it installed, without touching server data. Successful uninstall clears its role
   and returns to the Server/Client choice, as does successful server uninstall.
   Remove access before connecting to another clinic or uninstalling the desktop

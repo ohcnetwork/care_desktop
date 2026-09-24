@@ -48,9 +48,10 @@ func (a *App) GetState() (AppState, error) {
 	}, nil
 }
 
-func (a *App) DockerStatus() prereq.Status { return prereq.DockerCheck(a.engine().Runner()) }
-func (a *App) GitStatus() prereq.Status    { return prereq.GitCheck(a.engine().Runner()) }
-func (a *App) ClinicHealth() health.Health { return health.Ping() }
+func (a *App) DockerStatus() prereq.Status   { return prereq.DockerCheck(a.engine().Runner()) }
+func (a *App) GitStatus() prereq.Status      { return prereq.GitCheck(a.engine().Runner()) }
+func (a *App) RancherDesktopInstalled() bool { return prereq.RancherDesktopInstalled() }
+func (a *App) ClinicHealth() health.Health   { return health.Ping() }
 
 func (a *App) NetworkStatus() netfix.Status { return netfix.Check(a.engine().Runner()) }
 
