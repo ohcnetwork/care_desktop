@@ -6,10 +6,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 )
 
+// Rancher Desktop reads a deployment profile before its first run. A profile
+// that sets anything at all also tells it to skip the welcome dialog, so CARE
+// writes one before Rancher Desktop is ever started - not only when CARE is the
+// one installing it.
 const rancherProfileVersion = 18
 
 const rancherProfilePlist = `<?xml version="1.0" encoding="UTF-8"?>
@@ -32,6 +37,12 @@ const rancherProfilePlist = `<?xml version="1.0" encoding="UTF-8"?>
 </plist>
 `
 
+// Rancher Desktop reads its registry profile from "Policies\Rancher Desktop"
+// and then from "Rancher Desktop\Profile", and the later one wins. Windows
+// keeps HKCU\Software\Policies read-only for anyone who isn't an administrator,
+// so CARE writes the second, which needs no elevation.
+const rancherProfileKey = `HKCU\Software\Rancher Desktop\Profile\Defaults`
+
 func writeRancherProfile() error {
 	switch runtime.GOOS {
 	case "darwin":
@@ -49,19 +60,8 @@ func writeRancherProfile() error {
 			return err
 		}
 	case "windows":
-		const key = `HKCU\Software\Policies\Rancher Desktop\Defaults`
-		args := [][]string{
-			{key, "/v", "version", "/t", "REG_DWORD", "/d", fmt.Sprint(rancherProfileVersion)},
-			{key + `\application`, "/v", "adminAccess", "/t", "REG_DWORD", "/d", "1"},
-			{key + `\application`, "/v", "autoStart", "/t", "REG_DWORD", "/d", "1"},
-			{key + `\application`, "/v", "startInBackground", "/t", "REG_DWORD", "/d", "1"},
-			{key + `\containerEngine`, "/v", "name", "/t", "REG_SZ", "/d", "moby"},
-			{key + `\kubernetes`, "/v", "enabled", "/t", "REG_DWORD", "/d", "0"},
-		}
-		for _, a := range args {
-			if err := proc.Command("reg", append([]string{"add"}, append(a, "/f")...)...).Run(); err != nil {
-				return fmt.Errorf("could not write the Rancher Desktop profile: %w", err)
-			}
+		if err := writeRancherProfileWindows(); err != nil {
+			return err
 		}
 	default:
 		return nil
@@ -70,12 +70,58 @@ func writeRancherProfile() error {
 	return nil
 }
 
-var rancherSettings = []string{
-	"--application.admin-access=true",
-	"--application.auto-start=true",
-	"--application.start-in-background=true",
-	"--container-engine.name=moby",
-	"--kubernetes.enabled=false",
+func writeRancherProfileWindows() error {
+	if rancherProfileWritten() {
+		return nil
+	}
+	_ = proc.Command("reg", "delete", rancherProfileKey+`\application`,
+		"/v", rancherAdminAccessValue, "/f").Run()
+	args := [][]string{
+		{rancherProfileKey, "/v", "version", "/t", "REG_DWORD", "/d", fmt.Sprint(rancherProfileVersion)},
+		{rancherProfileKey + `\application`, "/v", "autoStart", "/t", "REG_DWORD", "/d", "1"},
+		{rancherProfileKey + `\application`, "/v", "startInBackground", "/t", "REG_DWORD", "/d", "1"},
+		{rancherProfileKey + `\containerEngine`, "/v", "name", "/t", "REG_SZ", "/d", "moby"},
+		{rancherProfileKey + `\kubernetes`, "/v", "enabled", "/t", "REG_DWORD", "/d", "0"},
+	}
+	for _, a := range args {
+		if err := proc.Command("reg", append([]string{"add"}, append(a, "/f")...)...).Run(); err != nil {
+			return fmt.Errorf("could not write the Rancher Desktop profile: %w", err)
+		}
+	}
+	return nil
+}
+
+const rancherAdminAccessValue = "adminAccess"
+
+// rancherProfileWritten reports whether this profile is already in the registry,
+// so start-up doesn't shell out to reg on every launch for each of its values.
+func rancherProfileWritten() bool {
+	out, err := proc.Command("reg", "query", rancherProfileKey, "/v", "version").Output()
+	if err != nil || !strings.Contains(string(out), fmt.Sprintf("0x%x", rancherProfileVersion)) {
+		return false
+	}
+	return proc.Command("reg", "query", rancherProfileKey+`\application`,
+		"/v", rancherAdminAccessValue).Run() != nil
+}
+
+func rancherSettings() []string {
+	settings := []string{
+		"--application.auto-start=true",
+		"--application.start-in-background=true",
+		"--container-engine.name=moby",
+		"--kubernetes.enabled=false",
+	}
+	if runtime.GOOS != "windows" {
+		settings = append(settings, "--application.admin-access=true")
+	}
+	return settings
+}
+
+// rancherLaunchArgs are what Rancher Desktop itself accepts on its command line.
+// The profile only seeds a first run; these also settle an install that someone
+// already answered the welcome dialog for.
+func rancherLaunchArgs() []string {
+	return append([]string{"--no-modal-dialogs"}, rancherSettings()...)
 }
 
 func applyRancherProfileNow() {
@@ -83,7 +129,7 @@ func applyRancherProfileNow() {
 	if rdctl == "" {
 		return
 	}
-	_ = proc.Command(rdctl, append([]string{"set"}, rancherSettings...)...).Run()
+	_ = proc.Command(rdctl, append([]string{"set"}, rancherSettings()...)...).Run()
 }
 
 func rdctlPath() string {

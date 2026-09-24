@@ -358,6 +358,26 @@ The standalone `trust.Untrust`, `hosts.Remove`, and `netfix.Undo` entry points
 keep elevating on their own for callers that remove a single item, and remain
 the only path on macOS and Linux.
 
+Batching changes what a failure means, so teardown uses `elevate.Teardown`
+rather than `elevate.Steps`. `Steps` is built for installation: it sets
+`$ErrorActionPreference = 'Stop'` and follows each step with
+`if (-not $?) { exit 1 }`, because there is no point trusting a certificate that
+was never installed. Applied to removal that rule is backwards — one step that
+cannot complete stops every later step from being *attempted*, so a single
+stubborn item leaves the rest installed and the verification pass reports all of
+them as leftovers at once. That is what an uninstall did when it reported the
+certificate, the hosts entry and the firewall rules as remaining in one message,
+while each of the three removals succeeded when run by hand.
+
+`Teardown` wraps each step in `try { … } catch { }` under
+`$ErrorActionPreference = 'Continue'` on Windows, and joins with `|| true` on
+Unix, so every step is attempted whatever the ones before it did. It can afford
+this because the caller does not infer success from the exit code: it re-inspects
+the certificate store, the hosts file and the firewall rules individually
+afterwards, and reports only what is genuinely still there. Removing as much as
+possible and naming the remainder is more useful than stopping at the first
+obstacle.
+
 The elevated Windows child is launched with `-WindowStyle Hidden`, passed both
 to `Start-Process` and to the child `powershell` itself. That suppresses the
 console window the child would otherwise flash; it does not hide, suppress, or
@@ -1047,17 +1067,103 @@ removed on return. It then launches Rancher Desktop with
 
 **Windows Docker**
 
-It first tries `winget install -e --id SUSE.RancherDesktop` with package/source
-agreement acceptance. If that command fails, it logs the fallback, resolves the
-latest version the same way macOS does, and downloads
+WSL 2 is checked and installed as its own prerequisite in
+[wsl.go](../app/internal/prereq/wsl.go), not as part of installing Docker. It is
+a different dependency with a different remedy — Windows may need a restart
+before it takes effect — and folding it into the Docker step hid that behind a
+button labelled "Install Rancher Desktop". The wizard therefore shows it as its
+own row, on Windows only, in the same way the network-profile repair does.
+
+### WSL 2 is two separate things, and both have to be on
+
+The "Windows Subsystem for Linux" app package and the `VirtualMachinePlatform`
+optional feature are installed independently, and they can disagree. The app
+package answers `wsl --status`; the feature carries the Hyper-V socket transport
+the virtual machine is reached through. `wsl --install --no-distribution` does
+not reliably turn the feature on, and `wsl --status` answers `0` regardless.
+
+A machine in that split state is the worst case, because every cheap signal says
+it is healthy: `wsl --status` succeeds, `wsl --version` prints, and a
+distribution will even boot and run commands, since Hyper-V alone is enough to
+start the VM. Only traffic to it fails. Rancher Desktop installs, `dockerd`
+starts *inside* the VM, and then `docker-proxy` loops on
+`error accept()ing connection: bad file descriptor` while the Windows side
+reports `timed out dialing Hyper-V socket`, forever.
+
+`wslReady` therefore requires both, and `wslAnswers` alone is never treated as
+readiness. The feature is read through the `Win32_OptionalFeature` CIM class,
+whose `InstallState` is `1` when enabled. That class is readable **without
+elevation**, unlike `Get-WindowsOptionalFeature` and `dism`, which is what makes
+the check possible on a path that has no administrator rights.
+
+Two details keep that probe honest:
+
+- It costs roughly a second and a half, far too much for every re-check, so a
+  positive result is cached for the life of the process. The feature cannot be
+  switched off again without administrator rights, so a cached *yes* cannot go
+  stale underneath the app. A negative result is never cached, so the row clears
+  as soon as the operator fixes it, and `InstallWSL` resets the cache after it
+  runs so the next probe is honest.
+- A probe that *fails* reports the feature as present. An inconclusive query must
+  not turn a working machine red and block setup; the failure that matters is a
+  definite `InstallState` that is not `1`.
+
+`InstallWSL` enables the feature explicitly with an elevated
+`dism /online /enable-feature /featurename:VirtualMachinePlatform /all
+/norestart` before installing the app package, rather than trusting
+`wsl --install` to do it. No distribution is requested because the clinic needs
+the WSL 2 platform, not a Linux userland of its own; Rancher Desktop registers
+its own distributions. It reports success only when both probes pass *and* no
+restart is pending; otherwise it returns the restart instruction as success
+rather than as an error. The restart itself is covered by
+[reboot](#reboot-detect-a-pending-windows-restart-not-its-exact-cause).
+
+Whether toggling the feature forces a restart varies by Windows build — it has
+been observed applying immediately with `RestartNeeded: False` — so the pending
+restart is checked rather than assumed. When WSL is not ready the row always
+carries its fix: a pending restart changes the wording only, because a stale
+restart flag left by an unrelated change must never remove the operator's only
+button.
+
+Skipping the prerequisite is what made a clean machine unrecoverable: winget
+resolves `Microsoft.WSL` as a dependency, but that package is an MSIX and cannot
+elevate itself from a non-elevated winget, so the winget route failed with
+`0x80073d28`, and the MSI fallback then downloaded roughly a gigabyte before
+failing its WSL 2 launch condition with the generic exit code 1603.
+
+The Docker row now defers to the WSL row rather than competing with it. While
+WSL is not ready `dockerInstallPlan` returns no action at all, so the wizard
+never offers a button whose only outcome is failure, and `DockerCheck` says so
+in words: "Rancher Desktop is not installed, and WSL 2 has to be on before it
+can be." `installDockerWindows` keeps the same guard as a backstop for a stale
+interface or a direct call, logging the refusal before returning it — an
+unlogged refusal is invisible when reading back what happened.
+
+With WSL 2 in place the MSI from github.com is the primary route, because it
+reports download progress the way macOS does; winget is the fallback, and it is
+noted in the log as reporting none. Elevating winget is what removed its output
+from the log, since an elevated child started through `Start-Process` does not
+stream back. Its dependency resolution was the reason to prefer it, and that
+reason disappeared once WSL became a prerequisite of its own. The fallback still
+runs `winget install -e --id SUSE.RancherDesktop` with package/source agreement
+acceptance, elevated. The primary route resolves the latest version the same way
+macOS does and downloads
 `.../releases/download/v<version>/Rancher.Desktop.Setup.<version>.msi`. There is
 no architecture-selection branch for that Windows download.
 
-The direct installer runs elevated as `msiexec /i <msi> /qn /norestart`; this
-helper waits and propagates the installer exit code. After either installation
-route, it launches Rancher Desktop and waits. `afterWindowsDockerInstall` does
-not itself edit group membership or inspect restart registry keys. It reports a
-start failure with advice that Windows may need a WSL 2 restart.
+The direct installer runs elevated as
+`msiexec /i <msi> /qn /norestart /l*v <log>`. A quiet install prints nothing, so
+without that log a refusal reaches the operator as a bare exit code;
+`msiFailureDetail` reads the log back and reports the installer's own
+explanation instead. It takes the first `Product: <name> -- <message>` line
+that is not a generic status such as `Installation failed.`, since the blocking
+condition is logged before the failure it causes, and strips NUL bytes so a
+UTF-16 log reads the same as an ANSI one. The log is removed afterwards.
+
+After either installation route, it launches Rancher Desktop and waits.
+`afterWindowsDockerInstall` does not itself edit group membership or inspect
+restart registry keys. It reports a start failure with advice that Windows may
+need a WSL 2 restart.
 
 Rancher Desktop executable lookup checks `%LOCALAPPDATA%\Programs`,
 `ProgramFiles`, `ProgramW6432`, and `C:\Program Files`, each with
@@ -1071,9 +1177,14 @@ The profile carries a `version` field, pinned to `rancherProfileVersion = 18`,
 the schema version the format is documented against. Rancher Desktop migrates an
 older profile version forward, so this does not need to track every release.
 
-Before installing, `writeRancherProfile` writes a *defaults* deployment profile
-so the operator never meets the first-run wizard and the clinic's requirements
-are already answered:
+`writeRancherProfile` writes a *defaults* deployment profile so the operator
+never meets the first-run wizard and the clinic's requirements are already
+answered. Rancher Desktop treats a run as a first run only when it finds no
+profile at all, so a profile that sets anything suppresses the wizard; with one
+in place it also never offers, downloads, or starts Kubernetes. The profile is
+therefore written before installing, before every `startRancher`, and once when
+a server starts CARE Desktop, so it is in place even when the operator installed
+Rancher Desktop themselves rather than through CARE:
 
 | Setting | Why CARE needs it |
 | --- | --- |
@@ -1087,25 +1198,46 @@ are already answered:
 | Platform | Profile location |
 | --- | --- |
 | macOS | `~/Library/Preferences/io.rancherdesktop.profile.defaults.plist` |
-| Windows | `HKCU\Software\Policies\Rancher Desktop\Defaults` through `reg add` |
+| Windows | `HKCU\Software\Rancher Desktop\Profile\Defaults` through `reg add` |
 | Linux | Not written; Linux uses its native Docker Engine. |
+
+Rancher Desktop looks for a registry profile under `SOFTWARE\Policies\Rancher
+Desktop` and then `SOFTWARE\Rancher Desktop\Profile`, reading `HKLM` before
+`HKCU` within each, and takes the first that holds anything. CARE writes the
+last of those four. Windows reserves `HKCU\Software\Policies` for
+administrators, so writing there fails with "Access is denied" for an ordinary
+operator, no profile lands, and Rancher Desktop opens its welcome dialog and
+downloads Kubernetes. `rancherProfileWritten` reads the `version` value back
+first, so a start that already has the profile does not shell out to `reg` six
+more times.
 
 Defaults are applied on first run only. An operator's later preference changes
 are kept, and an administrator's managed profile in `/Library/Managed
 Preferences` or `HKLM` still takes precedence over this user profile. Because of
 that, an installation that had already run would ignore the profile, so
 `applyRancherProfileNow` additionally attempts `rdctl set` for the same values
-(`rancherSettings`). It runs after installing and again each time a server starts
-CARE Desktop, so existing installations pick up later additions. That attempt is
+(`rancherSettings`). It runs on every profile write - after installing, before
+each start, and once each time a server starts CARE Desktop - so existing
+installations pick up later additions. That attempt is
 best-effort: `rdctl` may be absent, or the values may be locked by an
 administrator. A profile write failure is logged as a warning and does not stop
 the installation. `rdctlPath` uses the copy inside the Rancher Desktop bundle,
 because a freshly installed `~/.rd/bin` is not yet on the PATH CARE inherits.
 
-`OpenDocker` starts Rancher Desktop with `rdctl start --no-modal-dialogs` and the
-same settings, which opens no window, skips the first-run wizard, and applies the
-settings to an instance that is already running. It falls back to launching the
-app if `rdctl` fails.
+`OpenDocker` starts Rancher Desktop with `rdctl start` and `rancherLaunchArgs`
+(`--no-modal-dialogs` plus `rancherSettings`), which opens no window, skips the
+first-run wizard, and applies the settings to an instance that is already
+running.
+
+A Rancher Desktop that has never run its Linux environment before regularly
+fails its first start with `Timed out after waiting for /run/wsl-init.pid` and
+succeeds when it is started again, so a failed `rdctl start` is followed by
+`rdctl shutdown`, a `rancherRestartPause` wait, and one more attempt. Only if
+that also fails does it launch the application directly, passing the same
+`rancherLaunchArgs` on the command line. Rancher Desktop parses those arguments
+itself whatever launched it, so the direct launch skips the wizard and keeps
+Kubernetes off just as `rdctl` does - and unlike the profile, command-line
+arguments also apply to an installation that already answered the wizard.
 
 **Rancher Desktop administrator setup (macOS)**
 
@@ -1164,10 +1296,19 @@ uses `https://git-scm.com/downloads`.
 ### Waiting, downloads, and side effects
 
 `OpenDocker` launches Rancher Desktop on macOS/Windows. On Linux it elevates
-`systemctl start docker`. It then uses `dockerReadyTimeout = 3 * time.Minute`,
+`systemctl start docker`. It then uses `dockerReadyTimeout = 8 * time.Minute`,
 checking full `DockerCheck` readiness and sleeping three seconds between
 unsuccessful checks. Poll deadlines are checked between probes; they are not
 hard cancellation deadlines for the whole operation.
+
+That budget is generous because the first start after an install is the slow
+one: Rancher Desktop has to provision its distributions before the engine
+answers, and a healthy first run has been measured at around four and a half
+minutes. The earlier three-minute budget expired while a perfectly good install
+was still starting, so the wizard reported a failure for something that then
+succeeded on its own a minute later. Running out of time is therefore worded as
+"taking longer than usual… it may still be starting", not as a failure, because
+the check cannot tell a slow start from a broken one.
 
 The HTTP downloader uses a cloned default Go HTTP transport, ordinary TLS
 verification, and:

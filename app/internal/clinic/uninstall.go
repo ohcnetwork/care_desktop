@@ -152,7 +152,7 @@ func (e *Clinic) revertSystemChangesWindows(rootPEM string) []string {
 	}
 
 	e.logln("Removing this computer's certificate trust, hosts entry, and firewall rules (approve the prompt)...")
-	elevateErr := elevate.Steps(steps)
+	elevateErr := elevate.Teardown(steps)
 	detail := ""
 	if elevateErr != nil {
 		detail = " (" + elevateErr.Error() + ")"

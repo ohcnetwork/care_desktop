@@ -4,7 +4,7 @@ import { bridge } from "@/lib/bridge";
 import type { ToolPlan } from "@/types";
 
 export type CheckTone = "wait" | "ok" | "bad";
-export type CheckId = "residue" | "docker" | "git" | "mdns" | "clinic" | "network";
+export type CheckId = "residue" | "wsl" | "docker" | "git" | "mdns" | "clinic" | "network";
 
 /**
  * Which prerequisites are worth testing.
@@ -73,6 +73,7 @@ function actionFor(plan: ToolPlan, install: () => Promise<string | void>): Check
 export function useRequirementChecks(host: string, mode: ChecksMode = "setup") {
   const inSetup = mode === "setup";
   const [residue, setResidue] = useState<Result>(WAITING);
+  const [wsl, setWsl] = useState<Result | null>(null);
   const [docker, setDocker] = useState<Result>(WAITING);
   const [git, setGit] = useState<Result>(WAITING);
   const [mdns, setMdns] = useState<Result>(WAITING);
@@ -119,6 +120,32 @@ export function useRequirementChecks(host: string, mode: ChecksMode = "setup") {
           : { state: "bad", how: String(e) };
     }
     setResidue(result);
+    return result;
+  }, []);
+
+  const checkWSL = useCallback(async (): Promise<Result | null> => {
+    let result: Result | null;
+    try {
+      const status = await bridge.WSLStatus();
+      result = status.applicable
+        ? {
+            state: status.ok ? "ok" : "bad",
+            how: status.ok ? "" : status.how || status.message,
+            action:
+              status.ok || !status.fixable
+                ? undefined
+                : {
+                    label: "Turn on WSL 2",
+                    detail:
+                      "Turns on the Windows feature Docker runs inside. Windows will ask for permission, and may need to restart before Docker can be installed.",
+                    run: () => bridge.InstallWSL(),
+                  },
+          }
+        : null;
+    } catch {
+      result = null;
+    }
+    setWsl(result);
     return result;
   }, []);
 
@@ -240,16 +267,17 @@ export function useRequirementChecks(host: string, mode: ChecksMode = "setup") {
   }, []);
 
   const recheckAll = useCallback(async (): Promise<CheckTone> => {
-    const [r, d, g, m, c, n] = await Promise.all([
+    const [r, w, d, g, m, c, n] = await Promise.all([
       inSetup ? checkResidue() : null,
+      checkWSL(),
       checkDocker(),
       inSetup ? checkGit() : null,
       checkMDNS(),
       inSetup ? null : checkClinic(),
       checkNetwork(),
     ]);
-    return summarise([r, d, g, m, c, n].filter((x): x is Result => x !== null));
-  }, [inSetup, checkResidue, checkDocker, checkGit, checkMDNS, checkClinic, checkNetwork]);
+    return summarise([r, w, d, g, m, c, n].filter((x): x is Result => x !== null));
+  }, [inSetup, checkResidue, checkWSL, checkDocker, checkGit, checkMDNS, checkClinic, checkNetwork]);
 
   useEffect(() => {
     void recheckAll();
@@ -263,6 +291,14 @@ export function useRequirementChecks(host: string, mode: ChecksMode = "setup") {
         title: "A clean computer",
         detail: "Nothing left from an earlier CARE Desktop",
         ...residue,
+      });
+    }
+    if (wsl) {
+      list.push({
+        id: "wsl",
+        title: "WSL 2",
+        detail: "The Windows feature Docker runs inside",
+        ...wsl,
       });
     }
     list.push({
@@ -302,7 +338,7 @@ export function useRequirementChecks(host: string, mode: ChecksMode = "setup") {
       });
     }
     return list;
-  }, [inSetup, clinic, docker, git, host, mdns, network, residue]);
+  }, [inSetup, clinic, docker, git, host, mdns, network, residue, wsl]);
 
   const overall = useMemo(
     () => summarise(checks.map((c) => ({ state: c.state, how: c.how }))),
