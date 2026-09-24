@@ -13,6 +13,7 @@ import type {
   ResidueReport,
   RestartPlan,
   ToolPlan,
+  WSLStatus,
 } from "./types";
 
 declare global {
@@ -30,6 +31,8 @@ declare global {
           MDNSStatus(): Promise<NameStatus>;
           NetworkStatus(): Promise<NetworkStatus>;
           FixNetwork(): Promise<void>;
+          WSLStatus(): Promise<WSLStatus>;
+          InstallWSL(): Promise<string>;
           DockerPlan(): Promise<ToolPlan>;
           GitPlan(): Promise<ToolPlan>;
           InstallDocker(): Promise<string>;

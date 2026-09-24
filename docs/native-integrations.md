@@ -1047,29 +1047,87 @@ removed on return. It then launches Rancher Desktop with
 
 **Windows Docker**
 
-WSL 2 comes first, because the Rancher Desktop MSI refuses to install without
-it. `ensureWSL` treats a non-zero `wsl --status` as absent — `wsl.exe` ships
-with Windows, so its presence on PATH proves nothing — and installs it with an
-elevated `wsl --install --no-distribution`. No distribution is requested
-because the clinic needs the WSL 2 platform, not a Linux userland of its own;
-Rancher Desktop registers its own distributions.
+WSL 2 is checked and installed as its own prerequisite in
+[wsl.go](../app/internal/prereq/wsl.go), not as part of installing Docker. It is
+a different dependency with a different remedy — Windows may need a restart
+before it takes effect — and folding it into the Docker step hid that behind a
+button labelled "Install Rancher Desktop". The wizard therefore shows it as its
+own row, on Windows only, in the same way the network-profile repair does.
 
-That install usually only takes effect after a restart, so a `wsl --status`
-that still fails afterwards is reported as success with a restart instruction
-rather than an error, and provisioning stops there instead of continuing into
-an install that cannot yet work. The restart itself is already covered by
+### WSL 2 is two separate things, and both have to be on
+
+The "Windows Subsystem for Linux" app package and the `VirtualMachinePlatform`
+optional feature are installed independently, and they can disagree. The app
+package answers `wsl --status`; the feature carries the Hyper-V socket transport
+the virtual machine is reached through. `wsl --install --no-distribution` does
+not reliably turn the feature on, and `wsl --status` answers `0` regardless.
+
+A machine in that split state is the worst case, because every cheap signal says
+it is healthy: `wsl --status` succeeds, `wsl --version` prints, and a
+distribution will even boot and run commands, since Hyper-V alone is enough to
+start the VM. Only traffic to it fails. Rancher Desktop installs, `dockerd`
+starts *inside* the VM, and then `docker-proxy` loops on
+`error accept()ing connection: bad file descriptor` while the Windows side
+reports `timed out dialing Hyper-V socket`, forever.
+
+`wslReady` therefore requires both, and `wslAnswers` alone is never treated as
+readiness. The feature is read through the `Win32_OptionalFeature` CIM class,
+whose `InstallState` is `1` when enabled. That class is readable **without
+elevation**, unlike `Get-WindowsOptionalFeature` and `dism`, which is what makes
+the check possible on a path that has no administrator rights.
+
+Two details keep that probe honest:
+
+- It costs roughly a second and a half, far too much for every re-check, so a
+  positive result is cached for the life of the process. The feature cannot be
+  switched off again without administrator rights, so a cached *yes* cannot go
+  stale underneath the app. A negative result is never cached, so the row clears
+  as soon as the operator fixes it, and `InstallWSL` resets the cache after it
+  runs so the next probe is honest.
+- A probe that *fails* reports the feature as present. An inconclusive query must
+  not turn a working machine red and block setup; the failure that matters is a
+  definite `InstallState` that is not `1`.
+
+`InstallWSL` enables the feature explicitly with an elevated
+`dism /online /enable-feature /featurename:VirtualMachinePlatform /all
+/norestart` before installing the app package, rather than trusting
+`wsl --install` to do it. No distribution is requested because the clinic needs
+the WSL 2 platform, not a Linux userland of its own; Rancher Desktop registers
+its own distributions. It reports success only when both probes pass *and* no
+restart is pending; otherwise it returns the restart instruction as success
+rather than as an error. The restart itself is covered by
 [reboot](#reboot-detect-a-pending-windows-restart-not-its-exact-cause).
 
-Skipping this step is what made a clean machine unrecoverable: winget resolves
-`Microsoft.WSL` as a dependency, but that package is an MSIX and cannot elevate
-itself from a non-elevated winget, so the winget route failed with
-`0x80073d28`, and the MSI fallback then downloaded roughly a gigabyte before
-failing its WSL 2 launch condition with the generic exit code 1603. Both routes
-now run elevated, and the prerequisite is settled before anything is fetched.
+Whether toggling the feature forces a restart varies by Windows build — it has
+been observed applying immediately with `RestartNeeded: False` — so the pending
+restart is checked rather than assumed. When WSL is not ready the row always
+carries its fix: a pending restart changes the wording only, because a stale
+restart flag left by an unrelated change must never remove the operator's only
+button.
 
-With WSL 2 in place it tries `winget install -e --id SUSE.RancherDesktop` with
-package/source agreement acceptance, elevated. If that fails it logs the
-fallback, resolves the latest version the same way macOS does, and downloads
+Skipping the prerequisite is what made a clean machine unrecoverable: winget
+resolves `Microsoft.WSL` as a dependency, but that package is an MSIX and cannot
+elevate itself from a non-elevated winget, so the winget route failed with
+`0x80073d28`, and the MSI fallback then downloaded roughly a gigabyte before
+failing its WSL 2 launch condition with the generic exit code 1603.
+
+The Docker row now defers to the WSL row rather than competing with it. While
+WSL is not ready `dockerInstallPlan` returns no action at all, so the wizard
+never offers a button whose only outcome is failure, and `DockerCheck` says so
+in words: "Rancher Desktop is not installed, and WSL 2 has to be on before it
+can be." `installDockerWindows` keeps the same guard as a backstop for a stale
+interface or a direct call, logging the refusal before returning it — an
+unlogged refusal is invisible when reading back what happened.
+
+With WSL 2 in place the MSI from github.com is the primary route, because it
+reports download progress the way macOS does; winget is the fallback, and it is
+noted in the log as reporting none. Elevating winget is what removed its output
+from the log, since an elevated child started through `Start-Process` does not
+stream back. Its dependency resolution was the reason to prefer it, and that
+reason disappeared once WSL became a prerequisite of its own. The fallback still
+runs `winget install -e --id SUSE.RancherDesktop` with package/source agreement
+acceptance, elevated. The primary route resolves the latest version the same way
+macOS does and downloads
 `.../releases/download/v<version>/Rancher.Desktop.Setup.<version>.msi`. There is
 no architecture-selection branch for that Windows download.
 
@@ -1218,10 +1276,19 @@ uses `https://git-scm.com/downloads`.
 ### Waiting, downloads, and side effects
 
 `OpenDocker` launches Rancher Desktop on macOS/Windows. On Linux it elevates
-`systemctl start docker`. It then uses `dockerReadyTimeout = 3 * time.Minute`,
+`systemctl start docker`. It then uses `dockerReadyTimeout = 8 * time.Minute`,
 checking full `DockerCheck` readiness and sleeping three seconds between
 unsuccessful checks. Poll deadlines are checked between probes; they are not
 hard cancellation deadlines for the whole operation.
+
+That budget is generous because the first start after an install is the slow
+one: Rancher Desktop has to provision its distributions before the engine
+answers, and a healthy first run has been measured at around four and a half
+minutes. The earlier three-minute budget expired while a perfectly good install
+was still starting, so the wizard reported a failure for something that then
+succeeded on its own a minute later. Running out of time is therefore worded as
+"taking longer than usual… it may still be starting", not as a failure, because
+the check cannot tell a slow start from a broken one.
 
 The HTTP downloader uses a cloned default Go HTTP transport, ordinary TLS
 verification, and:

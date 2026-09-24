@@ -58,6 +58,18 @@ func (a *App) FixNetwork() error {
 	return a.withServerJob(func() error { return netfix.Fix(a.engine().Log) })
 }
 
+func (a *App) WSLStatus() prereq.WSLStatus { return prereq.WSLCheck() }
+
+func (a *App) InstallWSL() (string, error) {
+	var result string
+	err := a.withServerJob(func() error {
+		var err error
+		result, err = a.provisioner().InstallWSL()
+		return err
+	})
+	return result, err
+}
+
 func (a *App) DockerPlan() prereq.ToolPlan { return a.provisioner().DockerPlan() }
 func (a *App) GitPlan() prereq.ToolPlan    { return a.provisioner().GitPlan() }
 

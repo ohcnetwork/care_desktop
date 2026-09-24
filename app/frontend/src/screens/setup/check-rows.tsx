@@ -34,7 +34,7 @@ export function CheckRows({
 }) {
   const [running, setRunning] = useState<CheckId | null>(null);
   const [progress, setProgress] = useState("");
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<{ id: CheckId; text: string } | null>(null);
   // What the host says to do now that the install finished. Held until the
   // operator dismisses it: an install that ends with "restart Windows first"
   // must not be summarised by the row quietly going red again.
@@ -51,10 +51,16 @@ export function CheckRows({
     });
   }, [running]);
 
+  useEffect(() => {
+    if (!failure) return;
+    const row = checks.find((c) => c.id === failure.id);
+    if (!row || row.state !== "bad") setFailure(null);
+  }, [checks, failure]);
+
   const perform = (check: Check) => {
     if (!check.action || running) return;
     setRunning(check.id);
-    setFailure("");
+    setFailure(null);
     void check.action
       .run()
       .then((message) => {
@@ -62,7 +68,7 @@ export function CheckRows({
         else onDone();
       })
       .catch((e) => {
-        setFailure(errorText(e));
+        setFailure({ id: check.id, text: errorText(e) });
         onDone();
       })
       .finally(() => {
@@ -148,8 +154,8 @@ export function CheckRows({
                       {progress}
                     </div>
                   ) : null}
-                  {!busy && failure && running === null ? (
-                    <div className="mt-2 text-[12.5px] text-danger-ink">{failure}</div>
+                  {!busy && failure?.id === check.id && running === null ? (
+                    <div className="mt-2 text-[12.5px] text-danger-ink">{failure.text}</div>
                   ) : null}
                 </div>
               ) : null}

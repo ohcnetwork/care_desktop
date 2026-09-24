@@ -167,6 +167,8 @@ Execution abbreviations: **query** means no `run`/`withJob` helper, **read** mea
 | `MDNSStatus()` | `NameStatus` | Query. Reports whether this process has an advertiser, not an end-to-end remote-device verdict. |
 | `NetworkStatus()` | `NetworkStatus` | Query. Platform-specific networking inspection. |
 | `FixNetwork()` | `void` | Sync. Runs the native networking repair. |
+| `WSLStatus()` | `WSLStatus` | Query. Windows-only; `applicable` is false elsewhere and the row is hidden. |
+| `InstallWSL()` | `string` | Sync. Turns on WSL 2. A non-empty result is the restart instruction, not an error. |
 | `DockerPlan()` | `ToolPlan` | Query. Describes the available Docker install/open/manual action. |
 | `GitPlan()` | `ToolPlan` | Query. Describes the available Git action. |
 | `InstallDocker()` | `string` | Sync. Runs prerequisite provisioning and returns its result or error. |
@@ -176,6 +178,31 @@ Execution abbreviations: **query** means no `run`/`withJob` helper, **read** mea
 | `RestartNow()` | `void` | Sync. Attempts to enable login startup, then requests an OS restart; autostart failure is logged. |
 | `ClinicHealth()` | `Health` | Query. HTTP health probe, separate from name and certificate-trust checks. |
 | `ClinicStatus()` | `string` | Query. Engine's formatted Compose service status. |
+
+#### What the wizard rows owe the operator
+
+The wizard is used by people who will not open a terminal, so a red row without
+a button is a dead end. Two rules follow, and both were learned by breaking
+them.
+
+A failing row must keep its action. A row that reports a problem and withdraws
+its own fix leaves nothing to press: the WSL row once treated a pending restart
+as terminal and dropped its button, and because an unrelated change had left the
+restart flag set, the operator was stranded. Conditions like that belong in the
+wording, not in whether the fix is offered.
+
+A row must not offer an action that can only fail either. Where one requirement
+depends on another, the dependent row reports the dependency in words and
+returns no action until it is met — the Docker row does this while WSL 2 is off,
+so the only button on screen is the one that helps. The host still refuses the
+underlying call, because a stale interface can outlive the rule that hid the
+button.
+
+Failures reported by an action are held against the row that produced them and
+cleared as soon as that row stops failing. A single shared failure string prints
+one row's error under every other failing row, and survives the re-check that
+fixed it, so "Check again" appears to succeed while the old warning stays on
+screen.
 
 ### Setup and lifecycle
 
@@ -332,7 +359,7 @@ The core serialized shapes are:
 | `AppState` | `version`, `role`, `client_url`, `setup_done`, `mdns_name`, `docker`, `restore_pending`. Client-specific state exposes neither PEM nor ownership. `setup_done` is false while removal is in progress. |
 | `DockerStatus`, `NameStatus` | `ok`, `message`. |
 | `Health` | `active`, `code`, `detail`. |
-| `NetworkStatus` | `applicable`, `ok`, `message`, `how`, `fixable`. |
+| `NetworkStatus`, `WSLStatus` | `applicable`, `ok`, `message`, `how`, `fixable`. |
 | `ToolPlan` | `action`, `label`, `detail`, `url`. |
 | `RestartPlan` | `needed`, `title`, `detail`, `label`. |
 | `ResidueReport` | `clean`, `traces`; each trace has `id`, `label`, `detail`. |
