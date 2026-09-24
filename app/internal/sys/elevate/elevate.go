@@ -1,6 +1,8 @@
 package elevate
 
 import (
+	"fmt"
+	"os/exec"
 	"runtime"
 	"strings"
 
@@ -28,12 +30,12 @@ func OSAQuote(s string) string {
 func Run(sh string, elevated bool) error {
 	switch {
 	case !elevated:
-		return proc.Command("sh", "-c", sh).Run()
+		return run(proc.Command("sh", "-c", sh))
 	case runtime.GOOS == "darwin":
-		return proc.Command("osascript", "-e",
-			"do shell script "+OSAQuote(sh)+" with administrator privileges").Run()
+		return run(proc.Command("osascript", "-e",
+			"do shell script "+OSAQuote(sh)+" with administrator privileges"))
 	default:
-		return proc.Command("pkexec", "sh", "-c", sh).Run()
+		return run(proc.Command("pkexec", "sh", "-c", sh))
 	}
 }
 
@@ -42,10 +44,18 @@ func Steps(steps []Step) error {
 		return nil
 	}
 	if runtime.GOOS == "windows" {
-		return proc.Command("powershell", "-NoProfile", "-Command",
-			elevatedPS(stepScript(steps, true))).Run()
+		return run(proc.Command("powershell", "-NoProfile", "-Command",
+			elevatedPS(stepScript(steps, true))))
 	}
 	return Run(stepScript(steps, false), true)
+}
+
+func run(c *exec.Cmd) error {
+	out, err := c.CombinedOutput()
+	if msg := strings.TrimSpace(string(out)); err != nil && msg != "" {
+		return fmt.Errorf("%w: %s", err, msg)
+	}
+	return err
 }
 
 func elevatedPS(inner string) string {

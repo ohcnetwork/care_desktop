@@ -4,12 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/ohcnetwork/care_desktop/app/internal/sys/hosts"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/trust"
 )
 
-func (a *App) ConnectClient(address string) error {
+func (a *App) ConnectClient(address string) (err error) {
+	defer func() {
+		if err != nil {
+			a.logln("Could not connect to the clinic: " + err.Error())
+		}
+	}()
 	return a.withJob(func() error {
 		cfg := a.loadConfig()
 		if cfg.Role != "client" {
@@ -21,6 +28,9 @@ func (a *App) ConnectClient(address string) error {
 		}
 		if cfg.ClientURL != "" && cfg.ClientURL != clinicURL {
 			return errors.New("remove this computer's current clinic access before connecting to another clinic")
+		}
+		if err := hosts.RemoveHost(a.logln, strings.TrimPrefix(clinicURL, "https://")); err != nil {
+			return err
 		}
 		ctx := a.ctx
 		if ctx == nil {
@@ -64,7 +74,12 @@ func (a *App) ConnectClient(address string) error {
 	})
 }
 
-func (a *App) DisconnectClient() error {
+func (a *App) DisconnectClient() (err error) {
+	defer func() {
+		if err != nil {
+			a.logln("Could not disconnect from the clinic: " + err.Error())
+		}
+	}()
 	return a.withJob(func() error {
 		cfg := a.loadConfig()
 		if cfg.Role != "client" {

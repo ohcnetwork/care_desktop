@@ -429,6 +429,23 @@ re-reads before deciding to request elevation. It does not rewrite unowned
 conflicting mappings. Repeated appends cannot repair an existing non-loopback
 conflict by themselves; the final verification remains incomplete.
 
+All hosts-file removal goes through one helper, `replaceStep`. It reads the file,
+applies a line filter, and stages the result in a temporary file. It returns one
+step that saves `hosts.care-backup`, writes the new file, and flushes the DNS
+cache. There are two filters:
+
+- `withoutMarker` (uninstall, purge, remove old installation) drops every line
+  carrying `# care-desktop`, whatever name it maps, and leaves unmarked lines
+  alone.
+- `withoutHost` (client connect, through `hosts.RemoveHost`) removes one exact
+  hostname from any line, whoever added it, and keeps other names on that line.
+
+`hosts.Remove`, `hosts.RemoveStepWindows`, and `hosts.RemoveHost` differ only in
+filter and prompting. `Remove` on macOS/Linux still tries without privileges, then
+asks, then elevates. `RemoveStepWindows` is batched into the single uninstall UAC
+prompt, and its caller runs the returned cleanup after that prompt. `RemoveHost`
+elevates directly and re-reads the file to verify.
+
 The entry makes the clinic name point back to the server for that computer's own
 browser. It does **not** advertise a DNS record, answer mDNS for the LAN, modify
 another device, or prove that the `.local` name works beyond this machine.
@@ -503,6 +520,17 @@ URL with only its root path. It normalizes these to the clinic's HTTPS address.
 IP addresses, custom ports, and URLs containing application paths are not
 accepted.
 
+Before anything touches the network, the client removes any hosts-file line that
+maps the clinic name (for example `care.local`) to an address. A leftover entry,
+such as `127.0.0.1 care.local` from an earlier server setup on this computer,
+would send the client to itself instead of the clinic found through mDNS.
+`hosts.RemoveHost` removes only that name: other names on a shared line and all
+comments are kept. It uses the same `replaceStep` helper as uninstall (see
+[Hosts entries](#hosts-entries-and-their-ownership-marker)): it saves the previous
+file as `hosts.care-backup`, writes the new file with one administrator prompt,
+and flushes the DNS cache. The client then re-reads the file to confirm the name is gone. There is no
+prompt when no entry exists. This runs on every connect, including **Open CARE**.
+
 The client downloads `http://<host>/root.crt?ok=1`. The query flag keeps this
 native flow compatible with older servers; new servers do not require it.
 The HTTP request is bounded by timeouts and follows neither redirects nor a
@@ -515,8 +543,22 @@ CARE persists the pinned public root and ownership state before requesting OS
 elevation so interrupted or failed installation can be retried and cleaned up.
 Subsequent connections use that pinned root; they do not silently replace it
 with another HTTP download. OS installation uses the Windows LocalMachine Root
-store, the macOS System keychain, or fingerprint-specific Linux anchors.
-Administrator approval may be needed. The client automatically checks HTTPS
+store, the macOS login keychain, or fingerprint-specific Linux anchors.
+Administrator approval may be needed.
+
+On macOS the client runs `security add-trusted-cert` as the signed-in user, not
+through the `osascript` administrator prompt. macOS refuses trust-setting changes
+from a root script without user interaction
+(`SecTrustSettingsSetTrustSettings: ... no user interaction was possible`), which
+left the certificate in the System keychain but untrusted. Running as the user lets
+macOS show its own trust prompt; the trust applies to that macOS user only. The
+client counts the certificate as present only when it is in the login keychain
+and macOS trusts it, so a half-finished install is retried rather than skipped.
+
+The client screen shows plain-language errors (`frontend/src/lib/client-errors.ts`
+maps each backend error to a title, message and next steps). The original
+technical error is written to the app log by `ConnectClient` and
+`DisconnectClient`; the error panel links to the log file for support. The client automatically checks HTTPS
 before opening CARE; a download or approved prompt alone does not count as a
 successful connection. No manual fingerprint comparison or downloaded
 shell/PowerShell installer is part of this flow.
@@ -535,7 +577,7 @@ of a single clinic.
 
 ### Removing client access
 
-On a client, choose **Uninstall client setup** and confirm the native
+On a client, choose **Disconnect** and confirm the native
 client cleanup. It removes this device's saved connection and only the exact
 certificate that this client installed. Previously trusted certificates and
 unrelated CARE roots are not removed and may still enable browser access.

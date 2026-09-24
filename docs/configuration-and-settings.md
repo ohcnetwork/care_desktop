@@ -88,7 +88,7 @@ flag is exposed in `AppState`; its client fields are `role` and `client_url`.
 The pin and ownership state are
 persisted before OS elevation to preserve retry and cleanup information.
 Subsequent connects use the saved pin rather than silently accepting a new
-HTTP certificate. **Uninstall client setup** clears
+HTTP certificate. **Disconnect** clears
 the connection, certificate state and role after successful removal;
 failures keep retry state. It does not uninstall the executable.
 Certificates not installed by this client remain trusted and may still permit
@@ -128,7 +128,7 @@ was never installed still carries one. Any other field — an admin hash, backup
 directory, `setup_done`, `removing`, a client URL, pinned certificate or
 certificate ownership — or a populated install directory means the role is in
 use and `ClearRole` refuses with the uninstall-first message. A client that has
-connected therefore has no Back button; **Uninstall client setup** is its way
+connected therefore has no Back button; **Disconnect** is its way
 out. Client and unchosen state queries avoid Docker and backup inspection.
 
 `App` loads the file once into a cache guarded by `cfgMu`. `App.loadConfig()` returns a struct copy. Editing `config.json` externally does not update the running cache; it is not a watched configuration file.

@@ -67,7 +67,8 @@ declare global {
           InspectBackupFile(path: string): Promise<ImportedBackup>;
           RestoreFromFile(path: string, passphrase: string, adminPassword: string): Promise<void>;
           RestoreBackup(dbDump: string, filesArchive: string, passphrase: string, adminPassword: string): Promise<void>;
-          RunUninstall(removeImages: boolean, removeBackups: boolean, adminPassword: string): Promise<void>;
+          RancherDesktopInstalled(): Promise<boolean>;
+          RunUninstall(removeImages: boolean, removeBackups: boolean, removeRancher: boolean, adminPassword: string): Promise<void>;
           OpenURL(url: string): Promise<void>;
           ChooseFolder(title: string): Promise<string>;
           LogPath(): Promise<string>;

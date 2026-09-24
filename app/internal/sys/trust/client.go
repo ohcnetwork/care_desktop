@@ -156,7 +156,12 @@ func ClientCertificatePresent(rootPEM string) (bool, error) {
 	}
 	switch runtime.GOOS {
 	case "darwin":
-		return certInKeychain(darwinSystemKeychain, SHA1Hex(rootPEM))
+		present, err := certInKeychain(darwinLoginKeychain(), SHA1Hex(rootPEM))
+		if err != nil || !present {
+			return false, err
+		}
+		_, err = cert.Verify(x509.VerifyOptions{})
+		return err == nil, nil
 	case "windows":
 		out, err := (proc.Runner{}).Capture("powershell", "-NoProfile", "-Command",
 			"$ErrorActionPreference = 'Stop'; Test-Path -LiteralPath "+
@@ -210,10 +215,10 @@ func clientCertificateStep(goos, rootPEM, path string, remove bool) (elevate.Ste
 	step := elevate.Step{What: "set up this computer's access to CARE"}
 	switch goos {
 	case "darwin":
-		step.Sh = "security add-trusted-cert -d -r trustRoot -k " +
-			elevate.ShQuote(darwinSystemKeychain) + " " + elevate.ShQuote(path)
+		step.Sh = "security add-trusted-cert -r trustRoot -k " +
+			elevate.ShQuote(darwinLoginKeychain()) + " " + elevate.ShQuote(path)
 		if remove {
-			step.Sh = "security delete-certificate -Z " + SHA1Hex(rootPEM) + " " + elevate.ShQuote(darwinSystemKeychain)
+			step.Sh = "security delete-certificate -t -Z " + SHA1Hex(rootPEM) + " " + elevate.ShQuote(darwinLoginKeychain())
 		}
 	case "windows":
 		step.PS = installPS(path)
@@ -238,6 +243,13 @@ func clientCertificateStep(goos, rootPEM, path string, remove bool) (elevate.Ste
 	return step, nil
 }
 
+func runClientStep(goos string, step elevate.Step) error {
+	if goos == "darwin" {
+		return elevate.Run(step.Sh, false)
+	}
+	return elevate.Steps([]elevate.Step{step})
+}
+
 func InstallClientCertificate(rootPEM string) error {
 	if _, err := clientRoot(rootPEM, true); err != nil {
 		return err
@@ -258,7 +270,7 @@ func InstallClientCertificate(rootPEM string) error {
 	if err != nil {
 		return err
 	}
-	if err := elevate.Steps([]elevate.Step{step}); err != nil {
+	if err := runClientStep(runtime.GOOS, step); err != nil {
 		return fmt.Errorf("could not install the clinic certificate; approve the administrator prompt and try again: %w", err)
 	}
 	present, err := ClientCertificatePresent(rootPEM)
@@ -280,7 +292,7 @@ func RemoveClientCertificate(rootPEM string) error {
 	if err != nil {
 		return err
 	}
-	if err := elevate.Steps([]elevate.Step{step}); err != nil {
+	if err := runClientStep(runtime.GOOS, step); err != nil {
 		return fmt.Errorf("could not remove the clinic certificate; approve the administrator prompt and try again: %w", err)
 	}
 	present, err = ClientCertificatePresent(rootPEM)

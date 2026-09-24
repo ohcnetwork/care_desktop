@@ -9,7 +9,7 @@ import (
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/autostart"
 )
 
-func (a *App) RunUninstall(removeImages, removeBackups bool, adminPassword string) error {
+func (a *App) RunUninstall(removeImages, removeBackups, removeRancher bool, adminPassword string) error {
 	return a.run(func() error {
 		if err := a.requireAdmin(adminPassword); err != nil {
 			return err
@@ -46,6 +46,11 @@ func (a *App) RunUninstall(removeImages, removeBackups bool, adminPassword strin
 		}
 		if err := a.resetConfigAfterUninstall(); err != nil {
 			return err
+		}
+		if removeRancher {
+			if err := a.provisioner().RemoveRancherDesktop(); err != nil {
+				a.logln("CARE was removed, but Rancher Desktop could not be fully removed: " + err.Error())
+			}
 		}
 		a.logln("Uninstall complete.")
 		a.emit("uninstalled", true)

@@ -256,7 +256,7 @@ func TestClientRejectsServerMutations(t *testing.T) {
 		"start":        func() error { return a.ClinicAction("start", "") },
 		"restore":      func() error { return a.RestoreBackup("db", "", "", "") },
 		"import":       func() error { return a.RestoreFromFile("backup", "", "") },
-		"uninstall":    func() error { return a.RunUninstall(false, false, "") },
+		"uninstall":    func() error { return a.RunUninstall(false, false, false, "") },
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := action(); err == nil || !strings.Contains(err.Error(), "server") {

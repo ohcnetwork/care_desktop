@@ -135,7 +135,8 @@ func (e *Clinic) revertSystemChangesWindows(rootPEM string) []string {
 	}
 
 	host := e.host()
-	hostsStep, hostsNeed := hosts.RemoveStepWindows(host)
+	hostsStep, hostsCleanup, hostsNeed := hosts.RemoveStepWindows(host)
+	defer hostsCleanup()
 	if hostsNeed {
 		steps = append(steps, hostsStep)
 	}
