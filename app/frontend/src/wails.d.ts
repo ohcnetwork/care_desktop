@@ -3,8 +3,10 @@
 // Promises; events go through window.runtime.
 import type {
   AppState,
+  AppUpdate,
   Backup,
   CarePlugin,
+  ChannelStatus,
   DockerStatus,
   Health,
   ImportedBackup,
@@ -76,6 +78,11 @@ declare global {
           WasAutostartLaunched(): Promise<boolean>;
           AutostartEnabled(): Promise<boolean>;
           SetAutostart(on: boolean): Promise<void>;
+          CareUpdateStatus(): Promise<ChannelStatus>;
+          CheckCareUpdate(): Promise<void>;
+          DismissCareUpdate(): Promise<void>;
+          CheckAppUpdate(): Promise<AppUpdate>;
+          InstallAppUpdate(): Promise<void>;
         };
       };
     };

@@ -110,7 +110,11 @@ remaining teardown files and the residue package.
 | [`stop.go`](../app/internal/clinic/stop.go) | Data-preserving stop and restart implemented as Stop followed by Start. |
 | [`rebuild.go`](../app/internal/clinic/rebuild.go) | Explicit backend and frontend rebuild-and-restart paths. |
 | [`compose/build.go`](../app/internal/compose/build.go) | Source checkout cache, image fingerprints, four image builds, local freshness checks, and post-rebuild dangling-image cleanup. |
-| [`compose/build_test.go`](../app/internal/compose/build_test.go) | Build-input invalidation, local Git fixtures, source-stamp failures, image inspection failures, consumed build inputs, and empty-context cleanup. |
+| [`compose/channel.go`](../app/internal/compose/channel.go) | Branch resolution through `git ls-remote` without credential prompts, and the `channel.lock` record. |
+| [`compose/update.go`](../app/internal/compose/update.go) | Staging a newer commit into the `-next` images, declining, and applying a staged build by retag. |
+| [`clinic/update.go`](../app/internal/clinic/update.go) | Channel status, the safety backup taken before anything is retagged, live update application, and applying a staged update during startup. |
+| [`compose/channel_test.go`](../app/internal/compose/channel_test.go) | Lock round-tripping, tolerance of a corrupt lock, the refusal to trust a lock whose commit is not a commit, an unresolvable ref never becoming an image key, a dropped staged build being offered again, and the invariant that an image key follows the branch head rather than the branch name. |
+| [`compose/build_test.go`](../app/internal/compose/build_test.go) | Build-input invalidation, local Git fixtures with real branches, source-stamp failures, image inspection failures, consumed build inputs, and empty-context cleanup. |
 | [`compose/deployment_test.go`](../app/internal/compose/deployment_test.go) | Silo bootstrap arguments, configurable Caddy bucket routes, and Compose storage-environment wiring. |
 
 Backup-facing `clinic/backup.go`, `backupstore.go`, and
@@ -397,10 +401,86 @@ The builder keeps source in `InstallDir/src/backend` and
 6. Write the stamp only after successful checkout and verification. A failed
    attempt triggers best-effort removal of the incomplete directory.
 
-A cached development branch is not fetched again merely because the branch
-moved upstream. Even explicit `BuildBackend` or `BuildFrontend` can reuse the
-matching source stamp. Release ref validation and immutable release
-requirements belong to [development and release](development-and-release.md).
+A cached checkout is not fetched again merely because the branch moved
+upstream. Even explicit `BuildBackend` or `BuildFrontend` can reuse the
+matching source stamp. Release ref syntax belongs to
+[development and release](development-and-release.md).
+
+### Branch resolution and the channel lock
+
+`CARE_BE_REF`/`CARE_FE_REF` name a branch. The branch name never reaches
+`sourceKey`: it is resolved to a commit first, because the source stamp and the
+image `built-from` label are both derived from that key, and a constant branch
+name would make every cached build look current forever.
+
+[`compose/channel.go`](../app/internal/compose/channel.go) resolves a branch
+with `git ls-remote`, with the credential helper disabled and a timeout, so an
+unattended clinic can never stop on a password prompt. Only `refs/heads/` is
+queried: a tag in `CARE_BE_REF`/`CARE_FE_REF` is not a branch of verified
+commits and fails loudly rather than resolving to something unintended. The
+result is recorded in `InstallDir/channel.lock`, which is kept outside `.env`
+because `.env` is rewritten from the embedded copy on every launch.
+
+A ref that resolves to nothing is an error, not a fallback. Passing the branch
+name on as if it were a commit would produce a stable `sourceKey`, and a stable
+key is indistinguishable from an up-to-date clinic, so the failure would be
+silent and permanent. Refusing to build is recoverable; building the wrong
+thing quietly is not.
+
+| Field | Meaning |
+| --- | --- |
+| `ref` | The branch `.env` named when `current` was chosen. A release that switches branches invalidates `current`. |
+| `current` | The commit this clinic runs. Also the offline fallback. |
+| `next` | A commit already built into the `-next` image, waiting to be applied. |
+| `declined` | A commit the operator answered "Later" to; it stops the prompt, not the update. |
+
+Which commit a builder resolves depends on what it is for:
+
+- Starting, setup and manual rebuilds use `current`. Startup never chases the
+  branch, so an upstream push cannot turn opening the app into a long build.
+- The background check ([`Builder.Pending()`](../app/internal/compose/build.go))
+  resolves the branch head, and writes to its own `src/<service>-next` checkout
+  and `-next` image tag so it cannot collide with a running clinic.
+- A `ref` that is already a commit is used verbatim, by both.
+
+### Staged updates
+
+[`compose/update.go`](../app/internal/compose/update.go) and
+[`clinic/update.go`](../app/internal/clinic/update.go) carry an update from
+"found" to "running":
+
+1. The app checks hourly, starting once the clinic is actually serving. A
+   check is cheap; the build one may start is not, which is why it runs in the
+   background and nothing waits on it. Cadence and the conditions that skip a
+   check are in
+   [configuration and settings](configuration-and-settings.md).
+1. `PrepareUpdate` resolves both branch heads, skips anything equal to
+   `current` or `declined`, and builds what is left into the `-next` images
+   while the clinic keeps serving from the images it started with. No network
+   means no heads, no update, and no error. Each service records its `next`
+   commit as soon as its own image is built, so a check interrupted after the
+   frontend finished does not throw that build away. Between every stage the
+   builder re-checks whether the clinic has been abandoned, so an uninstall
+   started during a long build is not undone by the build finishing after it.
+2. The app emits `care-update`; the panel shows a banner offering to install
+   now or later. Declining records `declined` and leaves the build staged.
+3. When the backend changed, a one-shot encrypted database dump named
+   `care-pre-update-*.dump.enc` is taken **before** anything is retagged, on
+   both the live and the startup path. Migrations from a new backend are not
+   reversible; that dump is. A backup that fails leaves the update staged and
+   the clinic on the images it already runs. At startup that is logged and the
+   clinic opens as usual: an install that cannot write encrypted backups is a
+   reason not to update, not a reason not to start.
+4. `ApplyPending` retags `-next` over the live tag. At startup this happens
+   before any container is up, so it costs a retag; applied live it is the only
+   part of an update that is not a rebuild. If the staged image has gone —
+   pruned, or removed by hand — `next` and `declined` are cleared together, so
+   the commit is offered again by the next check instead of being remembered as
+   something already refused.
+
+There is no image-level rollback. The old image is reproducible from the branch
+by commit; the database is not, which is why the safety backup is the part that
+is not optional.
 
 There is no `--no-cache` or `--pull` added to these builds. "Rebuild" means run
 the build path; Docker may reuse layers, and the source checkout may also be

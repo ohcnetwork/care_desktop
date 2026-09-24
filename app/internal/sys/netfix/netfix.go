@@ -204,8 +204,10 @@ func Undo(log func(string)) error {
 	return undoRules(proc.Runner{Log: log})
 }
 
+var elevateSteps = elevate.Steps
+
 func undoRules(run proc.Runner) error {
-	if err := elevate.Steps([]elevate.Step{undoStep()}); err != nil {
+	if err := elevateSteps([]elevate.Step{undoStep()}); err != nil {
 		return fmt.Errorf("couldn't remove the clinic's firewall rules (approval may have been declined): %w", err)
 	}
 	present, err := inspectRules(run)

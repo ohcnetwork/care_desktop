@@ -14,8 +14,8 @@ data-loading/
 |   |-- master-repo.xlsx                 hand-maintained clinical master sheet
 |   |-- activity-definitions/*.json      generated from the sheet by the converter, committed
 |   |-- states-and-districts.json        36 states and union territories with their districts
-|   |-- questionnaire_fixtures.json      copied from the CARE backend at the pinned CARE_BE_REF
-|   `-- template_fixtures.json           copied from the CARE backend at the pinned CARE_BE_REF
+|   |-- questionnaire_fixtures.json      copied from the CARE backend at the tracked CARE_BE_REF
+|   `-- template_fixtures.json           copied from the CARE backend at the tracked CARE_BE_REF
 `-- frontend/                            Vite + React + Tailwind + shadcn page
     |-- scripts/convert-master-repo.mjs  xlsx -> data/activity-definitions
     |-- scripts/prune-fonts.mjs

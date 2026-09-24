@@ -68,6 +68,7 @@ All of these files belong to Go `package main`, even though they are organized b
 | [`app_client.go`](../app/app_client.go) | Native client connection, pinned trust/ownership journal, TLS verification, and exact-certificate uninstall with role reset after success. | [Native integrations](native-integrations.md), [Wails application](wails-application.md). |
 | [`app_installdir.go`](../app/app_installdir.go) | Fixed runtime kit path, unpacking/preservation rules, creation of a configured `Clinic`. | [Configuration](configuration-and-settings.md). |
 | [`app_actions.go`](../app/app_actions.go) | Read/write job gates, async runner, lifecycle/admin guards, setup, action dispatch, failed-install cleanup. | [Wails application](wails-application.md), [clinic lifecycle](clinic-lifecycle.md). |
+| [`app_update.go`](../app/app_update.go) | CARE branch-update status/check/dismiss, the background update watcher, and the GitHub-release desktop updater. | [Clinic lifecycle](clinic-lifecycle.md), [releases](releases.md). |
 | [`app_status.go`](../app/app_status.go) | State/health/tool/network queries, provisioning controls, name/password/folder validation, pre-setup naming. | [Wails application](wails-application.md), [native integrations](native-integrations.md). |
 | [`app_ui.go`](../app/app_ui.go) | Native URL/folder/log actions and login-startup controls. | [Wails application](wails-application.md). |
 | [`app_env.go`](../app/app_env.go) | Authorized reads and atomic writes of the two installed environment files. | [Configuration](configuration-and-settings.md). |
@@ -238,6 +239,7 @@ app/frontend/
     |   `-- care-store.tsx
     `-- screens/panel/
         |-- advanced-tab.tsx
+        |-- update-panel.tsx
         |-- env-editor.tsx
         |-- env-schema.ts
         |-- env-controls.tsx
@@ -252,6 +254,7 @@ app/frontend/
 | [`care-store.tsx`](../app/frontend/src/state/care-store.tsx) | Async-job completion handling, boot/start request, status polling, restore-pending behavior. |
 | [`run-steps.ts`](../app/frontend/src/lib/run-steps.ts) | Progress milestones derived from backend log messages. |
 | [`advanced-tab.tsx`](../app/frontend/src/screens/panel/advanced-tab.tsx) | Collects the local admin password and passes it to protected settings/plugin/removal requests. |
+| [`update-panel.tsx`](../app/frontend/src/screens/panel/update-panel.tsx) | The Advanced -> Updates section: CARE branch status and the desktop release updater. |
 | [`env-editor.tsx`](../app/frontend/src/screens/panel/env-editor.tsx) | Concurrent environment reads, draft changes, writes and apply action. |
 | [`env-file.ts`](../app/frontend/src/lib/env-file.ts) | Line-based environment parsing, value quoting, change application. |
 | [`env-schema.ts`](../app/frontend/src/screens/panel/env-schema.ts) | Key/file ownership, friendly field constraints, managed-value notes. |

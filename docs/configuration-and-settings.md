@@ -52,6 +52,7 @@ The installed kit contains the following recognizable parts:
 ```text
 install/
 |-- .env
+|-- channel.lock
 |-- docker-compose.yml
 |-- backend.env
 |-- frontend.env
@@ -162,6 +163,10 @@ A failure after configuration or files were created is therefore a partial setup
 
 Its preservation allow-list contains exactly `backend.env` and `frontend.env`: existing copies are not overwritten. Other kit files are refreshed from the executable. This includes `.env`, so the shipped pins do not become an independently editable runtime release mechanism.
 
+This is why the commit a clinic currently runs is kept in `channel.lock` rather than in `.env`. `channel.lock` is not part of the embedded tree, so the refresh neither creates nor overwrites it; it is removed with the installed kit during uninstall. A corrupt or missing lock is treated as "nothing known yet" rather than an error: the clinic resolves the branch again. So is a lock naming something that is not a commit, which is the one case where "nothing known yet" is a guess worth making rather than a value worth trusting.
+
+Writes go through a process-wide mutex and a temporary file renamed into place, because the background check and an operator pressing "Install now" can reach the lock at the same time, and a half-written lock would lose the record of what the clinic is running.
+
 Generated directories listed in `installGeneratedDirs` (currently `seed-data/`, the [facility setup page](seed-data.md)) are deleted before the walk and copied fresh, because their contents are hashed build assets whose names change every release and would otherwise pile up.
 
 Refresh copies the current kit but is not a general recursive deletion or a migration framework for all generated files. Similarly, preserving environments means a new template key is not automatically merged into an existing environment.
@@ -259,6 +264,21 @@ Do not change these values independently and expect the engine to stop managing 
 The storage configuration retains `MINIO_IMAGE`, `MINIO_ROOT_*`, the service name `minio`, and its existing data volume even though the server executable is Silo. Those identifiers are compatibility and ownership contracts, not evidence that the old executable should be launched.
 
 Treat both environment files as sensitive. The backend file contains service credentials; frontend values can be incorporated into browser-delivered assets and must not be used to hide a secret from staff browsers.
+
+## Updates
+
+Advanced -> Updates is the one place both update mechanisms are visible. Like the rest of the Advanced tab it is behind the desktop administrator password, but applying a CARE update is not separately re-authenticated: the update is one the app already built from the configured branch, and prompting again would only teach operators to postpone it.
+
+| Card | Shows | Actions |
+| --- | --- | --- |
+| CARE | The tracked branch, the backend and frontend commits in use, and one of three states: checking, up to date, or a staged update waiting. | Check now; install a staged update now. |
+| CARE Desktop | The installed version against the newest published GitHub release, with its notes. | Download the verified installer for this platform and launch it. |
+
+The panel also raises a banner when a CARE update finishes building, because the Advanced tab is not somewhere an operator looks. Declining the banner is not declining the update: it stops the prompt for that commit, and the staged build is applied at the next start, when no clinic is running and applying it costs a retag instead of a restart.
+
+The app checks hourly, but only while the clinic is actually serving. Until then it re-examines every thirty seconds and checks nothing, because a check competing with the start it is racing helps nobody. A clinic that later stops serving drops back to that thirty-second wait, so a check is never made against a clinic that is down. The loop ends only when the app closes, the desktop is switched to a client, or the clinic is being removed. These desktops stay on for weeks, so a check that only ran at launch would leave a verified fix unreachable until somebody restarted the app.
+
+"Check now" does not start a second check when one is already running; it joins the one in flight. The card follows the `care-check` event, so it reports the automatic hourly check as well as one somebody pressed. "Checking" lasts until any found commit has finished building, not only until the branch head is resolved, because until the build finishes there is nothing to install. Checks are skipped without a working network, during setup and removal, and while another job holds the clinic. A failed check is logged, not surfaced: a clinic with no internet is a supported state, not an error.
 
 ## Backend plugins
 

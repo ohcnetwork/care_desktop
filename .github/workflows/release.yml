@@ -46,8 +46,8 @@ jobs:
             throw new Error("Releases require CARE_DESKTOP_VERSION=X.Y.Z (no -dev suffix)");
           }
           for (const key of ["CARE_BE_REF", "CARE_FE_REF"]) {
-            if (!/^[0-9a-f]{40}$/i.test(value(key))) {
-              throw new Error(`${key} must be a full commit SHA`);
+            if (!/^[\w.\-/]+$/.test(value(key))) {
+              throw new Error(`${key} must be a branch name or commit SHA`);
             }
           }
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);

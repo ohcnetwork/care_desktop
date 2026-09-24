@@ -18,6 +18,7 @@ import { errorText } from "@/lib/format";
 import { useCare } from "@/state/care-store";
 import { EnvEditor } from "./env-editor";
 import { PluginTable } from "./plugin-table";
+import { UpdatePanel } from "./update-panel";
 
 export function AdvancedTab() {
   const [adminPassword, setAdminPassword] = useState<string | null>(null);
@@ -30,6 +31,18 @@ export function AdvancedTab() {
       <LogRow />
 
       <Accordion type="multiple">
+        <AccordionItem value="updates">
+          <AccordionTrigger>
+            <SectionTitle
+              title="Updates"
+              summary="Which version of CARE this clinic runs, and this app's own version"
+            />
+          </AccordionTrigger>
+          <AccordionContent>
+            <UpdatePanel />
+          </AccordionContent>
+        </AccordionItem>
+
         <AccordionItem value="config">
           <AccordionTrigger>
             <SectionTitle

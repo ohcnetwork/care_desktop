@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ohcnetwork/care_desktop/app/internal/sys/elevate"
 	"github.com/ohcnetwork/care_desktop/app/internal/sys/proc"
 )
 
@@ -154,9 +155,6 @@ func firewallCommandFixture(t *testing.T) string {
 	dir := t.TempDir()
 	script := `#!/bin/sh
 printf '%s\n' "$3" >> "$FIREWALL_TRACE"
-case "$3" in
-  *Start-Process*) exit "$UNDO_EXIT" ;;
-esac
 [ "$FAIL_INSPECTION" != yes ] || exit 7
 printf '%s\n' "$RULE_COUNT"
 `
@@ -166,7 +164,6 @@ printf '%s\n' "$RULE_COUNT"
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	trace := filepath.Join(dir, "calls")
 	t.Setenv("FIREWALL_TRACE", trace)
-	t.Setenv("UNDO_EXIT", "0")
 	t.Setenv("FAIL_INSPECTION", "no")
 	return trace
 }
@@ -213,6 +210,21 @@ func TestRulePresenceCountsAnyLeftoverAndPropagatesUnknown(t *testing.T) {
 	}
 }
 
+func stubElevation(t *testing.T, fail bool) *[]elevate.Step {
+	t.Helper()
+	var seen []elevate.Step
+	previous := elevateSteps
+	elevateSteps = func(steps []elevate.Step) error {
+		seen = append(seen, steps...)
+		if fail {
+			return errors.New("approval declined")
+		}
+		return nil
+	}
+	t.Cleanup(func() { elevateSteps = previous })
+	return &seen
+}
+
 func TestUndoRequiresVerifiedRemovalOfEveryOwnedRule(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
@@ -229,28 +241,26 @@ func TestUndoRequiresVerifiedRemovalOfEveryOwnedRule(t *testing.T) {
 		{"elevation refused", "0", false, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			trace := firewallCommandFixture(t)
+			firewallCommandFixture(t)
+			steps := stubElevation(t, tc.elevationFails)
 			t.Setenv("RULE_COUNT", tc.count)
 			if tc.inspectionFails {
 				t.Setenv("FAIL_INSPECTION", "yes")
 			}
-			if tc.elevationFails {
-				t.Setenv("UNDO_EXIT", "1")
-			}
 			if err := undoRules(proc.Runner{}); (err != nil) != tc.wantError {
 				t.Fatalf("undo error = %v", err)
 			}
-			scripts, err := os.ReadFile(trace)
-			if err != nil {
-				t.Fatal(err)
+			if len(*steps) != 1 {
+				t.Fatalf("elevated %d steps, want 1", len(*steps))
 			}
-			for _, required := range []string{"-Wait -PassThru", "exit $p.ExitCode", "-PolicyStore PersistentStore", "CARE Desktop *", "Remove-NetFirewallRule"} {
-				if !strings.Contains(string(scripts), required) {
-					t.Fatalf("removal is missing %q: %s", required, scripts)
+			removal := (*steps)[0].PS
+			for _, required := range []string{"-PolicyStore PersistentStore", "CARE Desktop *", "Remove-NetFirewallRule"} {
+				if !strings.Contains(removal, required) {
+					t.Fatalf("removal is missing %q: %s", required, removal)
 				}
 			}
-			if strings.Contains(string(scripts), "SilentlyContinue") {
-				t.Fatalf("removal ignores errors: %s", scripts)
+			if strings.Contains(removal, "SilentlyContinue") {
+				t.Fatalf("removal ignores errors: %s", removal)
 			}
 		})
 	}
