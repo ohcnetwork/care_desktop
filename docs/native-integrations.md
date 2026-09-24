@@ -358,6 +358,26 @@ The standalone `trust.Untrust`, `hosts.Remove`, and `netfix.Undo` entry points
 keep elevating on their own for callers that remove a single item, and remain
 the only path on macOS and Linux.
 
+Batching changes what a failure means, so teardown uses `elevate.Teardown`
+rather than `elevate.Steps`. `Steps` is built for installation: it sets
+`$ErrorActionPreference = 'Stop'` and follows each step with
+`if (-not $?) { exit 1 }`, because there is no point trusting a certificate that
+was never installed. Applied to removal that rule is backwards — one step that
+cannot complete stops every later step from being *attempted*, so a single
+stubborn item leaves the rest installed and the verification pass reports all of
+them as leftovers at once. That is what an uninstall did when it reported the
+certificate, the hosts entry and the firewall rules as remaining in one message,
+while each of the three removals succeeded when run by hand.
+
+`Teardown` wraps each step in `try { … } catch { }` under
+`$ErrorActionPreference = 'Continue'` on Windows, and joins with `|| true` on
+Unix, so every step is attempted whatever the ones before it did. It can afford
+this because the caller does not infer success from the exit code: it re-inspects
+the certificate store, the hosts file and the firewall rules individually
+afterwards, and reports only what is genuinely still there. Removing as much as
+possible and naming the remainder is more useful than stopping at the first
+obstacle.
+
 The elevated Windows child is launched with `-WindowStyle Hidden`, passed both
 to `Start-Process` and to the child `powershell` itself. That suppresses the
 console window the child would otherwise flash; it does not hide, suppress, or

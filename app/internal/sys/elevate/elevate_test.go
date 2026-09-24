@@ -58,3 +58,38 @@ func TestEmptyStepsDoNotElevate(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestWindowsTeardownAttemptsEveryStep(t *testing.T) {
+	script := teardownScript([]Step{
+		{PS: "certutil -delstore Root 'missing'"},
+		{PS: "Remove-Item 'hosts-entry'"},
+		{PS: "Remove-NetFirewallRule"},
+	}, true)
+
+	if strings.Contains(script, "exit 1") {
+		t.Fatalf("a failing step must not stop the ones after it: %s", script)
+	}
+	if strings.Count(script, "try {") != 3 || strings.Count(script, "catch { }") != 3 {
+		t.Fatalf("every step must be attempted independently: %s", script)
+	}
+	if strings.Contains(script, "$ErrorActionPreference = 'Stop'") {
+		t.Fatalf("teardown must not abort the script on the first error: %s", script)
+	}
+}
+
+func TestUnixTeardownAttemptsEveryStep(t *testing.T) {
+	script := teardownScript([]Step{{Sh: "false"}, {Sh: "printf second"}}, false)
+	if strings.Contains(script, "&&") {
+		t.Fatalf("&& stops at the first failure, which leaves the rest installed: %s", script)
+	}
+	if strings.Count(script, "|| true") != 2 {
+		t.Fatalf("every step must survive the one before it failing: %s", script)
+	}
+}
+
+func TestInstallStepsStillStopAtTheFirstFailure(t *testing.T) {
+	script := stepScript([]Step{{PS: "a"}, {PS: "b"}}, true)
+	if !strings.Contains(script, "if (-not $?) { exit 1 }") {
+		t.Fatalf("install must not run step 2 when step 1 failed: %s", script)
+	}
+}
