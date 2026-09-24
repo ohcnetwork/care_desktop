@@ -20,8 +20,9 @@ using OS uninstall to remove the desktop executable. See
 [client removal](native-integrations.md#removing-client-access).
 
 For a former server now used as a browser client, see
-[client recovery](client-recovery.md): it distinguishes a hosts-only repair from
-the destructive standalone cleanup scripts used when the app is unavailable.
+[client recovery](client-recovery.md): client setup removes the stale hosts entry
+automatically. That guide also covers the destructive standalone cleanup scripts
+used when the app is unavailable.
 
 This guide explains the current Wails backend and engine cleanup paths. It is
 not a collection of destructive terminal recipes. Resource and command names

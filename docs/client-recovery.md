@@ -8,8 +8,7 @@ This is a recovery procedure for an earlier installation, not a setup
 requirement for every client. The saved Server/Client role is not an ordinary
 switch: do not delete configuration or clinic data merely to change it.
 
-For an ordinary CARE Desktop client leaving a clinic, use **Uninstall client
-setup**, not the server-uninstall procedures below. It removes only that
+For an ordinary CARE Desktop client leaving a clinic, use **Disconnect**, not the server-uninstall procedures below. It removes only that
 client's saved connection and certificate it installed, preserving all server data.
 Successful uninstall clears the role so Server or Client can be selected again.
 If you also want to remove the desktop executable, uninstall it through the
@@ -30,60 +29,28 @@ the real server on the clinic network. The entry can remain even when Docker is
 not running or CARE Desktop has been deleted. Reinstalling a certificate or
 rebuilding the frontend will not fix that address override.
 
-The app's explicit **Uninstall** and **Remove the earlier CARE Desktop** cleanup
-paths remove CARE-owned hosts entries. Merely stopping the clinic, quitting, or
-deleting the application does not guarantee their removal. See
-[#13](https://github.com/ohcnetwork/care_desktop/issues/13).
+## The fix: connect as a client
 
-## First confirm the stale entry
+CARE Desktop's client setup removes this override automatically. On the affected
+computer, choose **Use as client**, enter the clinic address shown on the current
+server, and click **Connect**.
 
-Run these checks on the **affected former server/client computer**, not on the
-computer currently hosting the clinic. Replace `care.local` in this guide with
-your clinic's actual name.
+Before it contacts the clinic, CARE checks this computer's hosts file for that
+address. If it finds any entry, marked or not, it removes only that name. It
+saves the old file as `hosts.care-backup` and clears the DNS cache. Your computer
+asks for administrator approval once; approve it. If there is no entry, you won't
+see that prompt. The check runs again every time you click **Connect** or
+**Open CARE**, so an entry that comes back later is also removed. See
+[the hosts check](native-integrations.md#hosts-entries-and-their-ownership-marker).
 
-| System | Hosts file |
-| --- | --- |
-| Windows | `%WINDIR%\System32\drivers\etc\hosts` |
-| macOS / Linux | `/etc/hosts` |
+This does not remove the old clinic's Docker data, backups, or the application.
+Starting the old clinic again on this computer can add its entry back. Uninstall
+the old clinic if it is no longer needed (below).
 
-On Windows, inspect CARE-marked lines in PowerShell:
-
-```powershell
-Select-String -LiteralPath "$env:WINDIR\System32\drivers\etc\hosts" -Pattern '# care-desktop' -SimpleMatch
-```
-
-On macOS or Linux:
-
-```sh
-grep -nF '# care-desktop' /etc/hosts
-```
-
-Look for a CARE-marked loopback entry for the hostname you are trying to open.
-If there is no such entry, do not run a full uninstall to troubleshoot this
-symptom. Check network connectivity, mDNS, and certificate trust separately.
-Unmarked entries may have been added manually; have their owner review them.
-
-## Smallest repair: keep the old installation and its data
-
-If you only need to remove the address override:
-
-1. Quit CARE Desktop on this former server. Starting its old clinic again can
-   recreate the local hosts entry.
-2. Make a backup copy of its hosts file before editing.
-3. On Windows, open Notepad **as Administrator**, then open the hosts file
-   (choose **All Files** in the file picker). On macOS/Linux, open it in an
-   administrator-authorized editor, for example `sudo nano /etc/hosts`.
-4. Remove only the CARE-marked loopback line for the affected clinic hostname.
-   Preserve unrelated mappings and comments, and save the file.
-5. On Windows, run `ipconfig /flushdns`. On macOS, run
-   `sudo dscacheutil -flushcache`. On Linux using systemd-resolved, run
-   `sudo resolvectl flush-caches`; otherwise use that system's resolver-specific
-   cache flush or restart the computer.
-6. Fully close and reopen the browser, then visit `https://care.local/`.
-
-This repair does not remove Docker data, backups, certificates, or the
-application. Do not remove the current CARE server's intentional loopback
-mapping as a routine client troubleshooting step.
+If the prompt is declined, the app shows **"Your computer needs a quick fix
+first"**; click **Connect** again and approve it. If connecting still fails after
+that, the hosts file is not the problem. Check Wi-Fi, mDNS, and the server
+instead (see the end of this guide).
 
 ## Safety net: standalone cleanup of an unwanted earlier installation
 
@@ -94,7 +61,7 @@ fallback to the app's cleanup flows:
 - [Windows cleanup script](../uninstall-windows.ps1)
 - [macOS cleanup script](../uninstall-macos.sh)
 
-**These are full-uninstall scripts, not hosts-only repairs. They delete the old
+**These are full-uninstall scripts, not a fix for the address override. They delete the old
 clinic's live database/file-storage volumes, containers, installed files, and
 settings. They also remove CARE certificate trust and other local integration.**
 Keeping the backup folder is not the same as keeping the live clinic data.
@@ -149,14 +116,8 @@ reported failures before assuming the computer is clean.
 The scripts retain backups by default and attempt to preserve their recovery
 key. **Do not add `-RemoveBackups` / `--remove-backups` for client recovery.** Do
 not use `-Yes` / `--yes` to bypass the confirmation. There is no standalone
-Linux cleanup script in this repository; use the hosts-only procedure above or
-the app's explicit uninstall flow.
-
-After cleanup, repeat the hosts-file check and flush the resolver cache as
-described above. Open the clinic URL again. On Windows,
-`Test-NetConnection care.local -Port 443` can show the resolved address and
-whether HTTPS is reachable: it should target the real server, not `127.0.0.1`
-or `::1`.
+Linux cleanup script in this repository; use the app's explicit uninstall flow,
+or just connect as a client (above) if only the address override is the problem.
 
 Because full cleanup removes CARE certificates, use CARE Desktop's native
 client setup to trust the **current server's** certificate. Enter the `.local`
