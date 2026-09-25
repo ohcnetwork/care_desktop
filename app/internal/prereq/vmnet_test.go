@@ -13,19 +13,19 @@ import (
 func writeVMNetFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	files := map[string]string{
-		"socket_vmnet.rancher-desktop-shared":          "",
-		"rancher-desktop-shared_socket_vmnet.pid":      "100\n",
-		"socket_vmnet.rancher-desktop-bridged_en0":     "",
-		"rancher-desktop-bridged_en0_socket_vmnet.pid": "200\n",
-		"socket_vmnet.host":                            "",
-		"socket_vmnet.shared":                          "",
-		"shared_socket_vmnet.pid":                      "300\n",
-		"rancher-desktop-bridged_en5_socket_vmnet.pid": "garbage",
-		"docker.sock": "",
+	files := []struct{ name, body string }{
+		{"socket_vmnet.rancher-desktop-shared", ""},
+		{"rancher-desktop-shared_socket_vmnet.pid", "100\n"},
+		{"socket_vmnet.rancher-desktop-bridged_en0", ""},
+		{"rancher-desktop-bridged_en0_socket_vmnet.pid", "200\n"},
+		{"socket_vmnet.host", ""},
+		{"socket_vmnet.shared", ""},
+		{"shared_socket_vmnet.pid", "300\n"},
+		{"rancher-desktop-bridged_en5_socket_vmnet.pid", "garbage"},
+		{"docker.sock", ""},
 	}
-	for name, body := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+	for _, f := range files {
+		if err := os.WriteFile(filepath.Join(dir, f.name), []byte(f.body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
