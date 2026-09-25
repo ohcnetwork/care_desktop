@@ -82,6 +82,9 @@ func rancherRootSetup(all bool) (*rootSetup, error) {
 	if _, err := os.Lstat(rancherOldSudoers); err == nil {
 		r.cmds = append(r.cmds, "rm -f "+rancherOldSudoers)
 	}
+	if stale := staleVMNetFiles(vmnetRunDir, processAlive); len(stale) > 0 {
+		r.cmds = append(r.cmds, "rm -f "+shQuoteAll(stale))
+	}
 
 	sock := filepath.Join(home, ".rd", "docker.sock")
 	if target, err := os.Readlink(dockerSockLink); all || err != nil || target != sock {

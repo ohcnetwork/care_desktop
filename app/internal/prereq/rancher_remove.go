@@ -116,6 +116,7 @@ func darwinRancherRootCmds(home string) []string {
 			cmds = append(cmds, "rm -rf "+elevate.ShQuote(p))
 		}
 	}
+	cmds = append(cmds, rancherVMNetRemoveCmds(vmnetRunDir, processAlive)...)
 	if len(cmds) == 0 {
 		return nil
 	}

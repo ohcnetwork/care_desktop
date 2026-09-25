@@ -27,10 +27,14 @@ const GLYPH: Record<Check["state"], string> = { wait: "·", ok: "✓", bad: "✗
 export function CheckRows({
   checks,
   onDone,
+  locked = false,
+  onBusyChange,
 }: {
   checks: Check[];
   /** Re-run the checks once an action finishes, so the row settles by itself. */
   onDone: () => void;
+  locked?: boolean;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const [running, setRunning] = useState<CheckId | null>(null);
   const [progress, setProgress] = useState("");
@@ -51,6 +55,9 @@ export function CheckRows({
     });
   }, [running]);
 
+  const busy = running !== null || done !== "";
+  useEffect(() => onBusyChange?.(busy), [busy, onBusyChange]);
+
   useEffect(() => {
     if (!failure) return;
     const row = checks.find((c) => c.id === failure.id);
@@ -58,7 +65,7 @@ export function CheckRows({
   }, [checks, failure]);
 
   const perform = (check: Check) => {
-    if (!check.action || running) return;
+    if (!check.action || busy || locked || check.blockedBy) return;
     setRunning(check.id);
     setFailure(null);
     void check.action
@@ -98,7 +105,7 @@ export function CheckRows({
 
       <div className="overflow-hidden rounded-lg border border-line">
         {checks.map((check, i) => {
-          const busy = running === check.id;
+          const working = running === check.id;
           return (
             <Fragment key={check.id}>
               <div
@@ -135,26 +142,30 @@ export function CheckRows({
                     <div className="min-w-0 flex-1 text-[12.5px] leading-[1.5] text-danger-ink">
                       <div>{check.how}</div>
                       {check.action ? (
-                        <div className="mt-1 text-muted-foreground">{check.action.detail}</div>
+                        <div className="mt-1 text-muted-foreground">
+                          {check.blockedBy
+                            ? `Fix ${check.blockedBy} first, then this can be fixed.`
+                            : check.action.detail}
+                        </div>
                       ) : null}
                     </div>
                     {check.action ? (
                       <Button
                         variant="primary"
-                        disabled={running !== null}
+                        disabled={busy || locked || check.blockedBy !== undefined}
                         onClick={() => perform(check)}
                       >
-                        {busy ? <Spinner className="size-3.5" /> : null}
-                        {busy ? "Working…" : check.action.label}
+                        {working ? <Spinner className="size-3.5" /> : null}
+                        {working ? "Working…" : check.action.label}
                       </Button>
                     ) : null}
                   </div>
-                  {busy && progress ? (
+                  {working && progress ? (
                     <div className="mt-2 truncate font-mono text-[12px] text-muted-foreground">
                       {progress}
                     </div>
                   ) : null}
-                  {!busy && failure?.id === check.id && running === null ? (
+                  {!working && failure?.id === check.id && running === null ? (
                     <div className="mt-2 text-[12.5px] text-danger-ink">{failure.text}</div>
                   ) : null}
                 </div>

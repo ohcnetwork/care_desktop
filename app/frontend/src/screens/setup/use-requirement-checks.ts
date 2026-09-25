@@ -38,11 +38,27 @@ export type Check = {
   state: CheckTone;
   how: string;
   action?: CheckAction;
+  blockedBy?: string;
 };
 
 type Result = { state: CheckTone; how: string; action?: CheckAction };
 
 const WAITING: Result = { state: "wait", how: "" };
+
+const NEEDS: Partial<Record<CheckId, CheckId[]>> = {
+  docker: ["wsl"],
+  residue: ["docker"],
+  clinic: ["docker"],
+};
+
+function withPrerequisites(list: Check[]): Check[] {
+  return list.map((check) => {
+    const blocker = (NEEDS[check.id] ?? [])
+      .map((id) => list.find((c) => c.id === id))
+      .find((c) => c !== undefined && c.state !== "ok");
+    return blocker ? { ...check, blockedBy: blocker.title } : check;
+  });
+}
 
 function summarise(results: Result[]): CheckTone {
   if (results.some((r) => r.state === "bad")) return "bad";
@@ -79,6 +95,7 @@ export function useRequirementChecks(host: string, mode: ChecksMode = "setup") {
   const [mdns, setMdns] = useState<Result>(WAITING);
   const [clinic, setClinic] = useState<Result>(WAITING);
   const [network, setNetwork] = useState<Result | null>(null);
+  const [inFlight, setInFlight] = useState(0);
 
   /**
    * Leftovers from an earlier CARE Desktop. This is a hard blocker rather than a
@@ -267,16 +284,21 @@ export function useRequirementChecks(host: string, mode: ChecksMode = "setup") {
   }, []);
 
   const recheckAll = useCallback(async (): Promise<CheckTone> => {
-    const [r, w, d, g, m, c, n] = await Promise.all([
-      inSetup ? checkResidue() : null,
-      checkWSL(),
-      checkDocker(),
-      inSetup ? checkGit() : null,
-      checkMDNS(),
-      inSetup ? null : checkClinic(),
-      checkNetwork(),
-    ]);
-    return summarise([r, w, d, g, m, c, n].filter((x): x is Result => x !== null));
+    setInFlight((n) => n + 1);
+    try {
+      const [r, w, d, g, m, c, n] = await Promise.all([
+        inSetup ? checkResidue() : null,
+        checkWSL(),
+        checkDocker(),
+        inSetup ? checkGit() : null,
+        checkMDNS(),
+        inSetup ? null : checkClinic(),
+        checkNetwork(),
+      ]);
+      return summarise([r, w, d, g, m, c, n].filter((x): x is Result => x !== null));
+    } finally {
+      setInFlight((n) => n - 1);
+    }
   }, [inSetup, checkResidue, checkWSL, checkDocker, checkGit, checkMDNS, checkClinic, checkNetwork]);
 
   useEffect(() => {
@@ -337,7 +359,7 @@ export function useRequirementChecks(host: string, mode: ChecksMode = "setup") {
         ...network,
       });
     }
-    return list;
+    return withPrerequisites(list);
   }, [inSetup, clinic, docker, git, host, mdns, network, residue, wsl]);
 
   const overall = useMemo(
@@ -345,5 +367,5 @@ export function useRequirementChecks(host: string, mode: ChecksMode = "setup") {
     [checks],
   );
 
-  return { checks, overall, recheckAll, checkMDNS };
+  return { checks, overall, checking: inFlight > 0, recheckAll, checkMDNS };
 }
