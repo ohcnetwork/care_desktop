@@ -44,7 +44,7 @@ export function SetupScreen({
 }) {
   const { openStep, setOpenStep, setStepDone, startInstall, clearRole } = useCare();
   const host = normaliseHost(form.hostInput);
-  const { checks, overall, recheckAll, checkMDNS } = useRequirementChecks(host);
+  const { checks, overall, checking, recheckAll, checkMDNS } = useRequirementChecks(host);
 
   const [expanded, setExpanded] = useState<string>(openStep);
   const [hostProblem, setHostProblem] = useState("");
@@ -54,6 +54,7 @@ export function SetupScreen({
   const [backupDirProblem, setBackupDirProblem] = useState("");
   const [restart, setRestart] = useState<RestartPlan | null>(null);
   const [leaving, setLeaving] = useState(false);
+  const [fixing, setFixing] = useState(false);
   const leavingRef = useRef(false);
   const verifyingRef = useRef(false);
   const hostSave = useRef<Promise<boolean>>(Promise.resolve(false));
@@ -206,8 +207,10 @@ export function SetupScreen({
   };
 
   const issues = checks.filter((c) => c.state === "bad").length;
-  const note = verifying
-    ? "Re-checking your computer…"
+  const note = fixing
+    ? "Wait for the current fix to finish…"
+    : verifying || checking
+      ? "Re-checking your computer…"
     : verifyNote ||
       (overall !== "ok"
         ? "Waiting for your computer to be ready…"
@@ -228,7 +231,7 @@ export function SetupScreen({
         title="Set up your clinic"
         subtitle="One time, on this computer. About 15 minutes."
         onBack={() => void goBack()}
-        backDisabled={leaving || verifying}
+        backDisabled={leaving || verifying || fixing}
       />
 
       <ScreenBody>
@@ -294,18 +297,23 @@ export function SetupScreen({
                 </InputBox>
               </Field>
 
-              <CheckRows checks={checks} onDone={() => void verify()} />
+              <CheckRows
+                checks={checks}
+                onDone={() => void verify()}
+                locked={leaving || verifying || checking}
+                onBusyChange={setFixing}
+              />
 
               <div className="flex items-center gap-2.5">
                 <Button
-                  disabled={leaving || verifying}
+                  disabled={leaving || verifying || checking || fixing}
                   onClick={(e) => {
                     e.stopPropagation();
                     setVerifyNote("");
                     void verify();
                   }}
                 >
-                  Check again
+                  {verifying || checking ? "Checking…" : "Check again"}
                 </Button>
               </div>
             </AccordionContent>
@@ -434,7 +442,7 @@ export function SetupScreen({
           variant="primary"
           size="lg"
           className="shadow-lift disabled:shadow-none"
-          disabled={!ready || verifying || leaving}
+          disabled={!ready || verifying || leaving || checking || fixing}
           onClick={() => void onContinue()}
         >
           <Download className="size-[17px]" strokeWidth={2.2} />

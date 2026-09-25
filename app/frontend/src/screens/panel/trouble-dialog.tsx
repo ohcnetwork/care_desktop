@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 
 import {
   AlertDialog,
@@ -24,7 +24,8 @@ import { useCare } from "@/state/care-store";
  */
 export function TroubleDialog({ onClose }: { onClose: () => void }) {
   const { mdnsName, refresh } = useCare();
-  const { checks, overall, recheckAll } = useRequirementChecks(mdnsName, "running");
+  const { checks, checking, recheckAll } = useRequirementChecks(mdnsName, "running");
+  const [fixing, setFixing] = useState(false);
 
   const recheck = useCallback(async () => {
     await recheckAll();
@@ -41,19 +42,26 @@ export function TroubleDialog({ onClose }: { onClose: () => void }) {
         </AlertDialogDescription>
 
         <div className="mt-3">
-          <CheckRows checks={checks} onDone={() => void recheck()} />
+          <CheckRows
+            checks={checks}
+            onDone={() => void recheck()}
+            locked={checking}
+            onBusyChange={setFixing}
+          />
         </div>
 
         <AlertDialogFooter>
-          <AlertDialogCancel onClick={onClose}>Close</AlertDialogCancel>
+          <AlertDialogCancel disabled={fixing} onClick={onClose}>
+            Close
+          </AlertDialogCancel>
           <AlertDialogAction
-            disabled={overall === "wait"}
+            disabled={checking || fixing}
             onClick={(e) => {
               e.preventDefault();
               void recheck();
             }}
           >
-            Check again
+            {checking ? "Checking…" : "Check again"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

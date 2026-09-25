@@ -90,7 +90,8 @@ steps and does not fail the uninstall.
   the `MANAGED BY RANCHER DESKTOP` blocks in shell rc files. Then one administrator
   prompt removes the app, `/opt/rancher-desktop`, the sudoers files, the
   docker-socket LaunchDaemon, and the `/var/run/docker.sock` link, but only if
-  that link points at `~/.rd`.
+  that link points at `~/.rd`. The same prompt stops any socket_vmnet daemon
+  still running for Rancher and deletes its socket and pidfile (see below).
 - **Windows:** `winget uninstall SUSE.RancherDesktop`, falling back to
   `msiexec /x` with the product code from the Uninstall registry keys. Then it
   unregisters the `rancher-desktop` WSL distros, deletes the
@@ -100,6 +101,33 @@ steps and does not fail the uninstall.
 This is deliberately **not** part of `Clinic.Purge()` / `PurgeResidue()`. Residue
 cleanup targets CARE's own leftovers, and a Rancher Desktop that is already
 installed may be serving other projects.
+
+### Stale Rancher network sockets (macOS)
+
+Rancher's VM reaches the network through root socket_vmnet daemons that it
+starts via the sudoers file CARE installs. Each daemon leaves
+`/private/var/run/socket_vmnet.<name>` and `/private/var/run/<name>_socket_vmnet.pid`
+behind when it is stopped, for the names `host` and `rancher-desktop-*`. A
+leftover socket lets Lima dial it before the new daemon is listening, so the
+next Rancher start fails with `dial unix /private/var/run/socket_vmnet.rancher-desktop-shared:
+connect: connection refused` even though the daemon comes up moments later.
+
+[`prereq/vmnet.go`](../app/internal/prereq/vmnet.go) finds these files and treats
+a daemon as live when its pidfile names a running process. Two paths use it:
+
+- **Before Rancher starts:** `rancherRootSetup` deletes every stale file (no live
+  process) inside its existing administrator prompt, both when the wizard
+  installs Rancher and in `ensureRancherRoot` before each `OpenDocker`. Live
+  daemons are never touched, so a running Rancher VM is unaffected, and a clean
+  machine adds no command and no prompt.
+- **Removing Rancher Desktop:** stops every live daemon with
+  `pkill -F <pidfile> socket_vmnet` (the name guard avoids killing a process that
+  reused the PID) and deletes all of the files in its existing administrator prompt.
+
+Purge and an uninstall that keeps Rancher do not clean these up: Rancher is
+running by then, so its daemons are live and nothing is stale.
+
+Windows and Linux have no socket_vmnet, so neither path does anything there.
 
 `PurgeEverything` is a useful informal description of the last UI choice, but
 it is **not the current Go method name**. The current boundary is
