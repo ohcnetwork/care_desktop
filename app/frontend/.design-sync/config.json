@@ -1,0 +1,95 @@
+{
+  "projectId": "9065f4ab-d152-407a-a544-a01fb700b95c",
+  "shape": "package",
+  "pkg": "care-desktop-ui",
+  "globalName": "CareUI",
+  "entry": ".design-sync/.cache/pkg/dist/index.js",
+  "buildCmd": "node .design-sync/ds/build.mjs",
+  "srcDir": "../../../src",
+  "cssEntry": "dist/ds.css",
+  "extraFonts": [
+    "../../../node_modules/@fontsource/ibm-plex-sans/latin-400.css",
+    "../../../node_modules/@fontsource/ibm-plex-sans/latin-500.css",
+    "../../../node_modules/@fontsource/ibm-plex-sans/latin-600.css",
+    "../../../node_modules/@fontsource/ibm-plex-sans/latin-700.css",
+    "../../../node_modules/@fontsource/ibm-plex-mono/latin-400.css",
+    "../../../node_modules/@fontsource/ibm-plex-mono/latin-500.css",
+    "../../../node_modules/@fontsource/ibm-plex-mono/latin-600.css"
+  ],
+  "componentSrcMap": {
+    "AccordionItem": null,
+    "AccordionTrigger": null,
+    "AccordionContent": null,
+    "AlertDialogAction": null,
+    "AlertDialogCancel": null,
+    "AlertDialogContent": null,
+    "AlertDialogDescription": null,
+    "AlertDialogFooter": null,
+    "AlertDialogTitle": null,
+    "AlertDialogTrigger": null,
+    "CardTitle": null,
+    "CardDescription": null,
+    "RadioGroupItem": null,
+    "SelectContent": null,
+    "SelectGroup": null,
+    "SelectItem": null,
+    "SelectLabel": null,
+    "SelectTrigger": null,
+    "SelectValue": null,
+    "ToggleGroupItem": null,
+    "InfoButton": null,
+    "BoxNote": null,
+    "ScreenHead": null,
+    "ScreenBody": null,
+    "ScreenFoot": null,
+    "FootNote": null
+  },
+  "docsDir": "../../docs",
+  "extraEntries": [
+    "lucide-react"
+  ],
+  "overrides": {
+    "AlertDialog": {
+      "cardMode": "single",
+      "viewport": "720x420"
+    },
+    "Select": {
+      "cardMode": "single",
+      "viewport": "520x360"
+    },
+    "Toaster": {
+      "cardMode": "single",
+      "viewport": "640x200"
+    },
+    "ErrorBoundary": {
+      "cardMode": "single",
+      "viewport": "720x460"
+    },
+    "Screen": {
+      "cardMode": "single",
+      "viewport": "960x560"
+    },
+    "StorageRow": {
+      "cardMode": "column"
+    },
+    "Accordion": {
+      "cardMode": "column"
+    },
+    "Field": {
+      "cardMode": "column"
+    },
+    "Progress": {
+      "cardMode": "column"
+    },
+    "Input": {
+      "cardMode": "column"
+    },
+    "InputBox": {
+      "cardMode": "column"
+    },
+    "Card": {
+      "cardMode": "column"
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}

@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": "../..",
+    "outDir": "../.cache/pkg/dist/types",
+    "noUnusedLocals": false,
+    "baseUrl": "../..",
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["index.ts", "../../src/wails.d.ts"]
+}

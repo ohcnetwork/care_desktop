@@ -18,3 +18,9 @@ build/windows/installer/wails_tools.nsh
 build/windows/installer/tmp/
 # wails dev
 .wails/
+# design-sync (claude.ai/design): staged converter, build output, machine state
+frontend/.ds-sync/
+frontend/ds-bundle/
+frontend/.design-sync/.cache/
+frontend/.design-sync/learnings/
+frontend/.design-sync/node_modules

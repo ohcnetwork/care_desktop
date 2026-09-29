@@ -1,0 +1,10 @@
+@import "../../src/index.css";
+@source "../../src";
+@source "../previews";
+@source inline("{bg,text,border,ring,fill,stroke}-{ink,ink2,faint,line,hair,brand,brand-dark,brand-ink,brand-deep,brand-bg,brand-soft,brand-line,brand-pale,danger,danger-dark,danger-ink,danger-bg,danger-line,danger-tint,warn,warn-bg,warn-ink,warn-line,background,foreground,card,card-foreground,popover,popover-foreground,primary,primary-foreground,secondary,secondary-foreground,muted,muted-foreground,accent,accent-foreground,destructive,destructive-foreground,border,input,ring,white,transparent}");
+@source inline("{hover:,}{bg,text,border}-{brand,brand-dark,brand-ink,brand-bg,brand-soft,danger,danger-dark,hair,line,white}");
+@source inline("{p,px,py,pt,pb,pl,pr,m,mx,my,mt,mb,ml,mr,gap,gap-x,gap-y,space-y,space-x}-{0,0.5,1,1.5,2,2.5,3,3.5,4,5,6,7,8,9,10,12,14,16,20,24}");
+@source inline("{w,h,size,min-w,max-w,min-h}-{0,1,2,3,4,5,6,8,10,12,16,20,24,32,40,48,64,full,screen,fit,auto}");
+@source inline("{text-xs,text-sm,text-base,text-lg,text-xl,text-2xl,text-3xl,font-normal,font-medium,font-semibold,font-bold,font-mono,font-sans,uppercase,truncate,leading-tight,leading-snug,leading-normal,leading-relaxed,tracking-tight,tracking-wide}");
+@source inline("{rounded,rounded-sm,rounded-md,rounded-lg,rounded-xl,rounded-2xl,rounded-full,shadow-card,shadow-pop,shadow-lift,shadow-toast,border,border-t,border-b,border-l,border-r,border-0,border-2}");
+@source inline("{flex,inline-flex,grid,block,inline-block,hidden,flex-col,flex-row,flex-wrap,flex-1,flex-none,shrink-0,grow,items-start,items-center,items-end,items-baseline,justify-start,justify-center,justify-end,justify-between,self-start,self-center,relative,absolute,fixed,sticky,inset-0,overflow-hidden,overflow-auto,min-w-0,text-left,text-center,text-right,cursor-pointer,select-none,opacity-50,opacity-60,divide-y,divide-line,grid-cols-1,grid-cols-2,grid-cols-3,grid-cols-4,col-span-2,col-span-3}");
